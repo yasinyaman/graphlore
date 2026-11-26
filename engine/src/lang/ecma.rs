@@ -7,6 +7,8 @@
 //! the declaration around it) and `import()` (dynamic). `import type` is
 //! type-checking only.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use tree_sitter::Node;
 
 use super::{paths_in, LanguageModule};
@@ -64,16 +66,16 @@ const BUILTINS: &[&str] = &[
 ];
 
 fn source(n: Node, src: &[u8]) -> Option<String> {
-    n.child_by_field_name("source").map(|s| string_value(s, src))
+    n.by_field("source").map(|s| string_value(s, src))
 }
 
 fn specifiers(list: Node, src: &[u8]) -> Vec<(String, Option<String>)> {
     kids(list)
         .into_iter()
-        .filter(|c| c.kind().ends_with("specifier"))
+        .filter(|c| c.kind_str().ends_with("specifier"))
         .filter_map(|c| {
-            let name = c.child_by_field_name("name").map(|x| text(x, src))?;
-            let alias = c.child_by_field_name("alias").map(|x| text(x, src));
+            let name = c.by_field("name").map(|x| text(x, src))?;
+            let alias = c.by_field("alias").map(|x| text(x, src));
             Some((name, alias))
         })
         .collect()
@@ -85,19 +87,19 @@ fn specifiers(list: Node, src: &[u8]) -> Vec<(String, Option<String>)> {
 fn binds_import(v: Node, src: &[u8]) -> bool {
     let mut v = v;
     for _ in 0..4 {
-        match v.kind() {
+        match v.kind_str() {
             "await_expression" | "parenthesized_expression" => match v.named_child(0) {
                 Some(inner) => v = inner,
                 None => return false,
             },
-            "member_expression" => match v.child_by_field_name("object") {
+            "member_expression" => match v.by_field("object") {
                 Some(o) => v = o,
                 None => return false,
             },
             "call_expression" => {
                 return v
-                    .child_by_field_name("function")
-                    .is_some_and(|f| f.kind() == "import" || text(f, src) == "require");
+                    .by_field("function")
+                    .is_some_and(|f| f.kind_str() == "import" || text(f, src) == "require");
             }
             _ => return false,
         }
@@ -107,37 +109,37 @@ fn binds_import(v: Node, src: &[u8]) -> bool {
 
 /// `require('m')` and `import('m')`, bound by the declaration they sit in.
 fn call_import(n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
-    let f = n.child_by_field_name("function")?;
-    let args = n.child_by_field_name("arguments")?;
+    let f = n.by_field("function")?;
+    let args = n.by_field("arguments")?;
     let first = kids(args).into_iter().next()?;
-    if !matches!(first.kind(), "string" | "template_string") {
+    if !matches!(first.kind_str(), "string" | "template_string") {
         return None;
     }
     let module = string_value(first, src);
-    if f.kind() == "import" {
+    if f.kind_str() == "import" {
         // `const m = await import('./m.js')`, `const { f } = await import(…)`:
         // the names the declaration binds to the module
         let mut fact = import(n, ImportForm::Dynamic, module);
         let mut holder = n.parent();
-        while holder
-            .is_some_and(|h| matches!(h.kind(), "await_expression" | "parenthesized_expression"))
-        {
+        while holder.is_some_and(|h| {
+            matches!(h.kind_str(), "await_expression" | "parenthesized_expression")
+        }) {
             holder = holder.and_then(|h| h.parent());
         }
         let target = holder
-            .filter(|h| h.kind() == "variable_declarator")
-            .and_then(|h| h.child_by_field_name("name"));
+            .filter(|h| h.kind_str() == "variable_declarator")
+            .and_then(|h| h.by_field("name"));
         match target {
-            Some(t) if t.kind() == "identifier" => fact.alias = Some(text(t, src)),
-            Some(t) if t.kind() == "object_pattern" => {
+            Some(t) if t.kind_str() == "identifier" => fact.alias = Some(text(t, src)),
+            Some(t) if t.kind_str() == "object_pattern" => {
                 for p in kids(t) {
-                    match p.kind() {
+                    match p.kind_str() {
                         "shorthand_property_identifier_pattern" => {
                             fact.names.push((text(p, src), None))
                         }
                         "pair_pattern" => {
-                            let k = p.child_by_field_name("key").map(|x| text(x, src));
-                            let v = p.child_by_field_name("value").map(|x| text(x, src));
+                            let k = p.by_field("key").map(|x| text(x, src));
+                            let v = p.by_field("value").map(|x| text(x, src));
                             if let Some(k) = k {
                                 fact.names.push((k, v));
                             }
@@ -150,7 +152,7 @@ fn call_import(n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         }
         return Some(vec![fact]);
     }
-    if f.kind() != "identifier" || text(f, src) != "require" {
+    if f.kind_str() != "identifier" || text(f, src) != "require" {
         return None;
     }
     // `const x = require('m')`, `const {a, b: c} = require('m')`,
@@ -158,39 +160,42 @@ fn call_import(n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
     let mut holder = n.parent();
     let mut member = None;
     if let Some(p) = holder {
-        if p.kind() == "member_expression" {
-            member = p.child_by_field_name("property").map(|x| text(x, src));
+        if p.kind_str() == "member_expression" {
+            member = p.by_field("property").map(|x| text(x, src));
             holder = p.parent();
         }
     }
     let target = holder
-        .filter(|h| h.kind() == "variable_declarator" || h.kind() == "assignment_expression")
-        .and_then(|h| h.child_by_field_name("name").or_else(|| h.child_by_field_name("left")));
+        .filter(|h| {
+            h.kind_str() == "variable_declarator" || h.kind_str() == "assignment_expression"
+        })
+        .and_then(|h| h.by_field("name").or_else(|| h.by_field("left")));
     let mut fact = import(n, ImportForm::Module, module);
     // `module.exports = require('./lib/app')`: the module is that module
     if member.is_none()
-        && target
-            .is_some_and(|t| t.kind() == "member_expression" && text(t, src) == "module.exports")
+        && target.is_some_and(|t| {
+            t.kind_str() == "member_expression" && text(t, src) == "module.exports"
+        })
     {
         fact.form = ImportForm::ReExport;
         return Some(vec![fact]);
     }
     match (target, member) {
-        (Some(t), Some(m)) if t.kind() == "identifier" => {
+        (Some(t), Some(m)) if t.kind_str() == "identifier" => {
             fact.form = ImportForm::From;
             fact.names.push((m, Some(text(t, src))));
         }
-        (Some(t), None) if t.kind() == "identifier" => fact.alias = Some(text(t, src)),
-        (Some(t), None) if t.kind() == "object_pattern" => {
+        (Some(t), None) if t.kind_str() == "identifier" => fact.alias = Some(text(t, src)),
+        (Some(t), None) if t.kind_str() == "object_pattern" => {
             fact.form = ImportForm::From;
             for p in kids(t) {
-                match p.kind() {
+                match p.kind_str() {
                     "shorthand_property_identifier_pattern" => {
                         fact.names.push((text(p, src), None))
                     }
                     "pair_pattern" => {
-                        let k = p.child_by_field_name("key").map(|x| text(x, src));
-                        let v = p.child_by_field_name("value").map(|x| text(x, src));
+                        let k = p.by_field("key").map(|x| text(x, src));
+                        let v = p.by_field("value").map(|x| text(x, src));
                         if let Some(k) = k {
                             fact.names.push((k, v));
                         }
@@ -212,18 +217,18 @@ impl LanguageModule for Ecma {
     /// Module-level `let` / `var` (a `const` is `extra_def`'s constant).
     fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
         // `this.x = …` in a method of a class: a field of the class
-        if n.kind() == "assignment_expression" {
+        if n.kind_str() == "assignment_expression" {
             let field = n
-                .child_by_field_name("left")
-                .filter(|l| l.kind() == "member_expression")
-                .filter(|l| l.child_by_field_name("object").is_some_and(|o| o.kind() == "this"))
-                .and_then(|l| l.child_by_field_name("property"))
-                .filter(|p| p.kind() == "property_identifier");
+                .by_field("left")
+                .filter(|l| l.kind_str() == "member_expression")
+                .filter(|l| l.by_field("object").is_some_and(|o| o.kind_str() == "this"))
+                .and_then(|l| l.by_field("property"))
+                .filter(|p| p.kind_str() == "property_identifier");
             let mut p = n.parent();
             let mut in_class = false;
             while let Some(x) = p {
-                if x.kind() == "method_definition" {
-                    in_class = x.parent().is_some_and(|b| b.kind() == "class_body");
+                if x.kind_str() == "method_definition" {
+                    in_class = x.parent().is_some_and(|b| b.kind_str() == "class_body");
                     break;
                 }
                 p = x.parent();
@@ -235,38 +240,38 @@ impl LanguageModule for Ecma {
         }
         // `constructor(public greeting: string)`: a parameter that declares
         // a property of the class
-        if matches!(n.kind(), "required_parameter" | "optional_parameter") {
+        if matches!(n.kind_str(), "required_parameter" | "optional_parameter") {
             let property = all_kids(n).iter().any(|c| {
-                matches!(c.kind(), "accessibility_modifier" | "readonly" | "override_modifier")
+                matches!(c.kind_str(), "accessibility_modifier" | "readonly" | "override_modifier")
             });
             let of_class = n
                 .parent()
                 .and_then(|ps| ps.parent())
-                .filter(|m| m.kind() == "method_definition")
-                .is_some_and(|m| m.parent().is_some_and(|b| b.kind() == "class_body"));
-            return match n.child_by_field_name("pattern").filter(|x| x.kind() == "identifier") {
+                .filter(|m| m.kind_str() == "method_definition")
+                .is_some_and(|m| m.parent().is_some_and(|b| b.kind_str() == "class_body"));
+            return match n.by_field("pattern").filter(|x| x.kind_str() == "identifier") {
                 Some(name) if property && of_class => vec![(n, name, DefKind::Property)],
                 _ => Vec::new(),
             };
         }
-        if n.kind() != "variable_declarator" {
+        if n.kind_str() != "variable_declarator" {
             return Vec::new();
         }
         let Some(decl) = n
             .parent()
-            .filter(|p| matches!(p.kind(), "lexical_declaration" | "variable_declaration"))
+            .filter(|p| matches!(p.kind_str(), "lexical_declaration" | "variable_declaration"))
         else {
             return Vec::new();
         };
         let top = decl.parent().is_some_and(|p| {
             module_level(p)
-                || (p.kind() == "export_statement" && p.parent().is_some_and(module_level))
+                || (p.kind_str() == "export_statement" && p.parent().is_some_and(module_level))
         });
-        let is_const = all_kids(decl).iter().any(|c| c.kind() == "const");
-        let value = n.child_by_field_name("value");
+        let is_const = all_kids(decl).iter().any(|c| c.kind_str() == "const");
+        let value = n.by_field("value");
         let function = value.is_some_and(|v| {
             matches!(
-                v.kind(),
+                v.kind_str(),
                 "arrow_function"
                     | "function_expression"
                     | "function"
@@ -275,7 +280,7 @@ impl LanguageModule for Ecma {
             )
         });
         let module = value.is_some_and(|v| binds_import(v, src));
-        match n.child_by_field_name("name").filter(|x| x.kind() == "identifier") {
+        match n.by_field("name").filter(|x| x.kind_str() == "identifier") {
             Some(name) if top && !is_const && !function && !module => {
                 vec![(n, name, DefKind::Variable)]
             }
@@ -284,10 +289,10 @@ impl LanguageModule for Ecma {
     }
 
     fn kind_of(&self, node: Node, src: &[u8]) -> DefKind {
-        match node.kind() {
+        match node.kind_str() {
             "internal_module" | "module" => DefKind::Namespace,
             "method_definition"
-                if node.child_by_field_name("name").map(|n| text(n, src)).as_deref()
+                if node.by_field("name").map(|n| text(n, src)).as_deref()
                     == Some("constructor") =>
             {
                 DefKind::Constructor
@@ -297,28 +302,29 @@ impl LanguageModule for Ecma {
     }
 
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
-        match n.kind() {
+        match n.kind_str() {
             "import_statement" => {
                 // `import fs = require("./fs")`: the module, under that name
-                if let Some(cl) = kids(n).into_iter().find(|c| c.kind() == "import_require_clause")
+                if let Some(cl) =
+                    kids(n).into_iter().find(|c| c.kind_str() == "import_require_clause")
                 {
                     let mut f = import(n, ImportForm::Module, source(cl, src)?);
                     f.alias = kids(cl)
                         .into_iter()
-                        .find(|c| c.kind() == "identifier")
+                        .find(|c| c.kind_str() == "identifier")
                         .map(|x| text(x, src));
                     return Some(vec![f]);
                 }
                 let module = source(n, src)?;
-                let type_only = all_kids(n).iter().any(|c| c.kind() == "type");
+                let type_only = all_kids(n).iter().any(|c| c.kind_str() == "type");
                 let mut out = Vec::new();
                 let mut from = import(n, ImportForm::From, module.clone());
-                let clause = kids(n).into_iter().find(|c| c.kind() == "import_clause");
+                let clause = kids(n).into_iter().find(|c| c.kind_str() == "import_clause");
                 match clause {
                     None => out.push(import(n, ImportForm::Module, module.clone())),
                     Some(cl) => {
                         for c in kids(cl) {
-                            match c.kind() {
+                            match c.kind_str() {
                                 "identifier" => {
                                     from.names.push(("default".into(), Some(text(c, src))))
                                 }
@@ -347,7 +353,7 @@ impl LanguageModule for Ecma {
                 let module = source(n, src)?;
                 let mut f = import(n, ImportForm::ReExport, module);
                 for c in kids(n) {
-                    match c.kind() {
+                    match c.kind_str() {
                         "export_clause" => f.names.extend(specifiers(c, src)),
                         "namespace_export" => {
                             f.alias = kids(c).into_iter().next().map(|x| text(x, src))
@@ -355,7 +361,7 @@ impl LanguageModule for Ecma {
                         _ => {}
                     }
                 }
-                if all_kids(n).iter().any(|c| c.kind() == "type") {
+                if all_kids(n).iter().any(|c| c.kind_str() == "type") {
                     f.runs = Runs::TypeChecking;
                 }
                 Some(vec![f])
@@ -368,40 +374,39 @@ impl LanguageModule for Ecma {
     fn object_of(&self, n: Node, src: &[u8]) -> Option<String> {
         let p = n.parent()?;
         // `obj.name = function`, `Klass.prototype.name = function`
-        if p.kind() == "assignment_expression" {
-            let left = p.child_by_field_name("left")?;
-            if left.kind() != "member_expression" {
+        if p.kind_str() == "assignment_expression" {
+            let left = p.by_field("left")?;
+            if left.kind_str() != "member_expression" {
                 return None;
             }
-            let obj = path_of(left.child_by_field_name("object")?, src)?;
+            let obj = path_of(left.by_field("object")?, src)?;
             return obj.into_iter().rfind(|s| s != "prototype" && s != "()");
         }
         // `const obj = { name() {}, other: function () {} }`
-        let pair_or_method = if p.kind() == "object" {
+        let pair_or_method = if p.kind_str() == "object" {
             n
-        } else if p.kind() == "pair" {
+        } else if p.kind_str() == "pair" {
             p
         } else {
             return None;
         };
-        let object = pair_or_method.parent().filter(|o| o.kind() == "object")?;
+        let object = pair_or_method.parent().filter(|o| o.kind_str() == "object")?;
         let holder = object.parent()?;
         // `UserSchema.methods = { encryptPassword: function () {} }`: the
         // member it is assigned to, as `obj.name = function` names its object
-        if holder.kind() == "assignment_expression" {
-            let left =
-                holder.child_by_field_name("left").filter(|l| l.kind() == "member_expression")?;
+        if holder.kind_str() == "assignment_expression" {
+            let left = holder.by_field("left").filter(|l| l.kind_str() == "member_expression")?;
             return path_of(left, src)?.into_iter().rfind(|s| s != "prototype" && s != "()");
         }
-        let decl = Some(holder).filter(|d| d.kind() == "variable_declarator")?;
-        decl.child_by_field_name("name").filter(|x| x.kind() == "identifier").map(|x| text(x, src))
+        let decl = Some(holder).filter(|d| d.kind_str() == "variable_declarator")?;
+        decl.by_field("name").filter(|x| x.kind_str() == "identifier").map(|x| text(x, src))
     }
 
     fn extra_def<'t>(&self, n: Node<'t>, src: &[u8]) -> Option<(Node<'t>, DefKind)> {
         let is_function = |v: Option<Node>| {
             v.is_some_and(|v| {
                 matches!(
-                    v.kind(),
+                    v.kind_str(),
                     "arrow_function"
                         | "function_expression"
                         | "function"
@@ -410,30 +415,28 @@ impl LanguageModule for Ecma {
                 )
             })
         };
-        match n.kind() {
+        match n.kind_str() {
             // an enum's members: `enum Color { Red, Green = 2 }`
-            "enum_assignment" => {
-                n.child_by_field_name("name").map(|name| (name, DefKind::EnumMember))
-            }
-            "property_identifier" if n.parent().is_some_and(|p| p.kind() == "enum_body") => {
+            "enum_assignment" => n.by_field("name").map(|name| (name, DefKind::EnumMember)),
+            "property_identifier" if n.parent().is_some_and(|p| p.kind_str() == "enum_body") => {
                 Some((n, DefKind::EnumMember))
             }
             // a class field that holds a value, not a function
             "public_field_definition" | "field_definition" => {
-                let name =
-                    n.child_by_field_name("name").or_else(|| n.child_by_field_name("property"))?;
-                (!is_function(n.child_by_field_name("value"))).then_some((name, DefKind::Property))
+                let name = n.by_field("name").or_else(|| n.by_field("property"))?;
+                (!is_function(n.by_field("value"))).then_some((name, DefKind::Property))
             }
             // a module-level `const X = …` that is not a function
             "variable_declarator" => {
-                let decl = n.parent().filter(|p| p.kind() == "lexical_declaration")?;
+                let decl = n.parent().filter(|p| p.kind_str() == "lexical_declaration")?;
                 let top = decl.parent().is_some_and(|p| {
                     module_level(p)
-                        || (p.kind() == "export_statement" && p.parent().is_some_and(module_level))
+                        || (p.kind_str() == "export_statement"
+                            && p.parent().is_some_and(module_level))
                 });
-                let is_const = all_kids(decl).iter().any(|c| c.kind() == "const");
-                let name = n.child_by_field_name("name").filter(|x| x.kind() == "identifier")?;
-                let value = n.child_by_field_name("value");
+                let is_const = all_kids(decl).iter().any(|c| c.kind_str() == "const");
+                let name = n.by_field("name").filter(|x| x.kind_str() == "identifier")?;
+                let value = n.by_field("value");
                 let import = value.is_some_and(|v| binds_import(v, src));
                 (top && is_const && !is_function(value) && !import)
                     .then_some((name, DefKind::Constant))
@@ -444,12 +447,12 @@ impl LanguageModule for Ecma {
 
     fn exports_of(&self, n: Node, src: &[u8]) -> Vec<(String, String)> {
         let mut out = Vec::new();
-        match n.kind() {
-            "export_statement" if n.child_by_field_name("source").is_none() => {
+        match n.kind_str() {
+            "export_statement" if n.by_field("source").is_none() => {
                 // (`export = E;` is the module itself, as a default is)
-                let default = all_kids(n).iter().any(|c| matches!(c.kind(), "default" | "="));
+                let default = all_kids(n).iter().any(|c| matches!(c.kind_str(), "default" | "="));
                 for c in kids(n) {
-                    match c.kind() {
+                    match c.kind_str() {
                         "export_clause" => {
                             for (name, alias) in specifiers(c, src) {
                                 out.push((name.clone(), alias.unwrap_or(name)));
@@ -457,7 +460,7 @@ impl LanguageModule for Ecma {
                         }
                         "identifier" if default => out.push((text(c, src), "default".into())),
                         _ if default => {
-                            if let Some(name) = c.child_by_field_name("name") {
+                            if let Some(name) = c.by_field("name") {
                                 out.push((text(name, src), "default".into()));
                             }
                         }
@@ -467,15 +470,15 @@ impl LanguageModule for Ecma {
             }
             // CommonJS: `module.exports = X`, `module.exports = { a, b: c }`
             "assignment_expression" => {
-                let left = n.child_by_field_name("left").map(|l| text(l, src));
-                let Some(right) = n.child_by_field_name("right") else { return out };
+                let left = n.by_field("left").map(|l| text(l, src));
+                let Some(right) = n.by_field("right") else { return out };
                 // `exports.name = bound`, `module.exports.name = bound`: a
                 // name the module passes on
                 let named = left.as_deref().and_then(|l| {
                     l.strip_prefix("module.exports.").or_else(|| l.strip_prefix("exports."))
                 });
                 if let Some(name) = named {
-                    if right.kind() == "identifier" && !name.contains('.') {
+                    if right.kind_str() == "identifier" && !name.contains('.') {
                         out.push((text(right, src), name.to_string()));
                     }
                     return out;
@@ -483,20 +486,20 @@ impl LanguageModule for Ecma {
                 if left.as_deref() != Some("module.exports") {
                     return out;
                 }
-                match right.kind() {
+                match right.kind_str() {
                     "identifier" => out.push((text(right, src), "default".into())),
                     "object" => {
                         for prop in kids(right) {
-                            match prop.kind() {
+                            match prop.kind_str() {
                                 "shorthand_property_identifier" => {
                                     let t = text(prop, src);
                                     out.push((t.clone(), t));
                                 }
                                 "pair" => {
-                                    let k = prop.child_by_field_name("key").map(|x| text(x, src));
-                                    let v = prop.child_by_field_name("value");
+                                    let k = prop.by_field("key").map(|x| text(x, src));
+                                    let v = prop.by_field("value");
                                     if let (Some(k), Some(v)) = (k, v) {
-                                        if v.kind() == "identifier" {
+                                        if v.kind_str() == "identifier" {
                                             out.push((text(v, src), k));
                                         }
                                     }
@@ -506,7 +509,7 @@ impl LanguageModule for Ecma {
                         }
                     }
                     _ => {
-                        if let Some(name) = right.child_by_field_name("name") {
+                        if let Some(name) = right.by_field("name") {
                             out.push((text(name, src), "default".into()));
                         }
                     }
@@ -520,12 +523,12 @@ impl LanguageModule for Ecma {
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
         let mut out = Vec::new();
         for c in kids(n) {
-            match c.kind() {
+            match c.kind_str() {
                 "class_heritage" => {
                     for h in kids(c) {
-                        match h.kind() {
+                        match h.kind_str() {
                             "extends_clause" => {
-                                let v = h.child_by_field_name("value");
+                                let v = h.by_field("value");
                                 let items = match v {
                                     Some(v) => path_of(v, src).into_iter().collect(),
                                     None => paths_in(h, src),
@@ -562,7 +565,7 @@ impl LanguageModule for Ecma {
 /// program, or the body of a TypeScript `namespace` (whose `const`s and
 /// variables are the namespace's, as a module's are the module's).
 fn module_level(p: Node) -> bool {
-    p.kind() == "program"
-        || (p.kind() == "statement_block"
-            && p.parent().is_some_and(|q| matches!(q.kind(), "internal_module" | "module")))
+    p.kind_str() == "program"
+        || (p.kind_str() == "statement_block"
+            && p.parent().is_some_and(|q| matches!(q.kind_str(), "internal_module" | "module")))
 }

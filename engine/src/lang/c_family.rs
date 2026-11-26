@@ -4,6 +4,8 @@
 //! a file, `#include <x>` a system header (or a project one on the include
 //! path); `class A : public B` makes `A` extend `B`.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use std::sync::LazyLock;
 
 use regex::bytes::Regex;
@@ -33,12 +35,12 @@ impl LanguageModule for CFamily {
         let words = |n: Node| -> Vec<String> {
             kids(n)
                 .into_iter()
-                .filter(|c| matches!(c.kind(), "storage_class_specifier" | "type_qualifier"))
+                .filter(|c| matches!(c.kind_str(), "storage_class_specifier" | "type_qualifier"))
                 .map(|c| generic::text(c, src))
                 .collect()
         };
-        let in_class = n.kind() == "field_declaration"
-            && n.parent().is_some_and(|p| p.kind() == "field_declaration_list");
+        let in_class = n.kind_str() == "field_declaration"
+            && n.parent().is_some_and(|p| p.kind_str() == "field_declaration_list");
         // (through the `#if` / `#ifdef` groups a file-level declaration sits
         // in, `#ifndef _WIN32 extern … #endif`, and the `extern "C" { … }` a
         // header wraps itself in)
@@ -46,21 +48,22 @@ impl LanguageModule for CFamily {
         for _ in 0..12 {
             match up {
                 Some(p)
-                    if p.kind().starts_with("preproc_")
-                        || p.kind() == "linkage_specification"
-                        || (p.kind() == "declaration_list"
-                            && p.parent().is_some_and(|q| q.kind() == "linkage_specification")) =>
+                    if p.kind_str().starts_with("preproc_")
+                        || p.kind_str() == "linkage_specification"
+                        || (p.kind_str() == "declaration_list"
+                            && p.parent()
+                                .is_some_and(|q| q.kind_str() == "linkage_specification")) =>
                 {
                     up = p.parent()
                 }
                 _ => break,
             }
         }
-        let at_file = n.kind() == "declaration"
+        let at_file = n.kind_str() == "declaration"
             && up.is_some_and(|p| {
-                p.kind() == "translation_unit"
-                    || (p.kind() == "declaration_list"
-                        && p.parent().is_some_and(|q| q.kind() == "namespace_definition"))
+                p.kind_str() == "translation_unit"
+                    || (p.kind_str() == "declaration_list"
+                        && p.parent().is_some_and(|q| q.kind_str() == "namespace_definition"))
             });
         if !(in_class || at_file) {
             return Vec::new();
@@ -69,7 +72,7 @@ impl LanguageModule for CFamily {
         // grammar recovers into a declaration with no `;` of its own)
         let ended = n
             .child(n.child_count().saturating_sub(1))
-            .is_some_and(|c| c.kind() == ";" && !c.is_missing());
+            .is_some_and(|c| c.kind_str() == ";" && !c.is_missing());
         if !ended {
             return Vec::new();
         }
@@ -86,7 +89,7 @@ impl LanguageModule for CFamily {
             // `int x`, `int x = 1`, `int *p`, `int a[3]`; never a function
             let mut cur = d;
             for _ in 0..4 {
-                match cur.kind() {
+                match cur.kind_str() {
                     "identifier" | "field_identifier" => {
                         out.push((n, cur, kind));
                         break;
@@ -95,7 +98,7 @@ impl LanguageModule for CFamily {
                     | "pointer_declarator"
                     | "array_declarator"
                     | "reference_declarator" => {
-                        match cur.child_by_field_name("declarator").or_else(|| cur.named_child(0)) {
+                        match cur.by_field("declarator").or_else(|| cur.named_child(0)) {
                             Some(next) => cur = next,
                             None => break,
                         }
@@ -119,7 +122,7 @@ impl LanguageModule for CFamily {
     }
 
     fn kind_of(&self, node: Node, _src: &[u8]) -> DefKind {
-        match node.kind() {
+        match node.kind_str() {
             "class_specifier" => DefKind::Class,
             "union_specifier" => DefKind::Struct,
             k => generic::kind_of(k),
@@ -127,21 +130,21 @@ impl LanguageModule for CFamily {
     }
 
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
-        if n.kind() != "preproc_include" {
+        if n.kind_str() != "preproc_include" {
             return None;
         }
-        let p = n.child_by_field_name("path")?;
+        let p = n.by_field("path")?;
         let mut f = import(n, ImportForm::Module, string_value(p, src));
-        f.system = p.kind() == "system_lib_string";
+        f.system = p.kind_str() == "system_lib_string";
         Some(vec![f])
     }
 
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
         kids(n)
             .into_iter()
-            .filter(|c| c.kind() == "base_class_clause")
+            .filter(|c| c.kind_str() == "base_class_clause")
             .flat_map(kids)
-            .filter(|c| c.kind() != "access_specifier")
+            .filter(|c| c.kind_str() != "access_specifier")
             .filter_map(|c| path_of(c, src))
             .map(|p| (RefKind::Inherits, p))
             .collect()

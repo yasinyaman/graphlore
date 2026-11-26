@@ -6,6 +6,8 @@
 //! router)`, `app.use('/x', require('./x'))`, Fastify `register(plugin, {
 //! prefix })`) and NestJS `app.setGlobalPrefix('api')`.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use std::collections::HashSet;
 
 use tree_sitter::Node;
@@ -64,7 +66,8 @@ fn string_arg(args: Node, src: &[u8], index: usize) -> Option<String> {
     kids(args)
         .into_iter()
         .filter(|a| {
-            a.kind() == "string" || (a.kind() == "template_string" && a.named_child_count() == 0)
+            a.kind_str() == "string"
+                || (a.kind_str() == "template_string" && a.named_child_count() == 0)
         })
         .nth(index)
         .map(|a| string_value(a, src))
@@ -73,16 +76,17 @@ fn string_arg(args: Node, src: &[u8], index: usize) -> Option<String> {
 /// The first string argument as a path: a template string keeps its holes
 /// (`` `/${hop}` ``).
 fn path_arg(args: Node, src: &[u8]) -> Option<PathExpr> {
-    let a = kids(args).into_iter().find(|a| matches!(a.kind(), "string" | "template_string"))?;
+    let a =
+        kids(args).into_iter().find(|a| matches!(a.kind_str(), "string" | "template_string"))?;
     path_expr(a, src)
 }
 
 fn decorator_call(dec: Node) -> Option<Node> {
-    kids(dec).into_iter().find(|c| c.kind() == "call_expression")
+    kids(dec).into_iter().find(|c| c.kind_str() == "call_expression")
 }
 
 fn call_name(call: Node, src: &[u8]) -> Option<String> {
-    call.child_by_field_name("function").filter(|f| f.kind() == "identifier").map(|f| text(f, src))
+    call.by_field("function").filter(|f| f.kind_str() == "identifier").map(|f| text(f, src))
 }
 
 /// A request's method, URL and client object.
@@ -109,29 +113,29 @@ impl Ctx<'_> {
         let src = self.src;
         let mut prefix = String::new();
         let mut decs: Vec<Node> = pending.to_vec();
-        decs.extend(kids(cls).into_iter().filter(|c| c.kind() == "decorator"));
+        decs.extend(kids(cls).into_iter().filter(|c| c.kind_str() == "decorator"));
         for dec in decs {
             let Some(call) = decorator_call(dec) else { continue };
             if call_name(call, src).as_deref() == Some("Controller") {
                 prefix = call
-                    .child_by_field_name("arguments")
+                    .by_field("arguments")
                     .and_then(|a| string_arg(a, src, 0))
                     .unwrap_or_default();
             }
         }
-        let Some(body) = cls.child_by_field_name("body") else { return };
+        let Some(body) = cls.by_field("body") else { return };
         let mut method_pending: Vec<Node> = Vec::new();
         for child in kids(body) {
-            if child.kind() == "decorator" {
+            if child.kind_str() == "decorator" {
                 method_pending.push(child);
                 continue;
             }
-            if child.kind() != "method_definition" {
+            if child.kind_str() != "method_definition" {
                 method_pending.clear();
                 continue;
             }
             let mut decs = std::mem::take(&mut method_pending);
-            decs.extend(kids(child).into_iter().filter(|c| c.kind() == "decorator"));
+            decs.extend(kids(child).into_iter().filter(|c| c.kind_str() == "decorator"));
             for dec in decs {
                 let Some(call) = decorator_call(dec) else { continue };
                 let Some(name) = call_name(call, src) else { continue };
@@ -139,7 +143,7 @@ impl Ctx<'_> {
                     continue;
                 };
                 let sub = call
-                    .child_by_field_name("arguments")
+                    .by_field("arguments")
                     .and_then(|a| string_arg(a, src, 0))
                     .unwrap_or_default();
                 let handler = self.home(child.start_byte()).map_or(Handler::Inline, Handler::Def);
@@ -160,17 +164,16 @@ impl Ctx<'_> {
     /// `x.route('/p').get(h).post(h2)`: `(x, '/p')` from any verb call of it.
     fn chain_root<'t>(&self, call: Node<'t>) -> Option<(Node<'t>, String)> {
         let src = self.src;
-        let mut f = call.child_by_field_name("function")?;
-        while f.kind() == "member_expression" {
-            let obj = f.child_by_field_name("object").filter(|o| o.kind() == "call_expression")?;
-            let inner =
-                obj.child_by_field_name("function").filter(|i| i.kind() == "member_expression")?;
-            let args = obj.child_by_field_name("arguments")?;
-            let prop = inner.child_by_field_name("property")?;
-            let recv = inner.child_by_field_name("object")?;
+        let mut f = call.by_field("function")?;
+        while f.kind_str() == "member_expression" {
+            let obj = f.by_field("object").filter(|o| o.kind_str() == "call_expression")?;
+            let inner = obj.by_field("function").filter(|i| i.kind_str() == "member_expression")?;
+            let args = obj.by_field("arguments")?;
+            let prop = inner.by_field("property")?;
+            let recv = inner.by_field("object")?;
             if text(prop, src) == "route" {
                 let pattern = string_arg(args, src, 0)?;
-                return (recv.kind() == "identifier").then_some((recv, pattern));
+                return (recv.kind_str() == "identifier").then_some((recv, pattern));
             }
             if !VERBS.contains(&text(prop, src).as_str()) {
                 return None;
@@ -183,17 +186,13 @@ impl Ctx<'_> {
     /// A route registration; `true` when the call is one.
     fn registration(&mut self, call: Node, params: &HashSet<String>) -> bool {
         let src = self.src;
-        let (Some(f), Some(args)) =
-            (call.child_by_field_name("function"), call.child_by_field_name("arguments"))
-        else {
+        let (Some(f), Some(args)) = (call.by_field("function"), call.by_field("arguments")) else {
             return false;
         };
-        if f.kind() != "member_expression" {
+        if f.kind_str() != "member_expression" {
             return false;
         }
-        let (Some(obj), Some(prop)) =
-            (f.child_by_field_name("object"), f.child_by_field_name("property"))
-        else {
+        let (Some(obj), Some(prop)) = (f.by_field("object"), f.by_field("property")) else {
             return false;
         };
         let verb = text(prop, src);
@@ -201,11 +200,12 @@ impl Ctx<'_> {
         if !VERBS.contains(&verb.as_str()) {
             return false;
         }
-        let chained = if obj.kind() == "call_expression" { self.chain_root(call) } else { None };
+        let chained =
+            if obj.kind_str() == "call_expression" { self.chain_root(call) } else { None };
         let was_chained = chained.is_some();
         let (recv, pattern) = match chained {
             Some((r, p)) => (r, PathExpr::lit(p)),
-            None if obj.kind() == "identifier" => match path_arg(args, src) {
+            None if obj.kind_str() == "identifier" => match path_arg(args, src) {
                 Some(p) => (obj, p),
                 None => return false,
             },
@@ -223,7 +223,7 @@ impl Ctx<'_> {
         }
         if self.framework.is_none() {
             let handlers = if was_chained { &named[..] } else { named.get(1..).unwrap_or(&[]) };
-            let ok_last = last.is_some_and(|l| HANDLER_KINDS.contains(&l.kind()));
+            let ok_last = last.is_some_and(|l| HANDLER_KINDS.contains(&l.kind_str()));
             if handlers.is_empty() || !ok_last {
                 return false;
             }
@@ -232,12 +232,15 @@ impl Ctx<'_> {
             }
         }
         let handler = match last {
-            Some(l) if matches!(l.kind(), "identifier" | "member_expression") => {
+            Some(l) if matches!(l.kind_str(), "identifier" | "member_expression") => {
                 path_of(l, src).map(Handler::Path).unwrap_or(Handler::Inline)
             }
             // `(req, res) => ctrl.show(req, res)`: the call it makes
             Some(l)
-                if matches!(l.kind(), "arrow_function" | "function_expression" | "function") =>
+                if matches!(
+                    l.kind_str(),
+                    "arrow_function" | "function_expression" | "function"
+                ) =>
             {
                 single_call(l, src).map_or(Handler::Inline, Handler::Path)
             }
@@ -263,45 +266,42 @@ impl Ctx<'_> {
     fn client_request(&self, call: Node) -> Option<Request> {
         let src = self.src;
         let (Some(f), Some(args)) = (
-            call.child_by_field_name("function")
-                .or_else(|| call.child_by_field_name("constructor")),
-            call.child_by_field_name("arguments"),
+            call.by_field("function").or_else(|| call.by_field("constructor")),
+            call.by_field("arguments"),
         ) else {
             return None;
         };
         let named = kids(args);
         let first = named.first().copied();
-        let options = |i: usize| named.get(i).copied().filter(|o| o.kind() == "object");
+        let options = |i: usize| named.get(i).copied().filter(|o| o.kind_str() == "object");
         let method_in = |o: Option<Node>, keys: &[&str]| {
             o.and_then(|o| keys.iter().find_map(|k| object_value(o, src, k)))
-                .filter(|v| matches!(v.kind(), "string" | "template_string"))
+                .filter(|v| matches!(v.kind_str(), "string" | "template_string"))
                 .map(|v| string_value(v, src).to_uppercase())
         };
-        let url_of = |n: Node| match n.kind() {
+        let url_of = |n: Node| match n.kind_str() {
             "object" => object_value(n, src, "url").and_then(|v| path_expr(v, src)),
             _ => path_expr(n, src),
         };
-        if call.kind() == "new_expression" {
+        if call.kind_str() == "new_expression" {
             if text(f, src) == "EventSource" {
                 return Some((Some("GET".into()), first.and_then(url_of)?, None));
             }
             return None;
         }
-        match f.kind() {
+        match f.kind_str() {
             // fetch(url, { method }), axios(url | { url, method })
             "identifier" => {
                 let name = text(f, src);
                 let a = first?;
                 if FETCH_FUNCTIONS.contains(&name.as_str()) || self.clients.contains(&name) {
-                    let opts = if a.kind() == "object" { Some(a) } else { options(1) };
+                    let opts = if a.kind_str() == "object" { Some(a) } else { options(1) };
                     let m = method_in(opts, &["method"]).or(Some("GET".into()));
                     return Some((m, url_of(a)?, None));
                 }
             }
             "member_expression" => {
-                let (Some(obj), Some(prop)) =
-                    (f.child_by_field_name("object"), f.child_by_field_name("property"))
-                else {
+                let (Some(obj), Some(prop)) = (f.by_field("object"), f.by_field("property")) else {
                     return None;
                 };
                 let verb = text(prop, src);
@@ -310,7 +310,7 @@ impl Ctx<'_> {
                 let last = recv.last().map(String::as_str).unwrap_or("");
                 let a = first?;
                 // $.ajax({ url, type }), axios.request({ url, method })
-                if matches!(verb.as_str(), "ajax" | "request") && a.kind() == "object" {
+                if matches!(verb.as_str(), "ajax" | "request") && a.kind_str() == "object" {
                     if (head == "$" || head == "jQuery") || self.clients.contains(head) {
                         let m = method_in(Some(a), &["method", "type"]).or(Some("GET".into()));
                         return Some((m, url_of(a)?, self.client_path(&recv)));
@@ -323,17 +323,15 @@ impl Ctx<'_> {
                     _ => return None,
                 };
                 // a generated SDK: client.get({ url: '/api/v1/items/' })
-                let sdk = a.kind() == "object"
+                let sdk = a.kind_str() == "object"
                     && object_value(a, src, "url").is_some_and(|v| {
                         string_value(v, src).starts_with('/')
                             || matches!(path_expr(v, src), Some(PathExpr(ref ps)) if matches!(ps.first(), Some(Part::Lit(l)) if l.starts_with('/')))
                     });
                 // supertest: request(app).get('/x')
-                let supertest = obj.kind() == "call_expression"
+                let supertest = obj.kind_str() == "call_expression"
                     && self.imports("supertest")
-                    && obj
-                        .child_by_field_name("function")
-                        .is_some_and(|g| g.kind() == "identifier");
+                    && obj.by_field("function").is_some_and(|g| g.kind_str() == "identifier");
                 let through_client = self.clients.contains(head)
                     || ((head == "$" || head == "jQuery") && matches!(verb.as_str(), "get" | "post"))
                     // Angular: this.http.get(url) in a file importing HttpClient
@@ -380,15 +378,13 @@ impl Ctx<'_> {
     /// a client, and its base URL.
     fn client_decl(&mut self, decl: Node) {
         let src = self.src;
-        let (Some(name), Some(value)) =
-            (decl.child_by_field_name("name"), decl.child_by_field_name("value"))
-        else {
+        let (Some(name), Some(value)) = (decl.by_field("name"), decl.by_field("value")) else {
             return;
         };
-        if name.kind() != "identifier" || value.kind() != "call_expression" {
+        if name.kind_str() != "identifier" || value.kind_str() != "call_expression" {
             return;
         }
-        let Some(path) = value.child_by_field_name("function").and_then(|c| path_of(c, src)) else {
+        let Some(path) = value.by_field("function").and_then(|c| path_of(c, src)) else {
             return;
         };
         let (Some(head), Some(last)) = (path.first(), path.last()) else { return };
@@ -401,8 +397,8 @@ impl Ctx<'_> {
         let name = text(name, src);
         self.clients.insert(name.clone());
         let base = value
-            .child_by_field_name("arguments")
-            .and_then(|a| kids(a).into_iter().find(|o| o.kind() == "object"))
+            .by_field("arguments")
+            .and_then(|a| kids(a).into_iter().find(|o| o.kind_str() == "object"))
             .and_then(|o| {
                 ["baseURL", "baseUrl", "prefixUrl"].iter().find_map(|k| object_value(o, src, k))
             })
@@ -432,7 +428,7 @@ impl Ctx<'_> {
             }
             "use" if self.framework.is_some() || ROUTER_NAMES.contains(&parent[0].as_str()) => {
                 let (prefix, rest) = match named.first() {
-                    Some(a) if a.kind() == "string" => {
+                    Some(a) if a.kind_str() == "string" => {
                         (PathExpr::lit(string_value(*a, src)), &named[1..])
                     }
                     _ => (PathExpr::default(), &named[..]),
@@ -453,7 +449,7 @@ impl Ctx<'_> {
                 let Some(m) = named.first().and_then(|c| mounted(*c, src)) else { return };
                 let prefix = named
                     .get(1)
-                    .filter(|o| o.kind() == "object")
+                    .filter(|o| o.kind_str() == "object")
                     .and_then(|o| object_value(*o, src, "prefix"))
                     .and_then(|v| path_expr(v, src))
                     .unwrap_or_default();
@@ -472,21 +468,15 @@ impl Ctx<'_> {
     /// `const router = express.Router()`, `Router()`, `new Router({ prefix })`.
     fn router_decl(&mut self, decl: Node) {
         let src = self.src;
-        let (Some(name), Some(value)) =
-            (decl.child_by_field_name("name"), decl.child_by_field_name("value"))
-        else {
+        let (Some(name), Some(value)) = (decl.by_field("name"), decl.by_field("value")) else {
             return;
         };
-        if name.kind() != "identifier" {
+        if name.kind_str() != "identifier" {
             return;
         }
-        let (callee, args) = match value.kind() {
-            "call_expression" => {
-                (value.child_by_field_name("function"), value.child_by_field_name("arguments"))
-            }
-            "new_expression" => {
-                (value.child_by_field_name("constructor"), value.child_by_field_name("arguments"))
-            }
+        let (callee, args) = match value.kind_str() {
+            "call_expression" => (value.by_field("function"), value.by_field("arguments")),
+            "new_expression" => (value.by_field("constructor"), value.by_field("arguments")),
             _ => return,
         };
         let Some(path) = callee.and_then(|c| path_of(c, src)) else { return };
@@ -494,7 +484,7 @@ impl Ctx<'_> {
             return;
         }
         let prefix = args
-            .and_then(|a| kids(a).into_iter().find(|o| o.kind() == "object"))
+            .and_then(|a| kids(a).into_iter().find(|o| o.kind_str() == "object"))
             .and_then(|o| object_value(o, src, "prefix"))
             .and_then(|v| path_expr(v, src))
             .unwrap_or_default();
@@ -510,7 +500,7 @@ impl Ctx<'_> {
     fn walk(&mut self, node: Node, params: &HashSet<String>) {
         let mut pending: Vec<Node> = Vec::new();
         for child in kids(node) {
-            let k = child.kind();
+            let k = child.kind_str();
             if k == "decorator" {
                 pending.push(child);
                 continue;
@@ -524,10 +514,9 @@ impl Ctx<'_> {
             if k == "export_statement" {
                 // `@Controller() export class X` keeps its decorators on the export
                 let mut decs = std::mem::take(&mut pending);
-                decs.extend(kids(child).into_iter().filter(|c| c.kind() == "decorator"));
-                if let Some(cls) = child
-                    .child_by_field_name("declaration")
-                    .filter(|d| d.kind() == "class_declaration")
+                decs.extend(kids(child).into_iter().filter(|c| c.kind_str() == "decorator"));
+                if let Some(cls) =
+                    child.by_field("declaration").filter(|d| d.kind_str() == "class_declaration")
                 {
                     self.handle_class(cls, &decs);
                     self.class_body(cls, params);
@@ -564,23 +553,23 @@ impl Ctx<'_> {
 
 fn object_value<'t>(obj: Node<'t>, src: &[u8], key: &str) -> Option<Node<'t>> {
     kids(obj).into_iter().find_map(|p| {
-        (p.kind() == "pair"
-            && p.child_by_field_name("key")
+        (p.kind_str() == "pair"
+            && p.by_field("key")
                 .is_some_and(|k| string_value(k, src) == key || text(k, src) == key))
-        .then(|| p.child_by_field_name("value"))
+        .then(|| p.by_field("value"))
         .flatten()
     })
 }
 
 /// What `app.use(…)` mounts: a router by name, or a module required in place.
 fn mounted(n: Node, src: &[u8]) -> Option<Mounted> {
-    if n.kind() == "call_expression"
-        && n.child_by_field_name("function").is_some_and(|f| text(f, src) == "require")
+    if n.kind_str() == "call_expression"
+        && n.by_field("function").is_some_and(|f| text(f, src) == "require")
     {
-        let spec = n.child_by_field_name("arguments").and_then(|a| string_arg(a, src, 0))?;
+        let spec = n.by_field("arguments").and_then(|a| string_arg(a, src, 0))?;
         return Some(Mounted::Module(spec));
     }
-    if matches!(n.kind(), "identifier" | "member_expression") {
+    if matches!(n.kind_str(), "identifier" | "member_expression") {
         return path_of(n, src).filter(|p| !p.iter().any(|s| s == "()")).map(Mounted::Path);
     }
     None
@@ -589,18 +578,18 @@ fn mounted(n: Node, src: &[u8]) -> Option<Mounted> {
 /// Names a function binds as plain parameters.
 fn parameters(f: Node, src: &[u8]) -> HashSet<String> {
     let mut out = HashSet::new();
-    if let Some(one) = f.child_by_field_name("parameter").filter(|p| p.kind() == "identifier") {
+    if let Some(one) = f.by_field("parameter").filter(|p| p.kind_str() == "identifier") {
         out.insert(text(one, src));
     }
-    if let Some(ps) = f.child_by_field_name("parameters") {
+    if let Some(ps) = f.by_field("parameters") {
         for p in kids(ps) {
-            match p.kind() {
+            match p.kind_str() {
                 "identifier" => {
                     out.insert(text(p, src));
                 }
                 "required_parameter" | "optional_parameter" => {
                     if let Some(pat) =
-                        p.child_by_field_name("pattern").filter(|x| x.kind() == "identifier")
+                        p.by_field("pattern").filter(|x| x.kind_str() == "identifier")
                     {
                         out.insert(text(pat, src));
                     }

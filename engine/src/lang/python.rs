@@ -7,6 +7,8 @@
 //! Imports: `import a.b [as c]`, `from [..]m import x [as y]`, `from m import *`;
 //! one under `if TYPE_CHECKING:` is type-checking only.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use tree_sitter::Node;
 
 use super::LanguageModule;
@@ -20,7 +22,7 @@ pub struct Python;
 fn code_end(node: Node) -> u32 {
     let mut n = node;
     loop {
-        let last = all_kids(n).into_iter().rev().find(|c| c.kind() != "comment");
+        let last = all_kids(n).into_iter().rev().find(|c| c.kind_str() != "comment");
         match last {
             Some(c) => n = c,
             None => return end_line(n),
@@ -32,10 +34,9 @@ fn code_end(node: Node) -> u32 {
 fn under_type_checking(n: Node, src: &[u8]) -> bool {
     let mut child = n;
     while let Some(p) = child.parent() {
-        if p.kind() == "if_statement" {
-            let cond = p.child_by_field_name("condition").map(|c| text(c, src)).unwrap_or_default();
-            let in_body =
-                p.child_by_field_name("consequence").is_some_and(|c| c.id() == child.id());
+        if p.kind_str() == "if_statement" {
+            let cond = p.by_field("condition").map(|c| text(c, src)).unwrap_or_default();
+            let in_body = p.by_field("consequence").is_some_and(|c| c.id() == child.id());
             if cond.trim().ends_with("TYPE_CHECKING") && in_body {
                 return true;
             }
@@ -137,27 +138,28 @@ impl LanguageModule for Python {
     /// `CACHE = {}` at module level (a variable; `MAX = 3` a constant) and
     /// `count = 0` / `name: str` in a class body (a class attribute).
     fn state_defs<'t>(&self, node: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
-        if node.kind() != "assignment" {
+        if node.kind_str() != "assignment" {
             return Vec::new();
         }
-        let Some(stmt) = node.parent().filter(|p| p.kind() == "expression_statement") else {
+        let Some(stmt) = node.parent().filter(|p| p.kind_str() == "expression_statement") else {
             return Vec::new();
         };
         // `self.x = …` in a method: a field of the class
         if let Some(attr) =
-            node.child_by_field_name("left").filter(|l| l.kind() == "attribute").filter(|l| {
-                l.child_by_field_name("object")
-                    .is_some_and(|o| o.kind() == "identifier" && &_src[o.byte_range()] == b"self")
+            node.by_field("left").filter(|l| l.kind_str() == "attribute").filter(|l| {
+                l.by_field("object").is_some_and(|o| {
+                    o.kind_str() == "identifier" && &_src[o.byte_range()] == b"self"
+                })
             })
         {
             let in_method = {
                 let mut p = stmt.parent();
                 let mut found = false;
                 while let Some(x) = p {
-                    if x.kind() == "function_definition" {
+                    if x.kind_str() == "function_definition" {
                         found = x.parent().and_then(|b| b.parent()).is_some_and(|c| {
-                            c.kind() == "class_definition"
-                                || c.parent().is_some_and(|d| d.kind() == "class_definition")
+                            c.kind_str() == "class_definition"
+                                || c.parent().is_some_and(|d| d.kind_str() == "class_definition")
                         });
                         break;
                     }
@@ -165,23 +167,23 @@ impl LanguageModule for Python {
                 }
                 found
             };
-            return match attr.child_by_field_name("attribute") {
+            return match attr.by_field("attribute") {
                 Some(name) if in_method => vec![(node, name, DefKind::Property)],
                 _ => Vec::new(),
             };
         }
         let Some(scope) = stmt.parent() else { return Vec::new() };
-        let in_class = scope.kind() == "block"
-            && scope.parent().is_some_and(|c| c.kind() == "class_definition");
-        if scope.kind() != "module" && !in_class {
+        let in_class = scope.kind_str() == "block"
+            && scope.parent().is_some_and(|c| c.kind_str() == "class_definition");
+        if scope.kind_str() != "module" && !in_class {
             return Vec::new();
         }
         let mut out = Vec::new();
-        let Some(left) = node.child_by_field_name("left") else { return out };
-        let names: Vec<Node> = if left.kind() == "identifier" {
+        let Some(left) = node.by_field("left") else { return out };
+        let names: Vec<Node> = if left.kind_str() == "identifier" {
             vec![left]
-        } else if matches!(left.kind(), "pattern_list" | "tuple_pattern") {
-            kids(left).into_iter().filter(|c| c.kind() == "identifier").collect()
+        } else if matches!(left.kind_str(), "pattern_list" | "tuple_pattern") {
+            kids(left).into_iter().filter(|c| c.kind_str() == "identifier").collect()
         } else {
             Vec::new()
         };
@@ -189,19 +191,17 @@ impl LanguageModule for Python {
         let enum_class = in_class
             && scope
                 .parent()
-                .and_then(|c| c.child_by_field_name("superclasses"))
+                .and_then(|c| c.by_field("superclasses"))
                 .is_some_and(|bases| is_enum_base_list(bases, _src));
         // `TimeoutTypes = Union[float, Timeout]`, `Scope = MutableMapping[str,
         // Any]`, `T = TypeVar("T")`, `X: TypeAlias = …`: a module-level name
         // for a type, which annotations write
         let alias = !in_class
             && names.len() == 1
-            && (node.child_by_field_name("type").is_some_and(|t| {
+            && (node.by_field("type").is_some_and(|t| {
                 let text = String::from_utf8_lossy(&_src[t.byte_range()]);
                 text.rsplit('.').next() == Some("TypeAlias")
-            }) || node
-                .child_by_field_name("right")
-                .is_some_and(|v| is_type_expression(v, _src)));
+            }) || node.by_field("right").is_some_and(|v| is_type_expression(v, _src)));
         for name in names {
             let kind = if alias {
                 DefKind::TypeAlias
@@ -210,10 +210,10 @@ impl LanguageModule for Python {
             } else if in_class {
                 DefKind::Property
             } else if super::capitals(&String::from_utf8_lossy(&_src[name.byte_range()]))
-                && node.child_by_field_name("right").is_some_and(|v| {
+                && node.by_field("right").is_some_and(|v| {
                     // `CACHE = {}` is written in capitals and changed all the same
                     !matches!(
-                        v.kind(),
+                        v.kind_str(),
                         "dictionary"
                             | "list"
                             | "set"
@@ -239,26 +239,24 @@ impl LanguageModule for Python {
 
     fn region_start(&self, node: Node, def_line: u32) -> u32 {
         match node.parent() {
-            Some(p) if p.kind() == "decorated_definition" => line(p).min(def_line),
+            Some(p) if p.kind_str() == "decorated_definition" => line(p).min(def_line),
             _ => def_line,
         }
     }
 
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         let mut out = Vec::new();
-        match n.kind() {
+        match n.kind_str() {
             "import_statement" => {
                 let mut cursor = n.walk();
                 for (i, c) in n.children(&mut cursor).enumerate() {
                     if n.field_name_for_child(i as u32) != Some("name") {
                         continue;
                     }
-                    let (module, alias) = if c.kind() == "aliased_import" {
+                    let (module, alias) = if c.kind_str() == "aliased_import" {
                         (
-                            c.child_by_field_name("name")
-                                .map(|x| dotted(x, src))
-                                .unwrap_or_default(),
-                            c.child_by_field_name("alias").map(|x| text(x, src)),
+                            c.by_field("name").map(|x| dotted(x, src)).unwrap_or_default(),
+                            c.by_field("alias").map(|x| text(x, src)),
                         )
                     } else {
                         (dotted(c, src), None)
@@ -269,11 +267,8 @@ impl LanguageModule for Python {
                 }
             }
             "import_from_statement" => {
-                let module = n
-                    .child_by_field_name("module_name")
-                    .map(|m| dotted(m, src))
-                    .unwrap_or_default();
-                if kids(n).iter().any(|c| c.kind() == "wildcard_import") {
+                let module = n.by_field("module_name").map(|m| dotted(m, src)).unwrap_or_default();
+                if kids(n).iter().any(|c| c.kind_str() == "wildcard_import") {
                     out.push(import(n, ImportForm::Wildcard, module));
                 } else {
                     let mut f = import(n, ImportForm::From, module);
@@ -282,9 +277,9 @@ impl LanguageModule for Python {
                         if n.field_name_for_child(i as u32) != Some("name") {
                             continue;
                         }
-                        if c.kind() == "aliased_import" {
-                            let name = c.child_by_field_name("name").map(|x| dotted(x, src));
-                            let alias = c.child_by_field_name("alias").map(|x| text(x, src));
+                        if c.kind_str() == "aliased_import" {
+                            let name = c.by_field("name").map(|x| dotted(x, src));
+                            let alias = c.by_field("alias").map(|x| text(x, src));
                             if let Some(name) = name {
                                 f.names.push((name, alias));
                             }
@@ -307,13 +302,13 @@ impl LanguageModule for Python {
     }
 
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
-        if n.kind() != "class_definition" {
+        if n.kind_str() != "class_definition" {
             return Vec::new();
         }
-        let Some(list) = n.child_by_field_name("superclasses") else { return Vec::new() };
+        let Some(list) = n.by_field("superclasses") else { return Vec::new() };
         kids(list)
             .into_iter()
-            .filter(|c| c.kind() != "keyword_argument")
+            .filter(|c| c.kind_str() != "keyword_argument")
             .filter_map(|c| path_of(c, src))
             .map(|p| (RefKind::Inherits, p))
             .collect()
@@ -335,9 +330,9 @@ const ENUM_BASES: &[&str] = &["Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "
 
 fn is_enum_base_list(bases: Node, src: &[u8]) -> bool {
     kids(bases).into_iter().any(|b| {
-        let name = match b.kind() {
+        let name = match b.kind_str() {
             "identifier" => b,
-            "attribute" => match b.child_by_field_name("attribute") {
+            "attribute" => match b.by_field("attribute") {
                 Some(a) => a,
                 None => return false,
             },
@@ -386,24 +381,21 @@ fn is_type_expression(v: Node, src: &[u8]) -> bool {
         let t = String::from_utf8_lossy(&src[n.byte_range()]).to_string();
         t.rsplit('.').next().unwrap_or("").to_string()
     };
-    match v.kind() {
-        "subscript" => v.child_by_field_name("value").is_some_and(|x| {
-            matches!(x.kind(), "identifier" | "attribute")
+    match v.kind_str() {
+        "subscript" => v.by_field("value").is_some_and(|x| {
+            matches!(x.kind_str(), "identifier" | "attribute")
                 && TYPING_GENERICS.contains(&last(x).as_str())
         }),
-        "call" => v.child_by_field_name("function").is_some_and(|x| {
-            matches!(x.kind(), "identifier" | "attribute")
+        "call" => v.by_field("function").is_some_and(|x| {
+            matches!(x.kind_str(), "identifier" | "attribute")
                 && TYPE_MAKERS.contains(&last(x).as_str())
         }),
         "binary_operator" => {
-            let op = v.child_by_field_name("operator").map(|o| o.kind()) == Some("|");
+            let op = v.by_field("operator").map(|o| o.kind_str()) == Some("|");
             let mut typed = false;
             let mut sides = true;
-            for side in [v.child_by_field_name("left"), v.child_by_field_name("right")]
-                .into_iter()
-                .flatten()
-            {
-                match side.kind() {
+            for side in [v.by_field("left"), v.by_field("right")].into_iter().flatten() {
+                match side.kind_str() {
                     "none" => {}
                     "identifier" | "attribute" => {
                         typed |= last(side).chars().next().is_some_and(char::is_uppercase);

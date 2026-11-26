@@ -4,6 +4,8 @@
 //! path name a file. `extends`, `implements` and a trait `use` in a class body
 //! are the bases.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use tree_sitter::Node;
 
 use super::LanguageModule;
@@ -24,30 +26,30 @@ fn split_name(full: &str) -> (String, String) {
 fn use_clause(n: Node, clause: Node, prefix: &str, src: &[u8]) -> Option<ImportFact> {
     let name = kids(clause)
         .into_iter()
-        .find(|c| matches!(c.kind(), "qualified_name" | "name" | "namespace_name"))?;
+        .find(|c| matches!(c.kind_str(), "qualified_name" | "name" | "namespace_name"))?;
     let full =
         if prefix.is_empty() { text(name, src) } else { format!("{prefix}\\{}", text(name, src)) };
     let (module, last) = split_name(&full);
     let mut f = import(n, ImportForm::From, module);
-    f.names.push((last, clause.child_by_field_name("alias").map(|a| text(a, src))));
+    f.names.push((last, clause.by_field("alias").map(|a| text(a, src))));
     Some(f)
 }
 
 impl LanguageModule for Php {
     /// `public static $total` (shared by every instance) and `const MAX`.
     fn state_defs<'t>(&self, n: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
-        match n.kind() {
+        match n.kind_str() {
             "property_declaration" => kids(n)
                 .into_iter()
-                .filter(|c| c.kind() == "property_element")
-                .filter_map(|e| e.child_by_field_name("name"))
-                .filter_map(|v| kids(v).into_iter().find(|c| c.kind() == "name"))
+                .filter(|c| c.kind_str() == "property_element")
+                .filter_map(|e| e.by_field("name"))
+                .filter_map(|v| kids(v).into_iter().find(|c| c.kind_str() == "name"))
                 .map(|name| (n, name, DefKind::Property))
                 .collect(),
             "const_declaration" => kids(n)
                 .into_iter()
-                .filter(|c| c.kind() == "const_element")
-                .filter_map(|e| kids(e).into_iter().find(|c| c.kind() == "name"))
+                .filter(|c| c.kind_str() == "const_element")
+                .filter_map(|e| kids(e).into_iter().find(|c| c.kind_str() == "name"))
                 .map(|name| (n, name, DefKind::Constant))
                 .collect(),
             _ => Vec::new(),
@@ -55,20 +57,20 @@ impl LanguageModule for Php {
     }
 
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
-        match n.kind() {
+        match n.kind_str() {
             "namespace_use_declaration" => {
                 let mut out = Vec::new();
                 let prefix = kids(n)
                     .into_iter()
-                    .find(|c| c.kind() == "namespace_name")
+                    .find(|c| c.kind_str() == "namespace_name")
                     .map(|c| text(c, src))
                     .unwrap_or_default();
                 for c in kids(n) {
-                    match c.kind() {
+                    match c.kind_str() {
                         "namespace_use_clause" => out.extend(use_clause(n, c, "", src)),
                         "namespace_use_group" => {
                             for g in kids(c) {
-                                if g.kind() == "namespace_use_clause" {
+                                if g.kind_str() == "namespace_use_clause" {
                                     out.extend(use_clause(n, g, &prefix, src));
                                 }
                             }
@@ -81,7 +83,7 @@ impl LanguageModule for Php {
             k if k.starts_with("require") || k.starts_with("include") => {
                 let mut stack = vec![n];
                 while let Some(x) = stack.pop() {
-                    if matches!(x.kind(), "string" | "encapsed_string") {
+                    if matches!(x.kind_str(), "string" | "encapsed_string") {
                         let mut f = import(n, ImportForm::Module, string_value(x, src));
                         f.system = false;
                         return Some(vec![f]);
@@ -95,20 +97,20 @@ impl LanguageModule for Php {
     }
 
     fn package_of(&self, n: Node, src: &[u8]) -> Option<String> {
-        (n.kind() == "namespace_definition" && n.child_by_field_name("body").is_none())
-            .then(|| n.child_by_field_name("name").map(|c| text(c, src)))
+        (n.kind_str() == "namespace_definition" && n.by_field("body").is_none())
+            .then(|| n.by_field("name").map(|c| text(c, src)))
             .flatten()
     }
 
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
         let mut out = Vec::new();
         for c in kids(n) {
-            let kind = match c.kind() {
+            let kind = match c.kind_str() {
                 "base_clause" => RefKind::Inherits,
                 "class_interface_clause" => RefKind::Implements,
                 "declaration_list" => {
                     for u in kids(c) {
-                        if u.kind() == "use_declaration" {
+                        if u.kind_str() == "use_declaration" {
                             out.extend(
                                 kids(u)
                                     .into_iter()

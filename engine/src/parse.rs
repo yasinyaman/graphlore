@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
-use tree_sitter::{ParseOptions, ParseState, Parser, Tree};
+use tree_sitter::{Node, ParseOptions, ParseState, Parser, Tree};
 
 use crate::docs::{self, DocKind};
 use crate::facts::FileFacts;
@@ -92,6 +92,111 @@ pub fn parse(lang: Lang, src: &[u8], deadline: Option<Duration>) -> Result<Tree,
 
 /// The facts of one source file. `lang` is the detected language (or `None` for
 /// a document, which `doc` then names).
+/// A node's child by field name, with the name's field id worked out once
+/// per language and thread: tree-sitter's own `child_by_field_name` looks the
+/// name up among all the language's field names, by string, at every call
+/// (a third of the time spent reading files went there).
+pub trait Fields<'t> {
+    fn by_field(&self, name: &str) -> Option<Node<'t>>;
+}
+
+impl<'t> Fields<'t> for Node<'t> {
+    #[inline]
+    fn by_field(&self, name: &str) -> Option<Node<'t>> {
+        field_id(self, name).and_then(|id| self.child_by_field_id(id.get()))
+    }
+}
+
+/// A node's kind, from a table of its language's kind names made once per
+/// thread: tree-sitter's own `kind` measures the name and checks it is
+/// UTF-8 at every call (a fifth of the time spent reading files).
+pub trait Kinds<'t> {
+    fn kind_str(&self) -> &'t str;
+}
+
+impl<'t> Kinds<'t> for Node<'t> {
+    #[inline]
+    fn kind_str(&self) -> &'t str {
+        let id = self.kind_id() as usize;
+        let lang = self.language();
+        let at = &*lang as *const tree_sitter::Language as *const usize;
+        let key = unsafe { *at };
+        let (ptr, len) = KINDS.with(|kinds| {
+            let mut kinds = kinds.borrow_mut();
+            if kinds.0 != key {
+                // (the names of a language's kinds, as tree-sitter keeps them:
+                // they live as long as the language, which outlives its trees)
+                let names = (0..lang.node_kind_count())
+                    .map(|i| {
+                        lang.node_kind_for_id(i as u16)
+                            .map_or((std::ptr::null(), 0), |n| (n.as_ptr(), n.len()))
+                    })
+                    .collect();
+                *kinds = (key, names);
+            }
+            kinds.1.get(id).copied().unwrap_or((std::ptr::null(), 0))
+        });
+        if ptr.is_null() {
+            return self.kind();
+        }
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) }
+    }
+}
+
+type KindNames = (usize, Vec<(*const u8, usize)>);
+
+thread_local! {
+    static KINDS: std::cell::RefCell<KindNames> = const { std::cell::RefCell::new((0, Vec::new())) };
+}
+
+/// A hasher for keys that are already spread out (pointers, lengths).
+#[derive(Default)]
+struct PtrHasher(u64);
+
+impl std::hash::Hasher for PtrHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0.rotate_left(5) ^ u64::from(b)).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+        }
+    }
+    fn write_usize(&mut self, n: usize) {
+        self.0 = (self.0.rotate_left(5) ^ n as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+}
+
+/// (language, name's address, name's length) -> the name and its field id.
+type FieldIds = std::collections::HashMap<
+    (usize, usize, usize),
+    (Box<str>, Option<std::num::NonZeroU16>),
+    std::hash::BuildHasherDefault<PtrHasher>,
+>;
+
+fn field_id(n: &Node, name: &str) -> Option<std::num::NonZeroU16> {
+    thread_local! {
+        static IDS: std::cell::RefCell<FieldIds> = std::cell::RefCell::new(FieldIds::default());
+    }
+    let lang = n.language();
+    // (a language is a pointer to its tables: that pointer names it)
+    let at = &*lang as *const tree_sitter::Language as *const usize;
+    let key = (unsafe { *at }, name.as_ptr() as usize, name.len());
+    IDS.with(|ids| {
+        let mut ids = ids.borrow_mut();
+        // (most names are literals, at one address each; another name at an
+        // address a known one had is looked up again)
+        if let Some((known, id)) = ids.get(&key) {
+            if **known == *name {
+                return *id;
+            }
+        }
+        let id = lang.field_id_for_name(name);
+        ids.insert(key, (name.into(), id));
+        id
+    })
+}
+
 /// Nanoseconds spent in each step of `file_facts`, summed over the threads
 /// that read files (a measurement: `GRAPHLORE_TRACE_STATS=1`).
 pub static STEP_NS: [std::sync::atomic::AtomicU64; 6] = [

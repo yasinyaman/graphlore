@@ -9,6 +9,8 @@
 //! literal that is SQL (`"SELECT … FROM users"`). A key computed at run time
 //! names nothing and is only counted.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -308,12 +310,12 @@ pub fn visit<'t>(
     out: &mut Vec<ResourceUse>,
 ) {
     let Some(lang) = lang else { return };
-    let k = n.kind();
+    let k = n.kind_str();
     if is_call_kind(k) || matches!(k, "new_expression" | "object_creation_expression") {
         call(n, src, lang, out);
     }
     env_access(n, src, lang, anc, out);
-    if is_string(k) && !anc.last().is_some_and(|p| is_string(p.kind())) {
+    if is_string(k) && !anc.last().is_some_and(|p| is_string(p.kind_str())) {
         sql(n, src, out);
     }
 }
@@ -348,8 +350,10 @@ fn ends_with(path: &[String], suffix: &str) -> bool {
 
 /// The argument expressions of a call, unwrapped.
 fn arguments<'t>(n: Node<'t>) -> Vec<Node<'t>> {
-    let args = n.child_by_field_name("arguments").or_else(|| {
-        kids(n).into_iter().find(|c| c.kind().contains("argument") || c.kind() == "call_suffix")
+    let args = n.by_field("arguments").or_else(|| {
+        kids(n)
+            .into_iter()
+            .find(|c| c.kind_str().contains("argument") || c.kind_str() == "call_suffix")
     });
     let Some(args) = args else { return Vec::new() };
     let mut out = Vec::new();
@@ -358,7 +362,7 @@ fn arguments<'t>(n: Node<'t>) -> Vec<Node<'t>> {
         // `argument`, `value_argument`, `value_arguments` (Kotlin), keyword
         // arguments' values are not positional
         for _ in 0..3 {
-            if matches!(a.kind(), "argument" | "value_argument" | "value_arguments") {
+            if matches!(a.kind_str(), "argument" | "value_argument" | "value_arguments") {
                 match a.named_child(0) {
                     Some(c) => a = c,
                     None => break,
@@ -367,7 +371,7 @@ fn arguments<'t>(n: Node<'t>) -> Vec<Node<'t>> {
                 break;
             }
         }
-        if a.kind() == "keyword_argument" {
+        if a.kind_str() == "keyword_argument" {
             continue;
         }
         out.push(a);
@@ -377,11 +381,11 @@ fn arguments<'t>(n: Node<'t>) -> Vec<Node<'t>> {
 
 /// The text of a string literal with no interpolation in it.
 fn literal(n: Node, src: &[u8]) -> Option<String> {
-    if !is_string(n.kind()) {
+    if !is_string(n.kind_str()) {
         return None;
     }
     if kids(n).iter().any(|c| {
-        let k = c.kind();
+        let k = c.kind_str();
         k.contains("interpolation") || k.contains("substitution") || k == "template_substitution"
     }) {
         return None;
@@ -486,30 +490,26 @@ fn env_access<'t>(
     anc: &[Node<'t>],
     out: &mut Vec<ResourceUse>,
 ) {
-    let k = n.kind();
+    let k = n.kind_str();
     let (object, key) = match (lang, k) {
-        (Lang::Python, "subscript") => {
-            (n.child_by_field_name("value"), n.child_by_field_name("subscript"))
-        }
+        (Lang::Python, "subscript") => (n.by_field("value"), n.by_field("subscript")),
         (Lang::JavaScript | Lang::TypeScript | Lang::Tsx, "subscript_expression") => {
-            (n.child_by_field_name("object"), n.child_by_field_name("index"))
+            (n.by_field("object"), n.by_field("index"))
         }
         (Lang::JavaScript | Lang::TypeScript | Lang::Tsx, "member_expression") => {
-            let obj = n.child_by_field_name("object");
+            let obj = n.by_field("object");
             let is_env = obj
                 .and_then(|o| path_of(o, src))
                 .is_some_and(|p| p == ["process", "env"] || p == ["import", "meta", "env"]);
             if is_env {
-                if let Some(prop) = n.child_by_field_name("property") {
+                if let Some(prop) = n.by_field("property") {
                     let write = crate::state::writes_to(n, anc);
                     push(out, n, ResourceKind::Env, write, text(prop, src), "env", true);
                 }
             }
             return;
         }
-        (Lang::Ruby, "element_reference") => {
-            (n.child_by_field_name("object"), kids(n).into_iter().nth(1))
-        }
+        (Lang::Ruby, "element_reference") => (n.by_field("object"), kids(n).into_iter().nth(1)),
         (Lang::Php, "subscript_expression") => (n.named_child(0), n.named_child(1)),
         _ => return,
     };
@@ -603,7 +603,7 @@ pub fn declared_table(n: Node, src: &[u8], lang: Option<Lang>, name: &str) -> Op
     static MONGOOSE: OnceLock<Regex> = OnceLock::new();
     let mut t = text(n, src);
     // a TS decorator sits on the `export` around the class
-    if let Some(p) = n.parent().filter(|p| p.kind() == "export_statement") {
+    if let Some(p) = n.parent().filter(|p| p.kind_str() == "export_statement") {
         t = text(p, src);
     }
     let t = prefix(&t, 6000);
@@ -662,7 +662,7 @@ mod tests {
             let tree = crate::parse::parse(l, src.as_bytes(), None).ok().unwrap();
             let mut stack = vec![tree.root_node()];
             while let Some(n) = stack.pop() {
-                if n.child_by_field_name("name").is_some_and(|x| text(x, src.as_bytes()) == name) {
+                if n.by_field("name").is_some_and(|x| text(x, src.as_bytes()) == name) {
                     return declared_table(n, src.as_bytes(), lang, name);
                 }
                 stack.extend(kids(n));

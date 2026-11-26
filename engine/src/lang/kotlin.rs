@@ -4,6 +4,7 @@
 //! called as a constructor (`: Base()`) is the superclass; the others are
 //! interfaces unless the target says otherwise.
 
+use crate::parse::Kinds;
 use tree_sitter::Node;
 
 use super::java::dotted_import;
@@ -40,7 +41,8 @@ impl LanguageModule for Kotlin {
         }
         let in_tree = |l: u32| -> bool {
             let at = offset(l);
-            root.descendant_for_byte_range(at, at + 1).is_some_and(|n| n.kind().contains("comment"))
+            root.descendant_for_byte_range(at, at + 1)
+                .is_some_and(|n| n.kind_str().contains("comment"))
         };
         let trimmed = |l: u32| -> &[u8] {
             let line = lines.get(l as usize - 1).copied().unwrap_or(b"");
@@ -74,13 +76,13 @@ impl LanguageModule for Kotlin {
 
     /// `fun KmProperty.toPropertySpec()`: the receiver's type.
     fn receiver_of(&self, node: Node, src: &[u8]) -> Option<String> {
-        if node.kind() != "function_declaration" {
+        if node.kind_str() != "function_declaration" {
             return None;
         }
-        let recv = kids(node).into_iter().find(|c| c.kind() == "receiver_type")?;
+        let recv = kids(node).into_iter().find(|c| c.kind_str() == "receiver_type")?;
         let mut queue: std::collections::VecDeque<Node> = kids(recv).into();
         while let Some(n) = queue.pop_front() {
-            if n.kind() == "type_identifier" {
+            if n.kind_str() == "type_identifier" {
                 return Some(text(n, src));
             }
             queue.extend(kids(n));
@@ -93,34 +95,35 @@ impl LanguageModule for Kotlin {
     fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
         // `class Holder(val parameters: List<String>)`: a constructor
         // parameter written `val` / `var` declares a property of the class
-        if n.kind() == "class_parameter" {
-            let property = kids(n).iter().any(|c| c.kind() == "binding_pattern_kind");
-            let name = kids(n).into_iter().find(|c| c.kind() == "simple_identifier");
+        if n.kind_str() == "class_parameter" {
+            let property = kids(n).iter().any(|c| c.kind_str() == "binding_pattern_kind");
+            let name = kids(n).into_iter().find(|c| c.kind_str() == "simple_identifier");
             return match name {
                 Some(name) if property => vec![(n, name, DefKind::Property)],
                 _ => Vec::new(),
             };
         }
-        if n.kind() != "property_declaration"
-            || !n.parent().is_some_and(|p| p.kind() == "source_file")
+        if n.kind_str() != "property_declaration"
+            || !n.parent().is_some_and(|p| p.kind_str() == "source_file")
         {
             return Vec::new();
         }
-        let val =
-            kids(n).iter().any(|c| c.kind() == "binding_pattern_kind" && text(*c, src) == "val");
+        let val = kids(n)
+            .iter()
+            .any(|c| c.kind_str() == "binding_pattern_kind" && text(*c, src) == "val");
         let kind = if val { DefKind::Constant } else { DefKind::Variable };
         kids(n)
             .into_iter()
-            .filter(|c| c.kind() == "variable_declaration")
-            .filter_map(|v| kids(v).into_iter().find(|c| c.kind() == "simple_identifier"))
+            .filter(|c| c.kind_str() == "variable_declaration")
+            .filter_map(|v| kids(v).into_iter().find(|c| c.kind_str() == "simple_identifier"))
             .map(|name| (n, name, kind))
             .collect()
     }
 
     fn kind_of(&self, node: Node, src: &[u8]) -> DefKind {
-        if node.kind() == "class_declaration" {
+        if node.kind_str() == "class_declaration" {
             for c in all_kids(node) {
-                match c.kind() {
+                match c.kind_str() {
                     "interface" => return DefKind::Interface,
                     "modifiers" if text(c, src).split_whitespace().any(|w| w == "enum") => {
                         return DefKind::Enum
@@ -130,30 +133,31 @@ impl LanguageModule for Kotlin {
             }
             return DefKind::Class;
         }
-        generic::kind_of(node.kind())
+        generic::kind_of(node.kind_str())
     }
 
     fn extra_def<'t>(&self, n: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
-        if n.kind() != "property_declaration"
-            || !n.parent().is_some_and(|p| p.kind() == "class_body")
+        if n.kind_str() != "property_declaration"
+            || !n.parent().is_some_and(|p| p.kind_str() == "class_body")
         {
             return None;
         }
-        let decl = kids(n).into_iter().find(|c| c.kind() == "variable_declaration")?;
-        let name = kids(decl).into_iter().find(|c| c.kind() == "simple_identifier")?;
+        let decl = kids(n).into_iter().find(|c| c.kind_str() == "variable_declaration")?;
+        let name = kids(decl).into_iter().find(|c| c.kind_str() == "simple_identifier")?;
         Some((name, DefKind::Property))
     }
 
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
-        match n.kind() {
+        match n.kind_str() {
             "import_list" => None,
             "import_header" => {
                 let ks = kids(n);
-                let path = ks.iter().find(|c| c.kind() == "identifier").map(|c| text(*c, src))?;
-                let wildcard = ks.iter().any(|c| c.kind() == "wildcard_import");
+                let path =
+                    ks.iter().find(|c| c.kind_str() == "identifier").map(|c| text(*c, src))?;
+                let wildcard = ks.iter().any(|c| c.kind_str() == "wildcard_import");
                 let alias = ks
                     .iter()
-                    .find(|c| c.kind() == "import_alias")
+                    .find(|c| c.kind_str() == "import_alias")
                     .and_then(|a| kids(*a).into_iter().next())
                     .map(|a| text(a, src));
                 Some(vec![dotted_import(n, &path, wildcard, alias)])
@@ -163,19 +167,21 @@ impl LanguageModule for Kotlin {
     }
 
     fn package_of(&self, n: Node, src: &[u8]) -> Option<String> {
-        (n.kind() == "package_header")
-            .then(|| kids(n).into_iter().find(|c| c.kind() == "identifier").map(|c| text(c, src)))
+        (n.kind_str() == "package_header")
+            .then(|| {
+                kids(n).into_iter().find(|c| c.kind_str() == "identifier").map(|c| text(c, src))
+            })
             .flatten()
     }
 
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
         let mut out = Vec::new();
         for c in kids(n) {
-            if c.kind() != "delegation_specifier" {
+            if c.kind_str() != "delegation_specifier" {
                 continue;
             }
             for d in kids(c) {
-                let (kind, t) = match d.kind() {
+                let (kind, t) = match d.kind_str() {
                     "constructor_invocation" => (RefKind::Inherits, kids(d).into_iter().next()),
                     "user_type" => (RefKind::Base, Some(d)),
                     "explicit_delegation" => (RefKind::Base, kids(d).into_iter().next()),

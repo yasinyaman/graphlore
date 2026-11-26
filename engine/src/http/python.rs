@@ -6,6 +6,8 @@
 //! `include_router(…, prefix=…)` / `register_blueprint(…, url_prefix=…)` mounts,
 //! which resolution joins across files.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use tree_sitter::Node;
 
 use std::collections::HashSet;
@@ -30,28 +32,31 @@ const METHODS: &[&str] = &["get", "post", "put", "delete", "patch", "options", "
 
 /// The positional arguments of a call.
 fn positional<'t>(call: Node<'t>) -> Vec<Node<'t>> {
-    let Some(list) = call.child_by_field_name("arguments") else { return Vec::new() };
+    let Some(list) = call.by_field("arguments") else { return Vec::new() };
     kids(list)
         .into_iter()
         .filter(|a| {
-            !matches!(a.kind(), "keyword_argument" | "comment" | "list_splat" | "dictionary_splat")
+            !matches!(
+                a.kind_str(),
+                "keyword_argument" | "comment" | "list_splat" | "dictionary_splat"
+            )
         })
         .collect()
 }
 
 fn keyword<'t>(call: Node<'t>, src: &[u8], name: &str) -> Option<Node<'t>> {
-    let list = call.child_by_field_name("arguments")?;
+    let list = call.by_field("arguments")?;
     kids(list).into_iter().find_map(|a| {
-        (a.kind() == "keyword_argument"
-            && a.child_by_field_name("name").is_some_and(|k| text(k, src) == name))
-        .then(|| a.child_by_field_name("value"))
+        (a.kind_str() == "keyword_argument"
+            && a.by_field("name").is_some_and(|k| text(k, src) == name))
+        .then(|| a.by_field("value"))
         .flatten()
     })
 }
 
 fn literal(n: Node, src: &[u8]) -> Option<String> {
-    let interpolated = kids(n).iter().any(|c| c.kind() == "interpolation");
-    (n.kind() == "string" && !interpolated).then(|| string_value(n, src))
+    let interpolated = kids(n).iter().any(|c| c.kind_str() == "interpolation");
+    (n.kind_str() == "string" && !interpolated).then(|| string_value(n, src))
 }
 
 pub fn read(root: Node, src: &[u8], facts: &FileFacts) -> HttpFacts {
@@ -68,7 +73,7 @@ pub fn read(root: Node, src: &[u8], facts: &FileFacts) -> HttpFacts {
     let mut decorated: Vec<Node> = Vec::new();
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
-        match n.kind() {
+        match n.kind_str() {
             "call" => calls.push(n),
             "decorated_definition" => decorated.push(n),
             _ => {}
@@ -81,22 +86,20 @@ pub fn read(root: Node, src: &[u8], facts: &FileFacts) -> HttpFacts {
     // decorators: @router.get("/x"), @app.route("/x", methods=[...])
     if let Some(fw) = verb_framework {
         for d in decorated {
-            let Some(def) = d.child_by_field_name("definition") else { continue };
-            if def.kind() != "function_definition" {
+            let Some(def) = d.by_field("definition") else { continue };
+            if def.kind_str() != "function_definition" {
                 continue;
             }
             let handler = home(def.start_byte()).map_or(Handler::Inline, Handler::Def);
-            for dec in kids(d).into_iter().filter(|c| c.kind() == "decorator") {
-                let Some(call) = dec.named_child(0).filter(|c| c.kind() == "call") else {
+            for dec in kids(d).into_iter().filter(|c| c.kind_str() == "decorator") {
+                let Some(call) = dec.named_child(0).filter(|c| c.kind_str() == "call") else {
                     continue;
                 };
-                let Some(f) =
-                    call.child_by_field_name("function").filter(|f| f.kind() == "attribute")
+                let Some(f) = call.by_field("function").filter(|f| f.kind_str() == "attribute")
                 else {
                     continue;
                 };
-                let (Some(obj), Some(attr)) =
-                    (f.child_by_field_name("object"), f.child_by_field_name("attribute"))
+                let (Some(obj), Some(attr)) = (f.by_field("object"), f.by_field("attribute"))
                 else {
                     continue;
                 };
@@ -145,12 +148,12 @@ pub fn read(root: Node, src: &[u8], facts: &FileFacts) -> HttpFacts {
         }
     }
     for call in calls {
-        let Some(f) = call.child_by_field_name("function") else { continue };
+        let Some(f) = call.by_field("function") else { continue };
         let fpath = path_of(f, src).unwrap_or_default();
         let last = fpath.last().map(String::as_str).unwrap_or("");
         let pos = positional(call);
         // Django: path("x/", view)
-        if django && f.kind() == "identifier" && matches!(last, "path" | "re_path" | "url") {
+        if django && f.kind_str() == "identifier" && matches!(last, "path" | "re_path" | "url") {
             if let (Some(p), Some(h)) = (pos.first().and_then(|a| literal(*a, src)), pos.get(1)) {
                 let handler = match path_of(*h, src) {
                     Some(hp) if !hp.iter().any(|s| s == "()") => Handler::Path(hp),
@@ -177,9 +180,9 @@ pub fn read(root: Node, src: &[u8], facts: &FileFacts) -> HttpFacts {
             let key = if last == "APIRouter" { "prefix" } else { "url_prefix" };
             let bound = call
                 .parent()
-                .filter(|a| a.kind() == "assignment")
-                .and_then(|a| a.child_by_field_name("left"))
-                .filter(|l| l.kind() == "identifier");
+                .filter(|a| a.kind_str() == "assignment")
+                .and_then(|a| a.by_field("left"))
+                .filter(|l| l.kind_str() == "identifier");
             if let Some(name) = bound {
                 let prefix =
                     keyword(call, src, key).and_then(|v| path_expr(v, src)).unwrap_or_default();
@@ -234,7 +237,7 @@ fn clients(src: &[u8], facts: &FileFacts, calls: &[Node], out: &mut HttpFacts) {
     // objects a client maker makes: `s = requests.Session()`, `with
     // httpx.Client(base_url=…) as c:`, `self.client = TestClient(app)`
     let made = |call: Node| -> bool {
-        let Some(path) = call.child_by_field_name("function").and_then(|f| path_of(f, src)) else {
+        let Some(path) = call.by_field("function").and_then(|f| path_of(f, src)) else {
             return false;
         };
         let last = path.last().map(String::as_str).unwrap_or("");
@@ -249,19 +252,19 @@ fn clients(src: &[u8], facts: &FileFacts, calls: &[Node], out: &mut HttpFacts) {
             continue;
         }
         let Some(parent) = call.parent() else { continue };
-        let target = match parent.kind() {
-            "assignment" => parent.child_by_field_name("left"),
-            "as_pattern" => {
-                parent.child_by_field_name("alias").and_then(|a| a.named_child(0).or(Some(a)))
-            }
+        let target = match parent.kind_str() {
+            "assignment" => parent.by_field("left"),
+            "as_pattern" => parent.by_field("alias").and_then(|a| a.named_child(0).or(Some(a))),
             _ => None,
         };
         let Some(target) = target.and_then(|t| path_of(t, src)) else { continue };
         let Some(name) = target.last().cloned() else { continue };
         objects.insert(name.clone());
-        let top = parent.kind() == "assignment"
+        let top = parent.kind_str() == "assignment"
             && target.len() == 1
-            && parent.parent().is_some_and(|e| e.parent().is_some_and(|m| m.kind() == "module"));
+            && parent
+                .parent()
+                .is_some_and(|e| e.parent().is_some_and(|m| m.kind_str() == "module"));
         if top {
             let base = keyword(call, src, "base_url").and_then(|v| path_expr(v, src));
             if let Some(base) = base {
@@ -271,10 +274,10 @@ fn clients(src: &[u8], facts: &FileFacts, calls: &[Node], out: &mut HttpFacts) {
     }
     let defs = &facts.defs;
     for &call in calls {
-        let Some(f) = call.child_by_field_name("function") else { continue };
+        let Some(f) = call.by_field("function") else { continue };
         let pos = positional(call);
         // `get(url)` imported from requests
-        if f.kind() == "identifier" {
+        if f.kind_str() == "identifier" {
             let name = text(f, src);
             if !names.contains(&format!("={name}")) {
                 continue;
@@ -295,12 +298,10 @@ fn clients(src: &[u8], facts: &FileFacts, calls: &[Node], out: &mut HttpFacts) {
             }
             continue;
         }
-        if f.kind() != "attribute" {
+        if f.kind_str() != "attribute" {
             continue;
         }
-        let (Some(obj), Some(attr)) =
-            (f.child_by_field_name("object"), f.child_by_field_name("attribute"))
-        else {
+        let (Some(obj), Some(attr)) = (f.by_field("object"), f.by_field("attribute")) else {
             continue;
         };
         let verb = text(attr, src);

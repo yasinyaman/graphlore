@@ -7,6 +7,7 @@
 //! of [`Lang`], a row in [`SPECS`], and a module here when the defaults are not
 //! enough.
 
+use crate::parse::Kinds;
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Language, Node};
 
@@ -288,7 +289,7 @@ pub trait LanguageModule: Send + Sync {
 
     /// What a definition is.
     fn kind_of(&self, node: Node, _src: &[u8]) -> DefKind {
-        generic::kind_of(node.kind())
+        generic::kind_of(node.kind_str())
     }
 
     /// Whether a definition becomes a graph node.
@@ -365,7 +366,7 @@ pub trait LanguageModule: Send + Sync {
     /// a type reference of the enclosing type.
     fn is_field(&self, node: Node) -> bool {
         matches!(
-            node.kind(),
+            node.kind_str(),
             "field_declaration"
                 | "property_declaration"
                 | "public_field_definition"

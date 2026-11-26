@@ -13,6 +13,8 @@
 //! it assigns without `global`) is its own and is left out here, where the
 //! file's declarations are known.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use std::collections::{HashMap, HashSet};
 
 use tree_sitter::Node;
@@ -255,7 +257,7 @@ pub fn holds_container(node: Node, src: &[u8]) -> bool {
     });
     let mut parts = Vec::new();
     for field in ["type", "value", "right", "default_value", "initializer"] {
-        if let Some(c) = node.child_by_field_name(field) {
+        if let Some(c) = node.by_field(field) {
             parts.push(c);
         }
     }
@@ -310,7 +312,7 @@ impl State {
     }
 
     pub fn visit<'t>(&mut self, n: Node<'t>, src: &[u8], anc: &[Node<'t>]) {
-        let k = n.kind();
+        let k = n.kind_str();
         if matches!(k, "global_statement" | "nonlocal_statement") {
             for c in kids(n) {
                 self.outer.push((n.start_byte(), text(c, src)));
@@ -326,7 +328,7 @@ impl State {
             // (JS `var` is the function's, whatever block it is written in)
             let hoisted = matches!(lang, Some(Lang::JavaScript | Lang::TypeScript | Lang::Tsx))
                 && (k == "variable_declaration"
-                    || up(anc, 0).is_some_and(|p| p.kind() == "variable_declaration"));
+                    || up(anc, 0).is_some_and(|p| p.kind_str() == "variable_declaration"));
             // (the body of a type is no block: what it declares are members)
             let of_type = |kind: &str| {
                 [
@@ -351,8 +353,8 @@ impl State {
             };
             let scope = std::iter::once(&n)
                 .chain(anc.iter().rev())
-                .find(|a| crate::refs::is_scope(a.kind()) || of_type(a.kind()))
-                .filter(|a| scoped && !hoisted && !of_type(a.kind()));
+                .find(|a| crate::refs::is_scope(a.kind_str()) || of_type(a.kind_str()))
+                .filter(|a| scoped && !hoisted && !of_type(a.kind_str()));
             if let Some(scope) = scope {
                 let (lo, hi) = (scope.start_byte(), scope.end_byte());
                 let names: Vec<String> =
@@ -365,7 +367,7 @@ impl State {
         if k == "infix_expression" && scala_compound(n, src) {
             // Scala `hits += 1`
             let mut out = Vec::new();
-            if let Some(t) = n.child_by_field_name("left") {
+            if let Some(t) = n.by_field("left") {
                 targets(t, src, "augmented", &mut out, 0);
             }
             for (node, path, ctx) in out {
@@ -373,17 +375,17 @@ impl State {
                 self.push(node, RefKind::Read, path, "read");
             }
         } else if k == "assignment_expression"
-            && up(anc, 0).is_some_and(|p| p.kind() == "arguments")
+            && up(anc, 0).is_some_and(|p| p.kind_str() == "arguments")
             && crate::parse::current() == Some(crate::lang::Lang::Scala)
         {
             // Scala `Local(a = 1)`: an argument given by name writes nothing
         } else if ASSIGNMENTS.contains(&k) || go_assigning(n, k, src) {
             let target = n
-                .child_by_field_name("left")
-                .or_else(|| n.child_by_field_name("target"))
+                .by_field("left")
+                .or_else(|| n.by_field("target"))
                 .or_else(|| kids(n).into_iter().next());
-            let has_value = n.child_by_field_name("right").is_some()
-                || n.child_by_field_name("result").is_some()
+            let has_value = n.by_field("right").is_some()
+                || n.by_field("result").is_some()
                 || n.named_child_count() >= 2;
             if let (Some(t), true) = (target, has_value) {
                 let augmented = is_augmented(n, k, src);
@@ -404,7 +406,7 @@ impl State {
                         && !augmented
                         && path.len() == 1
                         && ctx == "assign"
-                        && node.kind() == "identifier"
+                        && node.kind_str() == "identifier"
                     {
                         self.declared.push((node.start_byte(), path[0].clone()));
                     }
@@ -419,8 +421,8 @@ impl State {
             if t.starts_with("++") || t.starts_with("--") || t.ends_with("++") || t.ends_with("--")
             {
                 let target = n
-                    .child_by_field_name("argument")
-                    .or_else(|| n.child_by_field_name("operand"))
+                    .by_field("argument")
+                    .or_else(|| n.by_field("operand"))
                     .or_else(|| kids(n).into_iter().next());
                 let mut out = Vec::new();
                 if let Some(t) = target {
@@ -485,7 +487,7 @@ impl State {
         // JS `for ([a, b] of rows)` with no `let` / `const` / `var` assigns
         // names declared elsewhere
         if k == "for_in_statement"
-            && n.child_by_field_name("kind").is_none()
+            && n.by_field("kind").is_none()
             && matches!(
                 crate::parse::current(),
                 Some(
@@ -509,11 +511,11 @@ impl State {
             for side in sides {
                 let mut stack = vec![(side, 0)];
                 while let Some((c, depth)) = stack.pop() {
-                    if BARE_KINDS.contains(&c.kind())
-                        || c.kind() == "shorthand_property_identifier_pattern"
+                    if BARE_KINDS.contains(&c.kind_str())
+                        || c.kind_str() == "shorthand_property_identifier_pattern"
                     {
                         self.declared.push((n.start_byte(), text(c, src)));
-                    } else if depth < 4 && !MEMBER_KINDS.contains(&c.kind()) {
+                    } else if depth < 4 && !MEMBER_KINDS.contains(&c.kind_str()) {
                         stack.extend(kids(c).into_iter().map(|x| (x, depth + 1)));
                     }
                 }
@@ -525,20 +527,20 @@ impl State {
     fn bare<'t>(&mut self, n: Node<'t>, src: &[u8], anc: &[Node<'t>]) {
         // Scala `Local(a = 1)`: the name of an argument, no variable
         if crate::parse::current() == Some(crate::lang::Lang::Scala)
-            && up(anc, 1).is_some_and(|g| g.kind() == "arguments")
+            && up(anc, 1).is_some_and(|g| g.kind_str() == "arguments")
             && up(anc, 0).is_some_and(|p| {
-                p.kind() == "assignment_expression"
-                    && p.child_by_field_name("left").is_some_and(|l| l.id() == n.id())
+                p.kind_str() == "assignment_expression"
+                    && p.by_field("left").is_some_and(|l| l.id() == n.id())
             })
         {
             return;
         }
         let Some(p) = up(anc, 0) else { return };
-        let pk = p.kind();
+        let pk = p.kind_str();
         // Kotlin `Command(name = "x")`: the name of an argument, no variable
         if pk == "value_argument"
             && p.child(0).is_some_and(|c| c.id() == n.id())
-            && p.child(1).is_some_and(|c| c.kind() == "=")
+            && p.child(1).is_some_and(|c| c.kind_str() == "=")
         {
             return;
         }
@@ -546,10 +548,10 @@ impl State {
         // gives the names and values as children of the initializer, in turn)
         if pk == "with_initializer" && crate::parse::current() == Some(crate::lang::Lang::CSharp) {
             let named: Vec<Node> =
-                kids(p).into_iter().filter(|c| !c.kind().contains("comment")).collect();
+                kids(p).into_iter().filter(|c| !c.kind_str().contains("comment")).collect();
             if named.iter().position(|c| c.id() == n.id()).is_some_and(|i| i % 2 == 0) {
                 let copied = up(anc, 1)
-                    .filter(|w| w.kind() == "with_expression")
+                    .filter(|w| w.kind_str() == "with_expression")
                     .and_then(|w| kids(w).into_iter().next())
                     .and_then(|v| path_of(v, src))
                     .filter(|v| !v.iter().any(|s| s == crate::refs::UNKNOWN));
@@ -563,7 +565,7 @@ impl State {
         // (a parameter's name; its default value is read like any other)
         let default_value = ["value", "default_value"]
             .iter()
-            .any(|f| p.child_by_field_name(f).is_some_and(|v| v.id() == n.id()));
+            .any(|f| p.by_field(f).is_some_and(|v| v.id() == n.id()));
         if pk.contains("parameter") && !default_value {
             self.declared.push((n.start_byte(), text(n, src)));
             return;
@@ -574,11 +576,11 @@ impl State {
         // Key: "k"}` reads the constant Key)
         if pk == "literal_element"
             && up(anc, 1)
-                .is_some_and(|k| k.kind() == "keyed_element" && first_named(k) == Some(p.id()))
+                .is_some_and(|k| k.kind_str() == "keyed_element" && first_named(k) == Some(p.id()))
             && !up(anc, 3).is_some_and(|lit| {
-                lit.kind() == "composite_literal"
-                    && lit.child_by_field_name("type").is_some_and(|t| {
-                        matches!(t.kind(), "map_type" | "array_type" | "slice_type")
+                lit.kind_str() == "composite_literal"
+                    && lit.by_field("type").is_some_and(|t| {
+                        matches!(t.kind_str(), "map_type" | "array_type" | "slice_type")
                     })
             })
         {
@@ -590,7 +592,7 @@ impl State {
             .iter()
             .rev()
             .take(8)
-            .any(|a| matches!(a.kind(), "attribute_item" | "inner_attribute_item"))
+            .any(|a| matches!(a.kind_str(), "attribute_item" | "inner_attribute_item"))
         {
             return;
         }
@@ -601,7 +603,8 @@ impl State {
             || pk.contains("superclass")
             || pk.contains("delegation_specifier")
             || matches!(pk, "base_list" | "base_class_clause" | "super_interfaces")
-            || (pk == "argument_list" && up(anc, 1).is_some_and(|c| c.kind() == "class_definition"))
+            || (pk == "argument_list"
+                && up(anc, 1).is_some_and(|c| c.kind_str() == "class_definition"))
         {
             return;
         }
@@ -615,7 +618,7 @@ impl State {
         let typed_default = is_typed_default(p, n);
         // (Go `[Size]int`: the length is a constant read)
         let array_length =
-            pk == "array_type" && p.child_by_field_name("length").is_some_and(|l| l.id() == n.id());
+            pk == "array_type" && p.by_field("length").is_some_and(|l| l.id() == n.id());
         if pk.contains("import")
             || (pk.contains("type") && !typed_default && !array_length)
             || pk.contains("label")
@@ -643,7 +646,7 @@ impl State {
             // takes a value, which is read)
             "type",
         ] {
-            if p.child_by_field_name(field).is_some_and(|x| x.id() == n.id()) {
+            if p.by_field(field).is_some_and(|x| x.id() == n.id()) {
                 return;
             }
         }
@@ -658,7 +661,9 @@ impl State {
         // (`assert!(f(Mode::Count))`, `assert_eq!(c.n, 1)`), never a bare
         // name of its own; `macro_state_uses` reads the arguments as the
         // expression they are
-        if pk == "token_tree" && n.prev_sibling().is_some_and(|s| matches!(s.kind(), "::" | ".")) {
+        if pk == "token_tree"
+            && n.prev_sibling().is_some_and(|s| matches!(s.kind_str(), "::" | "."))
+        {
             return;
         }
         if is_write_target(n, anc) {
@@ -684,7 +689,9 @@ impl State {
         if is_callee(p, n) || is_write_target(n, anc) {
             return;
         }
-        if p.kind().contains("import") || (p.kind().contains("type") && !is_typed_default(p, n)) {
+        if p.kind_str().contains("import")
+            || (p.kind_str().contains("type") && !is_typed_default(p, n))
+        {
             return;
         }
         if is_object(p, n) {
@@ -836,10 +843,10 @@ fn bare_name(n: Node, src: &[u8]) -> String {
 
 /// `path_of`, and PHP `self::$total` (whose `$total` `path_of` cannot name).
 fn member_path(n: Node, src: &[u8]) -> Option<Vec<String>> {
-    if n.kind() == "scoped_property_access_expression" {
-        let mut p = path_of(n.child_by_field_name("scope")?, src)?;
-        let name = n.child_by_field_name("name")?;
-        let inner = kids(name).into_iter().find(|c| c.kind() == "name").unwrap_or(name);
+    if n.kind_str() == "scoped_property_access_expression" {
+        let mut p = path_of(n.by_field("scope")?, src)?;
+        let name = n.by_field("name")?;
+        let inner = kids(name).into_iter().find(|c| c.kind_str() == "name").unwrap_or(name);
         p.push(text(inner, src).trim_start_matches('$').to_string());
         return Some(p);
     }
@@ -848,7 +855,7 @@ fn member_path(n: Node, src: &[u8]) -> Option<Vec<String>> {
 
 /// Scala writes `x += 1` as an infix expression.
 fn scala_compound(n: Node, src: &[u8]) -> bool {
-    n.child_by_field_name("operator").is_some_and(|o| {
+    n.by_field("operator").is_some_and(|o| {
         let t = text(o, src);
         t.len() >= 2 && t.ends_with('=') && !matches!(t.as_str(), "==" | "!=" | "<=" | ">=" | "===")
     })
@@ -864,7 +871,7 @@ fn is_augmented(n: Node, k: &str, src: &[u8]) -> bool {
         return true;
     }
     let mut cursor = n.walk();
-    let op = n.child_by_field_name("operator").or_else(|| {
+    let op = n.by_field("operator").or_else(|| {
         n.children(&mut cursor).find(|c| !c.is_named() && text(*c, src).ends_with('='))
     });
     op.is_some_and(|o| {
@@ -887,7 +894,7 @@ fn targets<'t>(
     if depth > MAX_CLIMB {
         return;
     }
-    let k = t.kind();
+    let k = t.kind_str();
     if BARE_KINDS.contains(&k) {
         out.push((t, vec![bare_name(t, src)], ctx));
     } else if MEMBER_KINDS.contains(&k) {
@@ -897,7 +904,7 @@ fn targets<'t>(
     } else if is_item(k) {
         let base = ["value", "object", "operand", "argument", "expression", "array"]
             .iter()
-            .find_map(|f| t.child_by_field_name(f))
+            .find_map(|f| t.by_field(f))
             .or_else(|| kids(t).into_iter().next());
         if let Some(b) = base {
             targets(b, src, if ctx == "delete" { ctx } else { "item" }, out, depth + 1);
@@ -907,7 +914,7 @@ fn targets<'t>(
         let ks = kids(t);
         match ks.as_slice() {
             [one] => targets(*one, src, ctx, out, depth + 1),
-            [base, .., last] if last.kind() == "navigation_suffix" => {
+            [base, .., last] if last.kind_str() == "navigation_suffix" => {
                 if let (Some(mut p), Some(name)) =
                     (path_of(*base, src), kids(*last).into_iter().last())
                 {
@@ -950,21 +957,21 @@ fn csharp_initialized(anc: &[Node], src: &[u8]) -> Option<Vec<String>> {
     let mut names: Vec<String> = Vec::new();
     let mut i = 0;
     loop {
-        if up(anc, i)?.kind() != "initializer_expression" {
+        if up(anc, i)?.kind_str() != "initializer_expression" {
             return None;
         }
         let holder = up(anc, i + 1)?;
-        match holder.kind() {
+        match holder.kind_str() {
             "object_creation_expression" => {
                 // (the type's member: a state path holds no `()`, and the
                 // type answers for the value it makes)
-                let mut p = path_of(holder.child_by_field_name("type")?, src)?;
+                let mut p = path_of(holder.by_field("type")?, src)?;
                 names.reverse();
                 p.extend(names);
                 return Some(p);
             }
             "assignment_expression" => {
-                names.push(text(holder.child_by_field_name("left")?, src));
+                names.push(text(holder.by_field("left")?, src));
                 i += 2;
             }
             _ => return None,
@@ -977,7 +984,7 @@ fn csharp_initialized(anc: &[Node], src: &[u8]) -> Option<Vec<String>> {
 fn go_assigning(n: Node, k: &str, src: &[u8]) -> bool {
     matches!(k, "range_clause" | "receive_statement")
         && crate::parse::current() == Some(crate::lang::Lang::Go)
-        && n.child_by_field_name("left").is_some()
+        && n.by_field("left").is_some()
         && !text(n, src).contains(":=")
 }
 
@@ -991,15 +998,13 @@ fn is_write_target<'t>(n: Node<'t>, anc: &[Node<'t>]) -> bool {
     let mut cur = n;
     for i in 0..MAX_CLIMB {
         let Some(p) = up(anc, i) else { return false };
-        let pk = p.kind();
+        let pk = p.kind_str();
         // (Go's `range` / receive targets, `=` or `:=`: written, never read)
         let go_target = matches!(pk, "range_clause" | "receive_statement")
             && crate::parse::current() == Some(crate::lang::Lang::Go);
         if ASSIGNMENTS.contains(&pk) || go_target {
-            let target = p
-                .child_by_field_name("left")
-                .or_else(|| p.child_by_field_name("target"))
-                .or_else(|| p.named_child(0));
+            let target =
+                p.by_field("left").or_else(|| p.by_field("target")).or_else(|| p.named_child(0));
             return target.is_some_and(|t| t.id() == cur.id());
         }
         if UPDATES.contains(&pk) || pk == "delete_statement" {
@@ -1019,18 +1024,18 @@ fn is_write_target<'t>(n: Node<'t>, anc: &[Node<'t>]) -> bool {
 /// `(object, member name)` of a member access or of a call written with its
 /// receiver as a field (Java `a.m()`, Ruby `a.m`).
 fn member_parts<'t>(p: Node<'t>, src: &[u8]) -> Option<(Node<'t>, String)> {
-    let k = p.kind();
+    let k = p.kind_str();
     if !(MEMBER_KINDS.contains(&k) || is_call_kind(k)) {
         return None;
     }
     for (obj, member) in MEMBER_FIELDS {
-        if let (Some(o), Some(m)) = (p.child_by_field_name(obj), p.child_by_field_name(member)) {
+        if let (Some(o), Some(m)) = (p.by_field(obj), p.by_field(member)) {
             return Some((o, text(m, src)));
         }
     }
     if k == "navigation_expression" {
         let ks = kids(p);
-        let suffix = ks.iter().find(|c| c.kind() == "navigation_suffix")?;
+        let suffix = ks.iter().find(|c| c.kind_str() == "navigation_suffix")?;
         let name = kids(*suffix).into_iter().last()?;
         return Some((*ks.first()?, text(name, src)));
     }
@@ -1044,21 +1049,20 @@ fn member_parts<'t>(p: Node<'t>, src: &[u8]) -> Option<(Node<'t>, String)> {
 }
 
 fn is_object(p: Node, n: Node) -> bool {
-    let k = p.kind();
+    let k = p.kind_str();
     if !(MEMBER_KINDS.contains(&k) || is_call_kind(k)) {
         return false;
     }
     MEMBER_FIELDS.iter().any(|(obj, member)| {
-        p.child_by_field_name(member).is_some()
-            && p.child_by_field_name(obj).is_some_and(|o| o.id() == n.id())
+        p.by_field(member).is_some() && p.by_field(obj).is_some_and(|o| o.id() == n.id())
     }) || (MEMBER_KINDS.contains(&k) && first_named(p) == Some(n.id()))
 }
 
 /// Whether `n` is what call `p` calls.
 fn is_callee(p: Node, n: Node) -> bool {
-    is_call_kind(p.kind())
-        && (p.child_by_field_name("function").is_some_and(|f| f.id() == n.id())
-            || (p.child_by_field_name("function").is_none() && first_named(p) == Some(n.id())))
+    is_call_kind(p.kind_str())
+        && (p.by_field("function").is_some_and(|f| f.id() == n.id())
+            || (p.by_field("function").is_none() && first_named(p) == Some(n.id())))
 }
 
 /// Whether a method that changes its receiver is called on `n`, directly or
@@ -1072,7 +1076,7 @@ fn calls_mutator<'t>(n: Node<'t>, src: &[u8], anc: &[Node<'t>]) -> bool {
             return false;
         }
         let Some((_, name)) = member_parts(p, src) else { return false };
-        if is_call_kind(p.kind()) {
+        if is_call_kind(p.kind_str()) {
             // the call node itself carries receiver and method name
             if MUTATORS.contains(&name.as_str()) {
                 return true;
@@ -1101,6 +1105,6 @@ fn calls_mutator<'t>(n: Node<'t>, src: &[u8], anc: &[Node<'t>]) -> bool {
 /// `n` is the default value of a typed parameter (Python
 /// `typed_default_parameter`'s `value`): a value read, not a type.
 fn is_typed_default(p: Node, n: Node) -> bool {
-    p.kind() == "typed_default_parameter"
-        && p.child_by_field_name("value").is_some_and(|v| v.id() == n.id())
+    p.kind_str() == "typed_default_parameter"
+        && p.by_field("value").is_some_and(|v| v.id() == n.id())
 }

@@ -11,6 +11,8 @@
 //! / `NewRequestWithContext` / `httptest.NewRequest` (the method a literal or
 //! `http.MethodPost`), a client's `Get(url)`, resty's `R().Get(url)`.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use std::collections::{HashMap, HashSet};
 
 use tree_sitter::Node;
@@ -38,7 +40,7 @@ const ROUTER_TYPES: &[&str] =
     &["RouterGroup", "Engine", "IRouter", "IRoutes", "Echo", "Group", "Router", "Mux", "ServeMux"];
 
 fn is_string(n: Node) -> bool {
-    matches!(n.kind(), "interpreted_string_literal" | "raw_string_literal")
+    matches!(n.kind_str(), "interpreted_string_literal" | "raw_string_literal")
 }
 
 #[derive(Clone, Default)]
@@ -63,16 +65,16 @@ struct Reader<'a> {
 
 /// `(method name, receiver, arguments)` of `recv.Name(args)`.
 fn selector_call<'t>(call: Node<'t>, src: &[u8]) -> Option<(String, Node<'t>, Vec<Node<'t>>)> {
-    if call.kind() != "call_expression" {
+    if call.kind_str() != "call_expression" {
         return None;
     }
-    let f = call.child_by_field_name("function")?;
-    if f.kind() != "selector_expression" {
+    let f = call.by_field("function")?;
+    if f.kind_str() != "selector_expression" {
         return None;
     }
-    let name = text(f.child_by_field_name("field")?, src);
-    let args = call.child_by_field_name("arguments").map(kids).unwrap_or_default();
-    Some((name, f.child_by_field_name("operand")?, args))
+    let name = text(f.by_field("field")?, src);
+    let args = call.by_field("arguments").map(kids).unwrap_or_default();
+    Some((name, f.by_field("operand")?, args))
 }
 
 impl Reader<'_> {
@@ -91,7 +93,7 @@ impl Reader<'_> {
             let lit = args.first().filter(|a| is_string(**a)).map(|a| string_value(*a, self.src));
             match m.as_str() {
                 "With" | "Use" | "Subrouter" | "Methods" => {}
-                "Group" | "PathPrefix" if !args.iter().any(|a| a.kind() == "func_literal") => {
+                "Group" | "PathPrefix" if !args.iter().any(|a| a.kind_str() == "func_literal") => {
                     chained = join_path(&[lit.as_deref().unwrap_or(""), &chained]);
                 }
                 _ => break,
@@ -122,10 +124,10 @@ impl Reader<'_> {
 
     fn handler(&self, args: &[Node]) -> Handler {
         match args.last() {
-            Some(l) if matches!(l.kind(), "identifier" | "selector_expression") => {
+            Some(l) if matches!(l.kind_str(), "identifier" | "selector_expression") => {
                 path_of(*l, self.src).map_or(Handler::Inline, Handler::Path)
             }
-            Some(l) if l.kind() == "func_literal" => {
+            Some(l) if l.kind_str() == "func_literal" => {
                 single_call(*l, self.src).map_or(Handler::Inline, Handler::Path)
             }
             _ => Handler::Inline,
@@ -150,7 +152,7 @@ impl Reader<'_> {
         let src = self.src;
         let (names, values) = (kids(names), kids(values));
         for (n, v) in names.iter().zip(values.iter()) {
-            if n.kind() != "identifier" {
+            if n.kind_str() != "identifier" {
                 continue;
             }
             let name = text(*n, src);
@@ -196,12 +198,12 @@ impl Reader<'_> {
 
     fn call(&mut self, call: Node, ctx: &Ctx) -> bool {
         let src = self.src;
-        let Some(f) = call.child_by_field_name("function") else { return false };
-        let args = call.child_by_field_name("arguments").map(kids).unwrap_or_default();
+        let Some(f) = call.by_field("function") else { return false };
+        let args = call.by_field("arguments").map(kids).unwrap_or_default();
         // a router handed to a function: addUserRoutes(v1)
-        if matches!(f.kind(), "identifier" | "selector_expression") {
+        if matches!(f.kind_str(), "identifier" | "selector_expression") {
             for (i, a) in args.iter().enumerate() {
-                if a.kind() != "identifier" {
+                if a.kind_str() != "identifier" {
                     continue;
                 }
                 let Some((parent, _, known)) = self.router(*a, ctx) else { continue };
@@ -270,7 +272,7 @@ impl Reader<'_> {
         if !matches!(name.as_str(), "Route" | "Group" | "With") {
             return false;
         }
-        let Some(lam) = args.iter().find(|a| a.kind() == "func_literal") else { return false };
+        let Some(lam) = args.iter().find(|a| a.kind_str() == "func_literal") else { return false };
         let sub = if name == "Route" {
             match args.first().filter(|a| is_string(**a)) {
                 Some(a) => string_value(*a, src),
@@ -281,9 +283,9 @@ impl Reader<'_> {
         };
         let Some((outer, prefix, _)) = self.router(recv, ctx) else { return false };
         let param = lam
-            .child_by_field_name("parameters")
-            .and_then(|ps| kids(ps).into_iter().find(|p| p.kind() == "parameter_declaration"))
-            .and_then(|p| p.child_by_field_name("name"))
+            .by_field("parameters")
+            .and_then(|ps| kids(ps).into_iter().find(|p| p.kind_str() == "parameter_declaration"))
+            .and_then(|p| p.by_field("name"))
             .map(|n| text(n, src))
             .unwrap_or_default();
         let mut inner = ctx.clone();
@@ -295,13 +297,13 @@ impl Reader<'_> {
     fn function_ctx(&self, f: Node) -> Ctx {
         let src = self.src;
         let mut ctx = Ctx::default();
-        let Some(ps) = f.child_by_field_name("parameters") else { return ctx };
+        let Some(ps) = f.by_field("parameters") else { return ctx };
         let mut i = 0;
-        for p in kids(ps).into_iter().filter(|p| p.kind() == "parameter_declaration") {
-            let ty = p.child_by_field_name("type").map(|t| text(t, src)).unwrap_or_default();
+        for p in kids(ps).into_iter().filter(|p| p.kind_str() == "parameter_declaration") {
+            let ty = p.by_field("type").map(|t| text(t, src)).unwrap_or_default();
             let last = ty.rsplit(['.', '*']).next().unwrap_or("");
             let names: Vec<Node> =
-                kids(p).into_iter().filter(|c| c.kind() == "identifier").collect();
+                kids(p).into_iter().filter(|c| c.kind_str() == "identifier").collect();
             for n in &names {
                 if ROUTER_TYPES.contains(&last) {
                     ctx.params.insert(text(*n, src), i);
@@ -317,26 +319,24 @@ impl Reader<'_> {
 
     fn walk(&mut self, n: Node, ctx: &mut Ctx) {
         for c in kids(n) {
-            match c.kind() {
+            match c.kind_str() {
                 "function_declaration" | "method_declaration" => {
                     let mut inner = self.function_ctx(c);
                     self.walk(c, &mut inner);
                     continue;
                 }
                 "short_var_declaration" | "assignment_statement" => {
-                    if let (Some(l), Some(r)) =
-                        (c.child_by_field_name("left"), c.child_by_field_name("right"))
-                    {
+                    if let (Some(l), Some(r)) = (c.by_field("left"), c.by_field("right")) {
                         self.binding(l, r, ctx);
                     }
                 }
                 "var_spec" => {
-                    let names = c.child_by_field_name("name").map(|_| c);
-                    let value = c.child_by_field_name("value");
+                    let names = c.by_field("name").map(|_| c);
+                    let value = c.by_field("value");
                     if let (Some(_), Some(v)) = (names, value) {
                         // `var x = …`: the identifiers before the values
                         let ids: Vec<Node> =
-                            kids(c).into_iter().filter(|k| k.kind() == "identifier").collect();
+                            kids(c).into_iter().filter(|k| k.kind_str() == "identifier").collect();
                         if let (Some(id), Some(first)) = (ids.first(), kids(v).first()) {
                             if let Some((m, _, _)) = selector_call(*first, self.src) {
                                 if MAKERS.contains(&m.as_str()) {
@@ -390,7 +390,7 @@ impl Reader<'_> {
                 let client = recv_text == "http"
                     || recv_text.ends_with("Client")
                     || recv_text.ends_with("client")
-                    || (recv.kind() == "call_expression" && recv_text.ends_with(".R()"));
+                    || (recv.kind_str() == "call_expression" && recv_text.ends_with(".R()"));
                 if !client {
                     return;
                 }
@@ -420,11 +420,11 @@ pub fn read(root: Node, src: &[u8], facts: &FileFacts) -> HttpFacts {
         .map_or("net-http", |(_, l)| l);
     // package-level routers, known in every function of the file
     let mut top = HashSet::new();
-    for decl in kids(root).into_iter().filter(|d| d.kind() == "var_declaration") {
-        for spec in kids(decl).into_iter().filter(|c| c.kind() == "var_spec") {
+    for decl in kids(root).into_iter().filter(|d| d.kind_str() == "var_declaration") {
+        for spec in kids(decl).into_iter().filter(|c| c.kind_str() == "var_spec") {
             let ids: Vec<Node> =
-                kids(spec).into_iter().filter(|k| k.kind() == "identifier").collect();
-            let first = spec.child_by_field_name("value").and_then(|v| kids(v).first().copied());
+                kids(spec).into_iter().filter(|k| k.kind_str() == "identifier").collect();
+            let first = spec.by_field("value").and_then(|v| kids(v).first().copied());
             if let (Some(id), Some(first)) = (ids.first(), first) {
                 if selector_call(first, src).is_some_and(|(m, _, _)| MAKERS.contains(&m.as_str())) {
                     top.insert(text(*id, src));

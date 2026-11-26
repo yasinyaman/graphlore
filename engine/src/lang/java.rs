@@ -3,6 +3,8 @@
 //! Imports name a type (`import a.b.C` is `C` from package `a.b`), a package
 //! (`a.b.*`) or a static member (`import static a.b.C.m`).
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use tree_sitter::Node;
 
 use super::{paths_in, LanguageModule};
@@ -30,20 +32,20 @@ impl LanguageModule for Java {
     fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
         // (a field an interface declares is a constant: implicitly `public
         // static final`, JLS 9.3)
-        if n.kind() == "constant_declaration" {
+        if n.kind_str() == "constant_declaration" {
             let mut cursor = n.walk();
             return n
                 .children_by_field_name("declarator", &mut cursor)
-                .filter_map(|d| d.child_by_field_name("name"))
+                .filter_map(|d| d.by_field("name"))
                 .map(|name| (n, name, DefKind::Constant))
                 .collect();
         }
-        if n.kind() != "field_declaration" {
+        if n.kind_str() != "field_declaration" {
             return Vec::new();
         }
         let mods = kids(n)
             .into_iter()
-            .find(|c| c.kind() == "modifiers")
+            .find(|c| c.kind_str() == "modifiers")
             .map(|m| text(m, src))
             .unwrap_or_default();
         let words: Vec<&str> = mods.split_whitespace().collect();
@@ -56,54 +58,54 @@ impl LanguageModule for Java {
         };
         let mut cursor = n.walk();
         n.children_by_field_name("declarator", &mut cursor)
-            .filter_map(|d| d.child_by_field_name("name"))
+            .filter_map(|d| d.by_field("name"))
             .map(|name| (n, name, kind))
             .collect()
     }
 
     fn kind_of(&self, node: Node, _src: &[u8]) -> DefKind {
-        match node.kind() {
+        match node.kind_str() {
             "annotation_type_declaration" => DefKind::Interface,
             k => generic::kind_of(k),
         }
     }
 
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
-        if n.kind() != "import_declaration" {
+        if n.kind_str() != "import_declaration" {
             return None;
         }
         let ks = kids(n);
         let path = ks
             .iter()
-            .find(|c| matches!(c.kind(), "scoped_identifier" | "identifier"))
+            .find(|c| matches!(c.kind_str(), "scoped_identifier" | "identifier"))
             .map(|c| text(*c, src))?;
-        let wildcard = ks.iter().any(|c| c.kind() == "asterisk");
+        let wildcard = ks.iter().any(|c| c.kind_str() == "asterisk");
         let mut f = dotted_import(n, &path, wildcard, None);
-        f.is_static = all_kids(n).iter().any(|c| c.kind() == "static");
+        f.is_static = all_kids(n).iter().any(|c| c.kind_str() == "static");
         Some(vec![f])
     }
 
     fn package_of(&self, n: Node, src: &[u8]) -> Option<String> {
-        if n.kind() != "package_declaration" {
+        if n.kind_str() != "package_declaration" {
             return None;
         }
         kids(n)
             .into_iter()
-            .find(|c| matches!(c.kind(), "scoped_identifier" | "identifier"))
+            .find(|c| matches!(c.kind_str(), "scoped_identifier" | "identifier"))
             .map(|c| text(c, src))
     }
 
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
         let mut out = Vec::new();
         for c in kids(n) {
-            let (kind, list) = match c.kind() {
+            let (kind, list) = match c.kind_str() {
                 "superclass" => (RefKind::Inherits, c),
                 "super_interfaces" => (RefKind::Implements, c),
                 "extends_interfaces" => (RefKind::Inherits, c),
                 _ => continue,
             };
             for item in kids(list) {
-                let items = if item.kind() == "type_list" {
+                let items = if item.kind_str() == "type_list" {
                     paths_in(item, src)
                 } else {
                     crate::refs::path_of(item, src).into_iter().collect()

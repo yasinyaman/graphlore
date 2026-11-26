@@ -19,6 +19,8 @@ pub mod python;
 pub mod ruby;
 pub mod rust;
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
 
@@ -209,21 +211,22 @@ fn collect(n: Node, src: &[u8], out: &mut Vec<Part>, depth: usize) -> Option<()>
     if depth > 6 {
         return None;
     }
-    let k = n.kind();
+    let k = n.kind_str();
     if k == "binary_expression" || k == "binary_operator" {
-        let op = n.child_by_field_name("operator").map(|o| text(o, src)).unwrap_or_default();
+        let op = n.by_field("operator").map(|o| text(o, src)).unwrap_or_default();
         if op != "+" {
             return None;
         }
-        collect(n.child_by_field_name("left")?, src, out, depth + 1)?;
-        return collect(n.child_by_field_name("right")?, src, out, depth + 1);
+        collect(n.by_field("left")?, src, out, depth + 1)?;
+        return collect(n.by_field("right")?, src, out, depth + 1);
     }
     if k == "parenthesized_expression" {
         return collect(n.named_child(0)?, src, out, depth + 1);
     }
     if k.contains("string") || k == "template_string" {
         let pieces = kids(n);
-        let interpolated = pieces.iter().any(|c| hole_kind(c.kind()) || delimiter_kind(c.kind()));
+        let interpolated =
+            pieces.iter().any(|c| hole_kind(c.kind_str()) || delimiter_kind(c.kind_str()));
         if !interpolated {
             out.push(Part::Lit(string_value(n, src)));
             return Some(());
@@ -236,7 +239,7 @@ fn collect(n: Node, src: &[u8], out: &mut Vec<Part>, depth: usize) -> Option<()>
         let open = body.find(['"', '\'', '`']).map_or(0, |i| i + 1);
         last += open;
         for c in pieces {
-            let ck = c.kind();
+            let ck = c.kind_str();
             let hole = hole_kind(ck);
             if !hole && !delimiter_kind(ck) {
                 continue;
@@ -254,7 +257,7 @@ fn collect(n: Node, src: &[u8], out: &mut Vec<Part>, depth: usize) -> Option<()>
                     // past the braces C# names (`interpolation_brace`)
                     kids(c)
                         .into_iter()
-                        .find(|e| !e.kind().contains("brace") && !delimiter_kind(e.kind()))
+                        .find(|e| !e.kind_str().contains("brace") && !delimiter_kind(e.kind_str()))
                         .and_then(|e| path_of(e, src))
                 };
                 match path {
@@ -304,16 +307,16 @@ fn delimiter_kind(k: &str) -> bool {
 /// `post { controller.register(ctx) }`, `() => svc.List()`, `(req, res) =>
 /// ctrl.show(req, res)`. That call's target handles the route.
 pub fn single_call(f: Node, src: &[u8]) -> Option<Vec<String>> {
-    let mut n = f.child_by_field_name("body").unwrap_or(f);
+    let mut n = f.by_field("body").unwrap_or(f);
     for _ in 0..6 {
-        let k = n.kind();
+        let k = n.kind_str();
         if crate::refs::is_call_kind(k) {
             let (_, path) = crate::refs::callee(n, src)?;
             let ok = !path.is_empty() && path.len() <= 3 && !path.iter().any(|s| s == "()");
             return ok.then_some(path);
         }
         let inner: Vec<Node> =
-            kids(n).into_iter().filter(|c| !c.kind().contains("comment")).collect();
+            kids(n).into_iter().filter(|c| !c.kind_str().contains("comment")).collect();
         n = match k {
             "annotated_lambda"
             | "lambda_literal"
@@ -381,7 +384,7 @@ mod tests {
         let tree = crate::parse::parse(lang, code.as_bytes(), None).unwrap();
         let mut stack = vec![tree.root_node()];
         while let Some(n) = stack.pop() {
-            if n.kind().contains("string") {
+            if n.kind_str().contains("string") {
                 return path_expr(n, code.as_bytes()).unwrap();
             }
             stack.extend(kids(n).into_iter().rev());

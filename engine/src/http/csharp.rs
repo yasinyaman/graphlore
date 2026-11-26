@@ -9,6 +9,8 @@
 //! `SendAsync(new HttpRequestMessage(HttpMethod.Get, url))`, in a file that
 //! names `HttpClient` (a cache's `GetAsync("key")` elsewhere is not one).
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use std::collections::HashMap;
 
 use tree_sitter::Node;
@@ -52,7 +54,7 @@ const CLIENT_METHODS: &[(&str, &str)] = &[
 ];
 
 fn is_literal(n: Node) -> bool {
-    matches!(n.kind(), "string_literal" | "verbatim_string_literal" | "raw_string_literal")
+    matches!(n.kind_str(), "string_literal" | "verbatim_string_literal" | "raw_string_literal")
 }
 
 /// The first string literal at or under `n`, breadth first.
@@ -70,9 +72,9 @@ fn first_literal(n: Node, src: &[u8]) -> Option<String> {
 /// `(short name, attribute)` of the attributes on a declaration.
 fn attributes<'t>(decl: Node<'t>, src: &[u8]) -> Vec<(String, Node<'t>)> {
     let mut out = Vec::new();
-    for al in kids(decl).into_iter().filter(|c| c.kind() == "attribute_list") {
-        for a in kids(al).into_iter().filter(|c| c.kind() == "attribute") {
-            let Some(name) = a.child_by_field_name("name") else { continue };
+    for al in kids(decl).into_iter().filter(|c| c.kind_str() == "attribute_list") {
+        for a in kids(al).into_iter().filter(|c| c.kind_str() == "attribute") {
+            let Some(name) = a.by_field("name") else { continue };
             let t = text(name, src);
             let short = t.rsplit('.').next().unwrap_or("");
             let short = short.strip_suffix("Attribute").unwrap_or(short);
@@ -84,12 +86,13 @@ fn attributes<'t>(decl: Node<'t>, src: &[u8]) -> Vec<(String, Node<'t>)> {
 
 /// The route template of an attribute: its first unnamed argument's string.
 fn template(attr: Node, src: &[u8]) -> String {
-    let Some(args) = kids(attr).into_iter().find(|c| c.kind() == "attribute_argument_list") else {
+    let Some(args) = kids(attr).into_iter().find(|c| c.kind_str() == "attribute_argument_list")
+    else {
         return String::new();
     };
-    for arg in kids(args).into_iter().filter(|c| c.kind() == "attribute_argument") {
-        let named = arg.child_by_field_name("name").is_some()
-            || kids(arg).iter().any(|c| matches!(c.kind(), "name_equals" | "name_colon"));
+    for arg in kids(args).into_iter().filter(|c| c.kind_str() == "attribute_argument") {
+        let named = arg.by_field("name").is_some()
+            || kids(arg).iter().any(|c| matches!(c.kind_str(), "name_equals" | "name_colon"));
         if !named {
             return first_literal(arg, src).unwrap_or_default();
         }
@@ -115,24 +118,24 @@ fn member_call<'t>(
     inv: Node<'t>,
     src: &[u8],
 ) -> Option<(String, Node<'t>, Vec<Node<'t>>, Node<'t>)> {
-    if inv.kind() != "invocation_expression" {
+    if inv.kind_str() != "invocation_expression" {
         return None;
     }
-    let f = inv.child_by_field_name("function")?;
-    if f.kind() != "member_access_expression" {
+    let f = inv.by_field("function")?;
+    if f.kind_str() != "member_access_expression" {
         return None;
     }
-    let name = f.child_by_field_name("name")?;
-    let recv = f.child_by_field_name("expression")?;
+    let name = f.by_field("name")?;
+    let recv = f.by_field("expression")?;
     // `GetFromJsonAsync<List<T>>`: the name without its type arguments
     let short = text(name, src).split('<').next().unwrap_or("").trim().to_string();
     let args = inv
-        .child_by_field_name("arguments")
+        .by_field("arguments")
         .map(kids)
         .unwrap_or_default()
         .into_iter()
-        .filter(|a| a.kind() == "argument")
-        .filter_map(|a| kids(a).into_iter().rfind(|c| c.kind() != "name_colon"))
+        .filter(|a| a.kind_str() == "argument")
+        .filter_map(|a| kids(a).into_iter().rfind(|c| c.kind_str() != "name_colon"))
         .collect();
     Some((short, recv, args, name))
 }
@@ -155,10 +158,10 @@ impl Reader<'_> {
         let mut stack = vec![root];
         while let Some(cls) = stack.pop() {
             stack.extend(kids(cls));
-            if cls.kind() != "class_declaration" {
+            if cls.kind_str() != "class_declaration" {
                 continue;
             }
-            let cname = cls.child_by_field_name("name").map(|n| text(n, src)).unwrap_or_default();
+            let cname = cls.by_field("name").map(|n| text(n, src)).unwrap_or_default();
             let attrs = attributes(cls, src);
             let marked = attrs.iter().any(|(n, _)| n == "ApiController" || n == "Route");
             if !cname.ends_with("Controller") && !marked {
@@ -170,9 +173,9 @@ impl Reader<'_> {
                 .find(|(n, _)| n == "Route")
                 .map(|(_, a)| template(*a, src))
                 .unwrap_or_default();
-            let Some(body) = cls.child_by_field_name("body") else { continue };
-            for m in kids(body).into_iter().filter(|c| c.kind() == "method_declaration") {
-                let mname_node = m.child_by_field_name("name");
+            let Some(body) = cls.by_field("body") else { continue };
+            for m in kids(body).into_iter().filter(|c| c.kind_str() == "method_declaration") {
+                let mname_node = m.by_field("name");
                 let mname = mname_node.map(|n| text(n, src)).unwrap_or_default();
                 let mattrs = attributes(m, src);
                 let mut routes: Vec<String> = mattrs
@@ -216,7 +219,7 @@ impl Reader<'_> {
     /// The prefix the groups a receiver goes through add.
     fn group_prefix(&self, recv: Node, scope: Option<usize>) -> String {
         let src = self.src;
-        match recv.kind() {
+        match recv.kind_str() {
             "identifier" => {
                 let name = text(recv, src);
                 // the group declared in this definition, else one around it
@@ -253,17 +256,22 @@ impl Reader<'_> {
     fn walk(&mut self, n: Node, http_client: bool) {
         let src = self.src;
         for c in kids(n) {
-            if c.kind() == "variable_declarator" {
+            if c.kind_str() == "variable_declarator" {
                 let name = c
-                    .child_by_field_name("name")
-                    .or_else(|| kids(c).into_iter().find(|x| x.kind() == "identifier"));
+                    .by_field("name")
+                    .or_else(|| kids(c).into_iter().find(|x| x.kind_str() == "identifier"));
                 let value = kids(c)
                     .into_iter()
-                    .find(|x| x.kind() == "invocation_expression")
+                    .find(|x| x.kind_str() == "invocation_expression")
                     .or_else(|| {
-                        kids(c).into_iter().find(|x| x.kind() == "equals_value_clause").and_then(
-                            |e| kids(e).into_iter().find(|x| x.kind() == "invocation_expression"),
-                        )
+                        kids(c)
+                            .into_iter()
+                            .find(|x| x.kind_str() == "equals_value_clause")
+                            .and_then(|e| {
+                                kids(e)
+                                    .into_iter()
+                                    .find(|x| x.kind_str() == "invocation_expression")
+                            })
                     });
                 if let (Some(name), Some(value)) = (name, value) {
                     let scope = self.home(c.start_byte());
@@ -274,7 +282,7 @@ impl Reader<'_> {
                     }
                 }
             }
-            if c.kind() == "invocation_expression" {
+            if c.kind_str() == "invocation_expression" {
                 self.minimal(c);
                 if http_client {
                     self.request(c);
@@ -298,10 +306,10 @@ impl Reader<'_> {
         let scope = self.home(inv.start_byte());
         let last = args.last().copied();
         let handler = match last {
-            Some(l) if matches!(l.kind(), "identifier" | "member_access_expression") => {
+            Some(l) if matches!(l.kind_str(), "identifier" | "member_access_expression") => {
                 path_of(l, src).map(Handler::Path).unwrap_or(Handler::Inline)
             }
-            Some(l) if l.kind() == "lambda_expression" => {
+            Some(l) if l.kind_str() == "lambda_expression" => {
                 single_call(l, src).map_or(Handler::Inline, Handler::Path)
             }
             _ => Handler::Inline,
@@ -324,12 +332,12 @@ impl Reader<'_> {
         let Some((name, _, args, _)) = member_call(inv, src) else { return };
         let (method, url) = if name == "SendAsync" {
             // SendAsync(new HttpRequestMessage(HttpMethod.Get, url))
-            let Some(msg) = args.first().filter(|a| a.kind() == "object_creation_expression")
+            let Some(msg) = args.first().filter(|a| a.kind_str() == "object_creation_expression")
             else {
                 return;
             };
             let margs: Vec<Node> = msg
-                .child_by_field_name("arguments")
+                .by_field("arguments")
                 .map(kids)
                 .unwrap_or_default()
                 .into_iter()
@@ -347,7 +355,7 @@ impl Reader<'_> {
         };
         let Some(url) = url.filter(|u| {
             is_literal(*u)
-                || matches!(u.kind(), "interpolated_string_expression" | "binary_expression")
+                || matches!(u.kind_str(), "interpolated_string_expression" | "binary_expression")
         }) else {
             return;
         };

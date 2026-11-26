@@ -17,6 +17,8 @@ use super::{
 };
 use crate::facts::FileFacts;
 use crate::generic::{all_kids, kids, line, text};
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use crate::refs::{innermost, string_value};
 use tree_sitter::Node;
 
@@ -84,12 +86,12 @@ impl<'t> Ann<'t> {
     /// `method = RequestMethod.GET` or an array of them; `ANY` without one.
     fn methods(&self, src: &[u8]) -> Vec<String> {
         let Some(v) = self.arg(&["method"]) else { return vec!["ANY".into()] };
-        let elems = if matches!(v.kind(), "element_value_array_initializer" | "collection_literal")
-        {
-            kids(v)
-        } else {
-            vec![v]
-        };
+        let elems =
+            if matches!(v.kind_str(), "element_value_array_initializer" | "collection_literal") {
+                kids(v)
+            } else {
+                vec![v]
+            };
         let out: Vec<String> = elems
             .iter()
             .map(|e| text(*e, src).rsplit('.').next().unwrap_or("").to_uppercase())
@@ -104,8 +106,8 @@ impl<'t> Ann<'t> {
 }
 
 fn is_literal(n: Node) -> bool {
-    matches!(n.kind(), "string_literal" | "line_string_literal")
-        && !kids(n).iter().any(|c| c.kind().contains("interpolat"))
+    matches!(n.kind_str(), "string_literal" | "line_string_literal")
+        && !kids(n).iter().any(|c| c.kind_str().contains("interpolat"))
 }
 
 /// The first string literal at or under `n`, breadth first.
@@ -122,25 +124,26 @@ fn first_literal(n: Node, src: &[u8]) -> Option<String> {
 
 /// The annotations on a declaration (Java `modifiers`, Kotlin `modifiers`).
 fn annotations<'t>(decl: Node<'t>, src: &[u8], kotlin: bool) -> Vec<Ann<'t>> {
-    let Some(mods) = kids(decl).into_iter().find(|c| c.kind() == "modifiers") else {
+    let Some(mods) = kids(decl).into_iter().find(|c| c.kind_str() == "modifiers") else {
         return Vec::new();
     };
     let mut out = Vec::new();
     for a in kids(mods) {
         if kotlin {
-            if a.kind() != "annotation" {
+            if a.kind_str() != "annotation" {
                 continue;
             }
-            let ci = kids(a).into_iter().find(|c| c.kind() == "constructor_invocation");
-            let ut = kids(ci.unwrap_or(a)).into_iter().find(|c| c.kind() == "user_type");
+            let ci = kids(a).into_iter().find(|c| c.kind_str() == "constructor_invocation");
+            let ut = kids(ci.unwrap_or(a)).into_iter().find(|c| c.kind_str() == "user_type");
             let Some(ut) = ut else { continue };
             let name = text(ut, src).rsplit('.').next().unwrap_or("").to_string();
             let (mut named, mut bare) = (Vec::new(), Vec::new());
-            let va = ci.and_then(|c| kids(c).into_iter().find(|x| x.kind() == "value_arguments"));
+            let va =
+                ci.and_then(|c| kids(c).into_iter().find(|x| x.kind_str() == "value_arguments"));
             for arg in va.map(kids).unwrap_or_default() {
                 let ks = kids(arg);
                 match ks.as_slice() {
-                    [k, .., v] if k.kind() == "simple_identifier" && ks.len() >= 2 => {
+                    [k, .., v] if k.kind_str() == "simple_identifier" && ks.len() >= 2 => {
                         named.push((text(*k, src), *v));
                     }
                     [.., v] => bare.push(*v),
@@ -149,17 +152,15 @@ fn annotations<'t>(decl: Node<'t>, src: &[u8], kotlin: bool) -> Vec<Ann<'t>> {
             }
             out.push(Ann { name, named, bare });
         } else {
-            if !matches!(a.kind(), "annotation" | "marker_annotation") {
+            if !matches!(a.kind_str(), "annotation" | "marker_annotation") {
                 continue;
             }
-            let Some(n) = a.child_by_field_name("name") else { continue };
+            let Some(n) = a.by_field("name") else { continue };
             let name = text(n, src).rsplit('.').next().unwrap_or("").to_string();
             let (mut named, mut bare) = (Vec::new(), Vec::new());
-            for p in a.child_by_field_name("arguments").map(kids).unwrap_or_default() {
-                if p.kind() == "element_value_pair" {
-                    if let (Some(k), Some(v)) =
-                        (p.child_by_field_name("key"), p.child_by_field_name("value"))
-                    {
+            for p in a.by_field("arguments").map(kids).unwrap_or_default() {
+                if p.kind_str() == "element_value_pair" {
+                    if let (Some(k), Some(v)) = (p.by_field("key"), p.by_field("value")) {
                         named.push((text(k, src), v));
                     }
                 } else {
@@ -177,8 +178,10 @@ fn classes(root: Node) -> Vec<Node> {
     let mut out = Vec::new();
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
-        if matches!(n.kind(), "class_declaration" | "interface_declaration" | "object_declaration")
-        {
+        if matches!(
+            n.kind_str(),
+            "class_declaration" | "interface_declaration" | "object_declaration"
+        ) {
             out.push(n);
         }
         stack.extend(kids(n));
@@ -188,7 +191,8 @@ fn classes(root: Node) -> Vec<Node> {
 }
 
 fn is_interface(cls: Node) -> bool {
-    cls.kind() == "interface_declaration" || all_kids(cls).iter().any(|c| c.kind() == "interface")
+    cls.kind_str() == "interface_declaration"
+        || all_kids(cls).iter().any(|c| c.kind_str() == "interface")
 }
 
 struct Reader<'a> {
@@ -248,20 +252,20 @@ impl Reader<'_> {
                 .unwrap_or_default();
             let path_prefix = anns.iter().find(|a| a.name == "Path").map(|a| a.path(src));
             let Some(body) = cls
-                .child_by_field_name("body")
-                .or_else(|| kids(cls).into_iter().find(|c| c.kind() == "class_body"))
+                .by_field("body")
+                .or_else(|| kids(cls).into_iter().find(|c| c.kind_str() == "class_body"))
             else {
                 continue;
             };
             for m in kids(body) {
-                if !matches!(m.kind(), "method_declaration" | "function_declaration") {
+                if !matches!(m.kind_str(), "method_declaration" | "function_declaration") {
                     continue;
                 }
                 let handler = self.home(m.start_byte()).map_or(Handler::Inline, Handler::Def);
                 let manns = annotations(m, src, self.kotlin);
                 let at = m
-                    .child_by_field_name("name")
-                    .or_else(|| kids(m).into_iter().find(|c| c.kind() == "simple_identifier"))
+                    .by_field("name")
+                    .or_else(|| kids(m).into_iter().find(|c| c.kind_str() == "simple_identifier"))
                     .unwrap_or(m);
                 // Feign: @RequestLine("GET /api/x")
                 if feign {
@@ -340,24 +344,24 @@ type CallParts<'t> = (Option<Node<'t>>, Node<'t>, Vec<Node<'t>>, Option<Node<'t>
 /// A call as `(receiver, name, arguments, lambda)`, either grammar.
 fn call_parts<'t>(n: Node<'t>, kotlin: bool) -> Option<CallParts<'t>> {
     if !kotlin {
-        if n.kind() != "method_invocation" {
+        if n.kind_str() != "method_invocation" {
             return None;
         }
-        let name = n.child_by_field_name("name")?;
-        let args = n.child_by_field_name("arguments").map(kids).unwrap_or_default();
-        return Some((n.child_by_field_name("object"), name, args, None));
+        let name = n.by_field("name")?;
+        let args = n.by_field("arguments").map(kids).unwrap_or_default();
+        return Some((n.by_field("object"), name, args, None));
     }
-    if n.kind() != "call_expression" {
+    if n.kind_str() != "call_expression" {
         return None;
     }
     let ks = kids(n);
-    let (head, suffix) = (ks.first().copied()?, ks.iter().find(|c| c.kind() == "call_suffix")?);
-    let (recv, name) = match head.kind() {
+    let (head, suffix) = (ks.first().copied()?, ks.iter().find(|c| c.kind_str() == "call_suffix")?);
+    let (recv, name) = match head.kind_str() {
         "simple_identifier" => (None, head),
         "navigation_expression" => {
             let hk = kids(head);
-            let nav = hk.iter().rev().find(|c| c.kind() == "navigation_suffix")?;
-            let name = kids(*nav).into_iter().find(|c| c.kind() == "simple_identifier")?;
+            let nav = hk.iter().rev().find(|c| c.kind_str() == "navigation_suffix")?;
+            let name = kids(*nav).into_iter().find(|c| c.kind_str() == "simple_identifier")?;
             (hk.first().copied(), name)
         }
         _ => return None,
@@ -365,10 +369,10 @@ fn call_parts<'t>(n: Node<'t>, kotlin: bool) -> Option<CallParts<'t>> {
     let sk = kids(*suffix);
     let args = sk
         .iter()
-        .find(|c| c.kind() == "value_arguments")
+        .find(|c| c.kind_str() == "value_arguments")
         .map(|va| kids(*va).into_iter().filter_map(|a| kids(a).last().copied()).collect())
         .unwrap_or_default();
-    let lambda = sk.iter().find(|c| c.kind() == "annotated_lambda").copied();
+    let lambda = sk.iter().find(|c| c.kind_str() == "annotated_lambda").copied();
     Some((recv, name, args, lambda))
 }
 
@@ -464,7 +468,8 @@ impl Reader<'_> {
             };
             // a type argument (`get<T>()`) is not a route
             let typed = kids(ch).iter().any(|c| {
-                c.kind() == "call_suffix" && kids(*c).iter().any(|x| x.kind() == "type_arguments")
+                c.kind_str() == "call_suffix"
+                    && kids(*c).iter().any(|x| x.kind_str() == "type_arguments")
             });
             if typed {
                 self.ktor(ch, prefix);

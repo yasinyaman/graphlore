@@ -7,6 +7,8 @@
 //! Keep this in step with `spans.py`: the qualnames and line ranges it produces
 //! are compared against that module by `tests/test_engine.py`.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use tree_sitter::Node;
 
 use crate::facts::{Def, DefKind};
@@ -146,7 +148,7 @@ pub fn region_start(node: Node, def_line: u32) -> u32 {
     let mut start = def_line;
     let mut prev = node.prev_named_sibling();
     while let Some(p) = prev {
-        let pt = p.kind().to_ascii_lowercase();
+        let pt = p.kind_str().to_ascii_lowercase();
         if !["comment", "decorator", "annotation", "attribute"].iter().any(|h| pt.contains(h)) {
             break;
         }
@@ -163,7 +165,7 @@ pub fn region_start(node: Node, def_line: u32) -> u32 {
 fn receiver_type(recv: Node, src: &[u8]) -> Option<String> {
     let mut queue: std::collections::VecDeque<Node> = kids(recv).into();
     while let Some(n) = queue.pop_front() {
-        if n.kind() == "type_identifier" {
+        if n.kind_str() == "type_identifier" {
             return Some(text(n, src));
         }
         queue.extend(kids(n));
@@ -173,14 +175,14 @@ fn receiver_type(recv: Node, src: &[u8]) -> Option<String> {
 
 /// `_ts_wrapped_function`: the function in `wrap(async (req, res) => {…})`.
 fn wrapped_function<'t>(call: Node<'t>, src: &[u8]) -> Option<Node<'t>> {
-    let f = call.child_by_field_name("function")?;
-    let args = call.child_by_field_name("arguments")?;
-    if f.kind() != "identifier" || SCHEDULERS.contains(&text(f, src).as_str()) {
+    let f = call.by_field("function")?;
+    let args = call.by_field("arguments")?;
+    if f.kind_str() != "identifier" || SCHEDULERS.contains(&text(f, src).as_str()) {
         return None;
     }
     let found: Vec<Node> =
-        kids(args).into_iter().filter(|a| FUNCTION_VALUES.contains(&a.kind())).collect();
-    if found.len() != 1 || found[0].child_by_field_name("name").is_some() {
+        kids(args).into_iter().filter(|a| FUNCTION_VALUES.contains(&a.kind_str())).collect();
+    if found.len() != 1 || found[0].by_field("name").is_some() {
         return None;
     }
     Some(found[0])
@@ -189,29 +191,29 @@ fn wrapped_function<'t>(call: Node<'t>, src: &[u8]) -> Option<Node<'t>> {
 /// `_ts_bound_function`: an anonymous function bound to a name.
 pub fn bound_function<'t>(node: Node<'t>, src: &[u8]) -> Option<(String, Node<'t>)> {
     let mut name = node
-        .child_by_field_name("name")
-        .or_else(|| node.child_by_field_name("key"))
-        .or_else(|| node.child_by_field_name("property"));
-    let mut value = node.child_by_field_name("value");
+        .by_field("name")
+        .or_else(|| node.by_field("key"))
+        .or_else(|| node.by_field("property"));
+    let mut value = node.by_field("value");
     if name.is_none() && value.is_none() {
-        let mut left = node.child_by_field_name("left");
+        let mut left = node.by_field("left");
         if let Some(l) = left {
-            if l.kind() == "member_expression" {
-                left = l.child_by_field_name("property");
+            if l.kind_str() == "member_expression" {
+                left = l.by_field("property");
             }
         }
         name = left;
-        value = node.child_by_field_name("right");
+        value = node.by_field("right");
     }
     let name = name?;
     let mut value = value?;
-    if !name.kind().ends_with("identifier") {
+    if !name.kind_str().ends_with("identifier") {
         return None;
     }
-    if value.kind() == "call_expression" {
+    if value.kind_str() == "call_expression" {
         value = wrapped_function(value, src)?;
     }
-    let vt = value.kind().to_ascii_lowercase();
+    let vt = value.kind_str().to_ascii_lowercase();
     if !["function", "arrow", "lambda", "closure", "func"].iter().any(|h| vt.contains(h)) {
         return None;
     }
@@ -219,7 +221,7 @@ pub fn bound_function<'t>(node: Node<'t>, src: &[u8]) -> Option<(String, Node<'t
         // a type written out (Go `map[string]func() int`), not a function
         return None;
     }
-    if value.child_by_field_name("name").is_some() {
+    if value.by_field("name").is_some() {
         return None;
     }
     Some((text(name, src), value))
@@ -228,28 +230,28 @@ pub fn bound_function<'t>(node: Node<'t>, src: &[u8]) -> Option<(String, Node<'t
 /// `_ts_anonymous_class`: Java `new Callback() { … }`, Kotlin
 /// `object : Callback<T> { … }`, Ruby `Request = Struct.new(:a) do … end`.
 pub fn anonymous_class(node: Node, src: &[u8]) -> Option<String> {
-    match node.kind() {
+    match node.kind_str() {
         "object_creation_expression" => {
-            if !kids(node).iter().any(|c| c.kind() == "class_body") {
+            if !kids(node).iter().any(|c| c.kind_str() == "class_body") {
                 return None;
             }
-            node.child_by_field_name("type").map(|t| text(t, src))
+            node.by_field("type").map(|t| text(t, src))
         }
         "object_literal" => {
             let ks = kids(node);
-            let spec = ks.iter().find(|c| c.kind() == "delegation_specifier")?;
-            let user = kids(*spec).into_iter().find(|c| c.kind() == "user_type")?;
-            if !ks.iter().any(|c| c.kind() == "class_body") {
+            let spec = ks.iter().find(|c| c.kind_str() == "delegation_specifier")?;
+            let user = kids(*spec).into_iter().find(|c| c.kind_str() == "user_type")?;
+            if !ks.iter().any(|c| c.kind_str() == "class_body") {
                 return None;
             }
             Some(text(user, src).split('<').next().unwrap_or_default().to_string())
         }
         "assignment" => {
-            let left = node.child_by_field_name("left")?;
-            let right = node.child_by_field_name("right")?;
-            if left.kind() == "constant"
-                && right.kind() == "call"
-                && right.child_by_field_name("block").is_some()
+            let left = node.by_field("left")?;
+            let right = node.by_field("right")?;
+            if left.kind_str() == "constant"
+                && right.kind_str() == "call"
+                && right.by_field("block").is_some()
             {
                 Some(text(left, src))
             } else {
@@ -261,20 +263,20 @@ pub fn anonymous_class(node: Node, src: &[u8]) -> Option<String> {
 }
 
 fn next_declarator<'t>(d: Node<'t>, also_qualified: bool) -> Option<Node<'t>> {
-    d.child_by_field_name("declarator").or_else(|| {
+    d.by_field("declarator").or_else(|| {
         kids(d).into_iter().find(|c| {
-            c.kind().ends_with("declarator")
-                || (also_qualified && c.kind() == "qualified_identifier")
+            c.kind_str().ends_with("declarator")
+                || (also_qualified && c.kind_str() == "qualified_identifier")
         })
     })
 }
 
 /// `_ts_declarator_name`: C/C++ `Session::Get` -> `Session.Get`.
 fn declarator_name(node: Node, src: &[u8]) -> Option<String> {
-    let mut decl = node.child_by_field_name("declarator");
+    let mut decl = node.by_field("declarator");
     for _ in 0..8 {
         let d = decl?;
-        match d.kind() {
+        match d.kind_str() {
             "identifier" | "field_identifier" | "destructor_name" | "type_identifier"
             | "operator_name" => return Some(text(d, src)),
             "qualified_identifier" => return Some(text(d, src).replace("::", ".")),
@@ -282,7 +284,9 @@ fn declarator_name(node: Node, src: &[u8]) -> Option<String> {
         }
         decl = next_declarator(d, true).or_else(|| {
             // (`typedef void (Cb)(int);`: the name in parentheses)
-            (d.kind() == "parenthesized_declarator").then(|| kids(d).into_iter().next()).flatten()
+            (d.kind_str() == "parenthesized_declarator")
+                .then(|| kids(d).into_iter().next())
+                .flatten()
         });
     }
     None
@@ -294,25 +298,22 @@ fn declarator_name(node: Node, src: &[u8]) -> Option<String> {
 /// initializer. A real function the parser misread keeps its body of
 /// statements.
 fn braced_initializer(node: Node) -> bool {
-    let (Some(decl), Some(body)) =
-        (node.child_by_field_name("declarator"), node.child_by_field_name("body"))
-    else {
+    let (Some(decl), Some(body)) = (node.by_field("declarator"), node.by_field("body")) else {
         return false;
     };
-    if decl.kind() != "identifier" {
+    if decl.kind_str() != "identifier" {
         return false;
     }
     let stmts: Vec<Node> =
-        kids(body).into_iter().filter(|c| !c.kind().contains("comment")).collect();
-    stmts.len() == 1 && matches!(stmts[0].kind(), "function_definition" | "lambda_expression")
+        kids(body).into_iter().filter(|c| !c.kind_str().contains("comment")).collect();
+    stmts.len() == 1 && matches!(stmts[0].kind_str(), "function_definition" | "lambda_expression")
 }
 
 /// `_ts_macro_statement`: a `declaration` whose type is a macro call the
 /// parser could not read (`TEST_ASSERT_EQUAL(p0, p1, 4);` followed by another
 /// in a function the parser lost): two statements, no declaration.
 fn macro_statement(node: Node) -> bool {
-    node.child_by_field_name("type")
-        .is_some_and(|t| t.kind() == "macro_type_specifier" && t.has_error())
+    node.by_field("type").is_some_and(|t| t.kind_str() == "macro_type_specifier" && t.has_error())
 }
 
 /// `_ts_test_macro_name`: C++ `TEST(Suite, Name) { … }`, `TEST_F(Fixture,
@@ -320,12 +321,11 @@ fn macro_statement(node: Node) -> bool {
 /// bare names. The test is `Suite.Name`, a method of the fixture when the
 /// file defines one.
 fn test_macro_name(node: Node, src: &[u8]) -> Option<String> {
-    if node.kind() != "function_definition" || node.child_by_field_name("type").is_some() {
+    if node.kind_str() != "function_definition" || node.by_field("type").is_some() {
         return None;
     }
-    let decl =
-        node.child_by_field_name("declarator").filter(|d| d.kind() == "function_declarator")?;
-    let name = decl.child_by_field_name("declarator").filter(|n| n.kind() == "identifier")?;
+    let decl = node.by_field("declarator").filter(|d| d.kind_str() == "function_declarator")?;
+    let name = decl.by_field("declarator").filter(|n| n.kind_str() == "identifier")?;
     let macro_name = text(name, src);
     let capitals = macro_name.len() >= 3
         && macro_name.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
@@ -333,12 +333,12 @@ fn test_macro_name(node: Node, src: &[u8]) -> Option<String> {
     if !capitals {
         return None;
     }
-    let params = kids(decl.child_by_field_name("parameters")?);
+    let params = kids(decl.by_field("parameters")?);
     let bare = |p: &Node| {
         let inner = kids(*p);
-        (p.kind() == "parameter_declaration"
+        (p.kind_str() == "parameter_declaration"
             && inner.len() == 1
-            && inner[0].kind() == "type_identifier")
+            && inner[0].kind_str() == "type_identifier")
             .then(|| text(inner[0], src))
     };
     match params.as_slice() {
@@ -349,10 +349,10 @@ fn test_macro_name(node: Node, src: &[u8]) -> Option<String> {
 
 /// `_ts_declares_function`: `int f(void);`, not a variable or a field.
 fn declares_function(node: Node) -> bool {
-    let mut decl = node.child_by_field_name("declarator");
+    let mut decl = node.by_field("declarator");
     for _ in 0..8 {
         let Some(d) = decl else { return false };
-        if d.kind() == "function_declarator" {
+        if d.kind_str() == "function_declarator" {
             return true;
         }
         decl = next_declarator(d, false);
@@ -363,38 +363,38 @@ fn declares_function(node: Node) -> bool {
 /// `_ts_child_name`: a keyword (Swift `init`) or the first identifier child
 /// (Kotlin).
 fn child_name(node: Node, src: &[u8]) -> Option<String> {
-    if let Some(k) = keyword_name(node.kind()) {
+    if let Some(k) = keyword_name(node.kind_str()) {
         return Some(k.to_string());
     }
-    if OPERATOR_TYPES.contains(&node.kind()) {
+    if OPERATOR_TYPES.contains(&node.kind_str()) {
         return operator_name(node, src);
     }
-    let t = node.kind().to_ascii_lowercase();
+    let t = node.kind_str().to_ascii_lowercase();
     if !(t.ends_with("_declaration") || t.ends_with("_entry") || t.ends_with("type_alias"))
         || t.contains("package")
     {
         return None;
     }
-    kids(node).into_iter().find(|c| NAME_CHILD_TYPES.contains(&c.kind())).map(|c| text(c, src))
+    kids(node).into_iter().find(|c| NAME_CHILD_TYPES.contains(&c.kind_str())).map(|c| text(c, src))
 }
 
 /// `_ts_operator_name`: C# `operator +` -> `operator+`, `implicit operator
 /// string(…)` -> `operator string`.
 fn operator_name(node: Node, src: &[u8]) -> Option<String> {
-    if node.kind() == "conversion_operator_declaration" {
-        return node.child_by_field_name("type").map(|t| format!("operator {}", text(t, src)));
+    if node.kind_str() == "conversion_operator_declaration" {
+        return node.by_field("type").map(|t| format!("operator {}", text(t, src)));
     }
     // (`operator +` is `operator+`; a word after `operator` keeps its
     // space, and what follows it: `operator true`, `operator checked +`)
     let all = all_kids(node);
-    let at = all.iter().position(|c| c.kind() == "operator")?;
+    let at = all.iter().position(|c| c.kind_str() == "operator")?;
     let first = text(*all.get(at + 1)?, src);
     if !first.starts_with(|c: char| c.is_ascii_alphabetic()) {
         return Some(format!("operator{first}"));
     }
     let words: Vec<String> = all[at + 1..]
         .iter()
-        .take_while(|c| c.kind() != "parameter_list")
+        .take_while(|c| c.kind_str() != "parameter_list")
         .map(|c| text(*c, src))
         .collect();
     Some(format!("operator {}", words.join(" ")))
@@ -403,7 +403,7 @@ fn operator_name(node: Node, src: &[u8]) -> Option<String> {
 /// The other names of a definition that declares several (Swift `case a, b,
 /// c`): every `name` field after the first, in an enum's node.
 pub fn more_names<'t>(node: Node<'t>) -> Vec<Node<'t>> {
-    if !node.kind().contains("enum") {
+    if !node.kind_str().contains("enum") {
         return Vec::new();
     }
     let mut cursor = node.walk();
@@ -412,7 +412,7 @@ pub fn more_names<'t>(node: Node<'t>) -> Vec<Node<'t>> {
 
 /// The generic classification of one node, in `spans.py`'s order.
 pub fn classify<'t, M: LanguageModule + ?Sized>(m: &M, node: Node<'t>, src: &[u8]) -> Step<'t> {
-    let kind = node.kind();
+    let kind = node.kind_str();
     let is_sym = m.is_symbol(kind) || keyword_name(kind).is_some();
     let def = |name: String| Step::Def {
         name,
@@ -428,15 +428,15 @@ pub fn classify<'t, M: LanguageModule + ?Sized>(m: &M, node: Node<'t>, src: &[u8
         return def(k.to_string());
     }
     if is_sym {
-        if let Some(name_node) = node.child_by_field_name("name") {
-            if kind.ends_with("_specifier") && node.child_by_field_name("body").is_none() {
+        if let Some(name_node) = node.by_field("name") {
+            if kind.ends_with("_specifier") && node.by_field("body").is_none() {
                 // C `struct config cfg` in a signature, or a forward declaration
                 return Step::Descend;
             }
-            if kind == "mod_item" && node.child_by_field_name("body").is_none() {
+            if kind == "mod_item" && node.by_field("body").is_none() {
                 return Step::Skip; // Rust `mod foo;` names a file
             }
-            let owner = node.child_by_field_name("receiver").and_then(|r| receiver_type(r, src));
+            let owner = node.by_field("receiver").and_then(|r| receiver_type(r, src));
             let suffix = NAME_SUFFIX.iter().find(|(k, _)| *k == kind).map_or("", |(_, v)| *v);
             return Step::Def {
                 name: format!("{}{suffix}", text(name_node, src)),
@@ -448,9 +448,9 @@ pub fn classify<'t, M: LanguageModule + ?Sized>(m: &M, node: Node<'t>, src: &[u8
             };
         }
         if kind.to_ascii_lowercase().contains("impl") {
-            if let Some(type_node) = node.child_by_field_name("type") {
+            if let Some(type_node) = node.by_field("type") {
                 // Rust `impl Pool for Fixed`: a prefix, no span; generics stripped
-                let base = type_node.child_by_field_name("type").unwrap_or(type_node);
+                let base = type_node.by_field("type").unwrap_or(type_node);
                 let t = text(base, src);
                 return Step::Scope { prefix: t.clone(), owner: Some(t), descend: node };
             }
@@ -653,7 +653,7 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     is_test: false,
                     object: None,
                     extra: false,
-                    decl_only: PROTOTYPE_TYPES.contains(&node.kind()),
+                    decl_only: PROTOTYPE_TYPES.contains(&node.kind_str()),
                     container: false,
                     table: None,
                     value: None,

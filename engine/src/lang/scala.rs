@@ -3,6 +3,8 @@
 //! `import a.b._` (or `*`). In `extends A with B`, `A` is the superclass and
 //! the rest are mixed in.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use tree_sitter::Node;
 
 use super::java::dotted_import;
@@ -16,31 +18,32 @@ pub struct Scala;
 impl LanguageModule for Scala {
     /// `var` / `val` at the top level or in an `object` (one shared instance).
     fn state_defs<'t>(&self, n: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
-        let kind = match n.kind() {
+        let kind = match n.kind_str() {
             "var_definition" => DefKind::Variable,
             "val_definition" => DefKind::Constant,
             _ => return Vec::new(),
         };
         let shared = n.parent().is_some_and(|p| {
-            p.kind() == "compilation_unit"
-                || (p.kind() == "template_body"
-                    && p.parent().is_some_and(|o| o.kind() == "object_definition"))
+            p.kind_str() == "compilation_unit"
+                || (p.kind_str() == "template_body"
+                    && p.parent().is_some_and(|o| o.kind_str() == "object_definition"))
         });
         // a `var` / `val` of a class or trait: a field of each instance
         let member = n.parent().is_some_and(|p| {
-            p.kind() == "template_body"
-                && p.parent()
-                    .is_some_and(|o| matches!(o.kind(), "class_definition" | "trait_definition"))
+            p.kind_str() == "template_body"
+                && p.parent().is_some_and(|o| {
+                    matches!(o.kind_str(), "class_definition" | "trait_definition")
+                })
         });
         let kind = if member && kind == DefKind::Variable { DefKind::Property } else { kind };
-        match n.child_by_field_name("pattern").filter(|p| p.kind() == "identifier") {
+        match n.by_field("pattern").filter(|p| p.kind_str() == "identifier") {
             Some(name) if shared || member => vec![(n, name, kind)],
             _ => Vec::new(),
         }
     }
 
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
-        if n.kind() != "import_declaration" {
+        if n.kind_str() != "import_declaration" {
             return None;
         }
         let mut path = Vec::new();
@@ -54,7 +57,7 @@ impl LanguageModule for Scala {
         let mut out = Vec::new();
         let mut selectors = false;
         for c in kids(n) {
-            match c.kind() {
+            match c.kind_str() {
                 "namespace_wildcard" => {
                     out.push(import(n, ImportForm::Wildcard, base.clone()));
                     selectors = true;
@@ -63,11 +66,11 @@ impl LanguageModule for Scala {
                     selectors = true;
                     let mut f = import(n, ImportForm::From, base.clone());
                     for s in kids(c) {
-                        match s.kind() {
+                        match s.kind_str() {
                             "identifier" => f.names.push((text(s, src), None)),
                             "arrow_renamed_identifier" | "as_renamed_identifier" => {
-                                let name = s.child_by_field_name("name").map(|x| text(x, src));
-                                let alias = s.child_by_field_name("alias").map(|x| text(x, src));
+                                let name = s.by_field("name").map(|x| text(x, src));
+                                let alias = s.by_field("alias").map(|x| text(x, src));
                                 if let Some(name) = name {
                                     f.names.push((name, alias));
                                 }
@@ -90,13 +93,13 @@ impl LanguageModule for Scala {
     }
 
     fn package_of(&self, n: Node, src: &[u8]) -> Option<String> {
-        (n.kind() == "package_clause")
-            .then(|| n.child_by_field_name("name").map(|c| text(c, src)))
+        (n.kind_str() == "package_clause")
+            .then(|| n.by_field("name").map(|c| text(c, src)))
             .flatten()
     }
 
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
-        let Some(ext) = n.child_by_field_name("extend") else { return Vec::new() };
+        let Some(ext) = n.by_field("extend") else { return Vec::new() };
         let mut out = Vec::new();
         let mut cursor = ext.walk();
         let mut first = true;

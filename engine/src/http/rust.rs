@@ -9,6 +9,8 @@
 //! The requests: `reqwest::get(url)`, a client's `get(url)` / `post(url)` in a
 //! file using reqwest, `ureq::get(url)`.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -40,7 +42,8 @@ fn method_arg() -> &'static Regex {
 }
 
 fn lit(n: Node, src: &[u8]) -> Option<String> {
-    (n.kind() == "string_literal" || n.kind() == "raw_string_literal").then(|| string_value(n, src))
+    (n.kind_str() == "string_literal" || n.kind_str() == "raw_string_literal")
+        .then(|| string_value(n, src))
 }
 
 /// `(name, receiver, arguments, name node)` of `recv.name(args)` or
@@ -49,15 +52,15 @@ fn call_parts<'t>(
     call: Node<'t>,
     src: &[u8],
 ) -> (String, Option<Node<'t>>, Vec<Node<'t>>, Node<'t>) {
-    let args = call.child_by_field_name("arguments").map(kids).unwrap_or_default();
-    let Some(f) = call.child_by_field_name("function") else {
+    let args = call.by_field("arguments").map(kids).unwrap_or_default();
+    let Some(f) = call.by_field("function") else {
         return (String::new(), None, args, call);
     };
-    if f.kind() == "field_expression" {
-        let field = f.child_by_field_name("field");
+    if f.kind_str() == "field_expression" {
+        let field = f.by_field("field");
         return (
             field.map(|x| text(x, src)).unwrap_or_default(),
-            f.child_by_field_name("value"),
+            f.by_field("value"),
             args,
             field.unwrap_or(f),
         );
@@ -68,8 +71,8 @@ fn call_parts<'t>(
 
 /// A function named by path (`users::router`, `routes`): what a mount calls.
 fn callee_path(n: Node, src: &[u8]) -> Option<Vec<String>> {
-    let target = if n.kind() == "call_expression" { n.child_by_field_name("function")? } else { n };
-    if !matches!(target.kind(), "identifier" | "scoped_identifier") {
+    let target = if n.kind_str() == "call_expression" { n.by_field("function")? } else { n };
+    if !matches!(target.kind_str(), "identifier" | "scoped_identifier") {
         return None;
     }
     let path: Vec<String> = text(target, src).split("::").map(str::to_string).collect();
@@ -125,11 +128,11 @@ impl Reader<'_> {
         let src = self.src;
         let mut pending: Vec<Node> = Vec::new();
         for c in kids(n) {
-            match c.kind() {
+            match c.kind_str() {
                 "attribute_item" => pending.push(c),
                 k if k.contains("comment") => {}
                 "function_item" => {
-                    if let Some(name) = c.child_by_field_name("name") {
+                    if let Some(name) = c.by_field("name") {
                         let handler =
                             self.home(c.start_byte()).map_or(Handler::Inline, Handler::Def);
                         for a in &pending {
@@ -169,7 +172,9 @@ impl Reader<'_> {
     /// `get(h).post(h2)` / `web::get().to(f)`: (method, handler) pairs.
     fn methods_of(&self, expr: Option<Node>, pending: Option<Node>) -> Vec<(String, Handler)> {
         let src = self.src;
-        let Some(expr) = expr.filter(|e| e.kind() == "call_expression") else { return Vec::new() };
+        let Some(expr) = expr.filter(|e| e.kind_str() == "call_expression") else {
+            return Vec::new();
+        };
         let (name, recv, args, _) = call_parts(expr, src);
         let first = args.first().copied();
         if name == "to" || name == "to_async" {
@@ -191,7 +196,7 @@ impl Reader<'_> {
     fn chain_path(&self, recv: Option<Node>, names: &[&str]) -> String {
         let src = self.src;
         let mut node = recv;
-        while let Some(n) = node.filter(|n| n.kind() == "call_expression") {
+        while let Some(n) = node.filter(|n| n.kind_str() == "call_expression") {
             let (name, inner, args, _) = call_parts(n, src);
             if names.contains(&name.as_str()) && !args.is_empty() {
                 return args.first().and_then(|a| lit(*a, src)).unwrap_or_default();
@@ -203,7 +208,7 @@ impl Reader<'_> {
 
     fn walk(&mut self, n: Node, prefix: &str) {
         let src = self.src;
-        if n.kind() == "call_expression" {
+        if n.kind_str() == "call_expression" {
             let (name, recv, args, name_node) = call_parts(n, src);
             let scope = match recv {
                 Some(_) => join_path(&[prefix, &self.chain_path(recv, &["scope"])]),
@@ -244,7 +249,9 @@ impl Reader<'_> {
                 "nest" if recv.is_some() && args.len() == 2 && lit(args[0], src).is_some() => {
                     let inner = join_path(&[prefix, &lit(args[0], src).unwrap_or_default()]);
                     match callee_path(args[1], src) {
-                        Some(f) if args[1].kind() == "call_expression" => self.mount(n, f, inner),
+                        Some(f) if args[1].kind_str() == "call_expression" => {
+                            self.mount(n, f, inner)
+                        }
                         _ => self.walk(args[1], &inner),
                     }
                     self.walk(recv.unwrap(), prefix);
@@ -252,7 +259,7 @@ impl Reader<'_> {
                 }
                 "merge" | "configure" if recv.is_some() && args.len() == 1 => {
                     let mounted = callee_path(args[0], src)
-                        .filter(|_| args[0].kind() == "call_expression" || name == "configure");
+                        .filter(|_| args[0].kind_str() == "call_expression" || name == "configure");
                     match mounted {
                         Some(f) => self.mount(n, f, scope.clone()),
                         None => self.walk(args[0], prefix),
@@ -284,14 +291,14 @@ impl Reader<'_> {
         let mut stack = vec![root];
         while let Some(n) = stack.pop() {
             stack.extend(kids(n));
-            if n.kind() != "call_expression" {
+            if n.kind_str() != "call_expression" {
                 continue;
             }
             let (name, recv, args, _) = call_parts(n, src);
             if !METHODS.contains(&name.as_str()) {
                 continue;
             }
-            let f = n.child_by_field_name("function").map(|f| text(f, src)).unwrap_or_default();
+            let f = n.by_field("function").map(|f| text(f, src)).unwrap_or_default();
             let ok = match recv {
                 None => f.starts_with("reqwest::") || f.starts_with("ureq::"),
                 Some(r) => {

@@ -9,6 +9,8 @@
 //! The requests: `HTTParty` / `Faraday` / `RestClient` `get(url)`, and in a
 //! test file a receiver-less `get '/x'` (rack-test, request specs), counted.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use tree_sitter::Node;
 
 use super::{join_path, path_expr, CallFact, Handler, HttpFacts, Part, PathExpr, RouteFact};
@@ -42,11 +44,11 @@ const CLIENTS: &[&str] = &["HTTParty", "Faraday", "RestClient", "Typhoeus"];
 /// A string literal (no interpolation) or a symbol (`:feed` → `feed`).
 fn value(n: Option<Node>, src: &[u8]) -> Option<String> {
     let n = n?;
-    match n.kind() {
+    match n.kind_str() {
         "simple_symbol" | "hash_key_symbol" => {
             Some(text(n, src).trim_start_matches(':').to_string())
         }
-        "string" if !kids(n).iter().any(|c| c.kind() == "interpolation") => {
+        "string" if !kids(n).iter().any(|c| c.kind_str() == "interpolation") => {
             Some(string_value(n, src))
         }
         _ => None,
@@ -68,13 +70,13 @@ impl<'t> Call<'t> {
 
 /// `routes.py`'s `_ruby_call`: method, positional and keyword arguments, block.
 fn ruby_call<'t>(n: Node<'t>, src: &[u8]) -> Call<'t> {
-    let name = n.child_by_field_name("method").map(|m| text(m, src)).unwrap_or_default();
+    let name = n.by_field("method").map(|m| text(m, src)).unwrap_or_default();
     let (mut pos, mut kw) = (Vec::new(), Vec::new());
-    for a in n.child_by_field_name("arguments").map(kids).unwrap_or_default() {
-        if a.kind() == "pair" {
-            let (k, v) = (a.child_by_field_name("key"), a.child_by_field_name("value"));
+    for a in n.by_field("arguments").map(kids).unwrap_or_default() {
+        if a.kind_str() == "pair" {
+            let (k, v) = (a.by_field("key"), a.by_field("value"));
             if let (Some(k), Some(v)) = (k, v) {
-                if k.kind() == "string" {
+                if k.kind_str() == "string" {
                     // `get 'x' => 'c#a'`
                     pos.push(k);
                     if !kw.iter().any(|(n, _): &(String, Node)| n == "to") {
@@ -88,7 +90,7 @@ fn ruby_call<'t>(n: Node<'t>, src: &[u8]) -> Call<'t> {
             pos.push(a);
         }
     }
-    Call { name, pos, kw, block: n.child_by_field_name("block") }
+    Call { name, pos, kw, block: n.by_field("block") }
 }
 
 /// The receiver-less calls a block holds, not looking inside other calls.
@@ -96,9 +98,9 @@ fn body_calls(block: Node) -> Vec<Node> {
     let mut out = Vec::new();
     let mut stack: Vec<Node> = kids(block).into_iter().rev().collect();
     while let Some(n) = stack.pop() {
-        if n.kind() == "call" && n.child_by_field_name("receiver").is_none() {
+        if n.kind_str() == "call" && n.by_field("receiver").is_none() {
             out.push(n);
-        } else if n.kind() != "call" {
+        } else if n.kind_str() != "call" {
             stack.extend(kids(n).into_iter().rev());
         }
     }
@@ -166,7 +168,7 @@ impl Reader<'_> {
         for call in body_calls(block) {
             let c = ruby_call(call, src);
             let first = value(c.pos.first().copied(), src)
-                .filter(|_| c.pos.first().is_some_and(|p| p.kind() == "string"));
+                .filter(|_| c.pos.first().is_some_and(|p| p.kind_str() == "string"));
             match (c.block, first) {
                 (Some(_), Some(p)) if VERBS.contains(&c.name.as_str()) => {
                     self.route(call, "sinatra", &c.name, join_path(&[prefix, &p]), Handler::Inline);
@@ -182,7 +184,7 @@ impl Reader<'_> {
 
     fn strings(&self, n: Option<Node>) -> Vec<String> {
         let Some(n) = n else { return Vec::new() };
-        if n.kind() == "array" {
+        if n.kind_str() == "array" {
             return kids(n).into_iter().filter_map(|e| value(Some(e), self.src)).collect();
         }
         value(Some(n), self.src).into_iter().collect()
@@ -273,14 +275,14 @@ impl Reader<'_> {
         let mut stack = vec![root];
         while let Some(n) = stack.pop() {
             stack.extend(kids(n));
-            if n.kind() != "call" {
+            if n.kind_str() != "call" {
                 continue;
             }
             let c = ruby_call(n, src);
             if !VERBS.contains(&c.name.as_str()) || c.block.is_some() {
                 continue;
             }
-            let recv = n.child_by_field_name("receiver").map(|r| text(r, src));
+            let recv = n.by_field("receiver").map(|r| text(r, src));
             let ok = match &recv {
                 Some(r) => CLIENTS.contains(&r.as_str()),
                 None => test,
@@ -308,7 +310,7 @@ pub fn read(root: Node, src: &[u8], facts: &FileFacts) -> HttpFacts {
     let mut supers = Vec::new();
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
-        match n.kind() {
+        match n.kind_str() {
             "call" => calls.push(n),
             "superclass" => supers.push(n),
             _ => {}
@@ -316,17 +318,17 @@ pub fn read(root: Node, src: &[u8], facts: &FileFacts) -> HttpFacts {
         stack.extend(kids(n));
     }
     let sinatra = calls.iter().any(|c| {
-        c.child_by_field_name("receiver").is_none()
-            && c.child_by_field_name("method").is_some_and(|m| text(m, src) == "require")
+        c.by_field("receiver").is_none()
+            && c.by_field("method").is_some_and(|m| text(m, src) == "require")
             && text(*c, src).contains("sinatra")
     }) || supers.iter().any(|s| text(*s, src).contains("Sinatra"));
     if sinatra {
         r.sinatra(root, "");
     }
     for c in &calls {
-        let draws = c.child_by_field_name("method").is_some_and(|m| text(m, src) == "draw")
-            && c.child_by_field_name("receiver").is_some_and(|r| text(r, src).contains("routes"));
-        if let (true, Some(b)) = (draws, c.child_by_field_name("block")) {
+        let draws = c.by_field("method").is_some_and(|m| text(m, src) == "draw")
+            && c.by_field("receiver").is_some_and(|r| text(r, src).contains("routes"));
+        if let (true, Some(b)) = (draws, c.by_field("block")) {
             r.rails(b, "", "", "", "");
         }
     }

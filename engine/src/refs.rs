@@ -8,6 +8,8 @@
 //! between languages for that, so each language module reads its own
 //! (`LanguageModule::imports_of`, `heritage_of`, `package_of`).
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use std::collections::HashMap;
 
 use tree_sitter::Node;
@@ -111,7 +113,7 @@ fn receiver_word(t: &str) -> Option<&'static str> {
 }
 
 pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
-    let k = n.kind();
+    let k = n.kind_str();
     if SELF_KINDS.contains(&k) {
         return Some(vec![if k == "crate" { "crate".into() } else { "self".into() }]);
     }
@@ -119,7 +121,7 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         // Kotlin `super<A>`: the supertype named (overload-resolution.md,
         // 'Call with an explicit super-form receiver')
         if k == "super_expression" {
-            if let Some(t) = kids(n).into_iter().find(|c| c.kind() == "user_type") {
+            if let Some(t) = kids(n).into_iter().find(|c| c.kind_str() == "user_type") {
                 if let Some(p) = path_of(t, src) {
                     return Some(p);
                 }
@@ -136,7 +138,7 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     // Scala `opt[URI]`, Rust `parse::<T>`: the function, its type arguments
     // aside
     if k == "generic_function" {
-        return path_of(n.child_by_field_name("function")?, src);
+        return path_of(n.by_field("function")?, src);
     }
     if k == "instance_variable" {
         // Ruby `@repo`: a field of the object
@@ -171,11 +173,8 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     // `x!`, `x!!`: the value itself
     if k == "postfix_expression" {
         let mut cursor = n.walk();
-        if n.children(&mut cursor).any(|c| c.kind() == "bang" || c.kind() == "!!") {
-            return path_of(
-                n.child_by_field_name("target").or_else(|| kids(n).into_iter().next())?,
-                src,
-            );
+        if n.children(&mut cursor).any(|c| c.kind_str() == "bang" || c.kind_str() == "!!") {
+            return path_of(n.by_field("target").or_else(|| kids(n).into_iter().next())?, src);
         }
     }
     // `xs[0]`: an element of `xs`
@@ -190,7 +189,7 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     ) {
         let object = ["object", "operand", "value", "expression", "array"]
             .iter()
-            .find_map(|f| n.child_by_field_name(f))
+            .find_map(|f| n.by_field(f))
             .or_else(|| kids(n).into_iter().next())?;
         // Go `NewStack[int]()`, `Box[Item].Get`: an instantiation, the
         // generic thing itself
@@ -212,7 +211,7 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     // or a pointer to one, a slice of its elements: the walk does not tell
     // the two apart)
     if k == "slice_expression" && crate::parse::current() == Some(crate::lang::Lang::Go) {
-        return path_of(n.child_by_field_name("operand")?, src);
+        return path_of(n.by_field("operand")?, src);
     }
     // Go `Point{1, 2}.Norm()`, `(&Point{}).Scale()`: a value of the type
     // written, as a construction is
@@ -223,10 +222,10 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     }
     // `[x.owner for x in xs]`: a collection of what each element gives
     if matches!(k, "list_comprehension" | "set_comprehension" | "generator_expression") {
-        let clause = kids(n).into_iter().find(|c| c.kind() == "for_in_clause")?;
-        let var = bound_name(clause.child_by_field_name("left")?, src)?;
-        let of = path_of(clause.child_by_field_name("right")?, src)?;
-        let each = path_of(n.child_by_field_name("body")?, src)?;
+        let clause = kids(n).into_iter().find(|c| c.kind_str() == "for_in_clause")?;
+        let var = bound_name(clause.by_field("left")?, src)?;
+        let of = path_of(clause.by_field("right")?, src)?;
+        let each = path_of(n.by_field("body")?, src)?;
         return mapped(&of, &var, each);
     }
     if is_call_kind(k) || matches!(k, "new_expression" | "object_creation_expression") {
@@ -248,9 +247,9 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         };
     }
     for (obj, member) in MEMBER_FIELDS {
-        if let (Some(o), Some(m)) = (n.child_by_field_name(obj), n.child_by_field_name(member)) {
+        if let (Some(o), Some(m)) = (n.by_field(obj), n.by_field(member)) {
             // Rust `self::f`: `f` of the module the path is written in
-            if k == "scoped_identifier" && o.kind() == "self" {
+            if k == "scoped_identifier" && o.kind_str() == "self" {
                 return member_path(m, src);
             }
             let mut p = path_of(o, src).unwrap_or_else(|| vec![UNKNOWN.into()]);
@@ -285,20 +284,20 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         "element_binding_expression" => Some(vec![BOUND.to_string(), ELEMENT.to_string()]),
         "member_binding_expression" => {
             let mut p = vec![BOUND.to_string()];
-            p.extend(path_of(n.child_by_field_name("name")?, src)?);
+            p.extend(path_of(n.by_field("name")?, src)?);
             Some(p)
         }
         // Swift `(x as! Foo)`: a tuple of one value is the value
         "tuple_expression" if kids(n).len() == 1 => {
             let only = kids(n)[0];
-            path_of(only.child_by_field_name("value").unwrap_or(only), src)
+            path_of(only.by_field("value").unwrap_or(only), src)
         }
         // Kotlin / Swift: `a.b` with no fields, or Swift `target`/`suffix`
         "navigation_expression" => {
             let ks = kids(n);
             let mut p =
                 ks.first().and_then(|f| path_of(*f, src)).unwrap_or_else(|| vec![UNKNOWN.into()]);
-            let suffix = ks.iter().find(|c| c.kind() == "navigation_suffix")?;
+            let suffix = ks.iter().find(|c| c.kind_str() == "navigation_suffix")?;
             let name = kids(*suffix).into_iter().last()?;
             p.extend(member_path(name, src)?);
             Some(p)
@@ -316,7 +315,7 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         | "class_constant_access_expression" => {
             let mut p = Vec::new();
             for c in kids(n) {
-                if matches!(c.kind(), "type_arguments" | "type_projection") {
+                if matches!(c.kind_str(), "type_arguments" | "type_projection") {
                     continue;
                 }
                 p.extend(path_of(c, src)?);
@@ -346,12 +345,12 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
             (p.len() > usize::from(p.first().is_some_and(|h| h == "\\"))).then_some(p)
         }
         "generic_type" | "generic_name" | "parameterized_type" | "template_type" => n
-            .child_by_field_name("name")
-            .or_else(|| n.child_by_field_name("type"))
+            .by_field("name")
+            .or_else(|| n.by_field("type"))
             .or_else(|| kids(n).into_iter().next())
             .and_then(|c| path_of(c, src)),
-        "attribute" if n.child_by_field_name("object").is_none() => {
-            n.child_by_field_name("name").and_then(|c| path_of(c, src))
+        "attribute" if n.by_field("object").is_none() => {
+            n.by_field("name").and_then(|c| path_of(c, src))
         }
         "pointer_type"
         | "reference_type"
@@ -375,14 +374,14 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         "scoped_type_identifier" | "scoped_identifier" | "qualified_identifier" => {
             let mut p = Vec::new();
             // C++ `::Helper()`: the global namespace, written `::`
-            if n.kind() == "qualified_identifier"
-                && n.child_by_field_name("scope").is_none()
+            if n.kind_str() == "qualified_identifier"
+                && n.by_field("scope").is_none()
                 && text(n, src).trim_start().starts_with("::")
             {
                 p.push("::".to_string());
             }
             for c in kids(n) {
-                if matches!(c.kind(), "type_arguments" | "annotation" | "marker_annotation") {
+                if matches!(c.kind_str(), "type_arguments" | "annotation" | "marker_annotation") {
                     continue;
                 }
                 p.extend(path_of(c, src)?);
@@ -414,7 +413,7 @@ pub fn is_call_kind(k: &str) -> bool {
 
 /// The callee of a call node, and whether it constructs (`new`).
 pub fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
-    let k = n.kind();
+    let k = n.kind_str();
     if matches!(
         k,
         "new_expression"
@@ -431,10 +430,10 @@ pub fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
     ) {
         // Scala `new Outer.Inner(…)`, `new scopt.OptionParser[Config](…)`:
         // the type named through what holds it
-        let stable = kids(n).into_iter().find_map(|c| match c.kind() {
+        let stable = kids(n).into_iter().find_map(|c| match c.kind_str() {
             "stable_type_identifier" => Some(c),
             "generic_type" => {
-                c.child_by_field_name("type").filter(|t| t.kind() == "stable_type_identifier")
+                c.by_field("type").filter(|t| t.kind_str() == "stable_type_identifier")
             }
             _ => None,
         });
@@ -442,14 +441,14 @@ pub fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
             return Some((RefKind::New, stable_path(st, src)));
         }
         let t = n
-            .child_by_field_name("constructor")
-            .or_else(|| n.child_by_field_name("constructed_type"))
-            .or_else(|| n.child_by_field_name("type"))
-            .or_else(|| n.child_by_field_name("name"))
+            .by_field("constructor")
+            .or_else(|| n.by_field("constructed_type"))
+            .or_else(|| n.by_field("type"))
+            .or_else(|| n.by_field("name"))
             .or_else(|| {
-                kids(n)
-                    .into_iter()
-                    .find(|c| TYPE_KINDS.contains(&c.kind()) || NAME_KINDS.contains(&c.kind()))
+                kids(n).into_iter().find(|c| {
+                    TYPE_KINDS.contains(&c.kind_str()) || NAME_KINDS.contains(&c.kind_str())
+                })
             })?;
         let p = path_of(t, src)?;
         return Some((RefKind::New, p));
@@ -459,12 +458,12 @@ pub fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
     }
     // Java `method_invocation`, Ruby `call`, PHP member/scoped calls: object
     // and name as fields of the call itself
-    if let Some(name) = n.child_by_field_name("method").or_else(|| n.child_by_field_name("name")) {
-        if n.child_by_field_name("function").is_none() {
+    if let Some(name) = n.by_field("method").or_else(|| n.by_field("name")) {
+        if n.by_field("function").is_none() {
             let recv = n
-                .child_by_field_name("object")
-                .or_else(|| n.child_by_field_name("receiver"))
-                .or_else(|| n.child_by_field_name("scope"));
+                .by_field("object")
+                .or_else(|| n.by_field("receiver"))
+                .or_else(|| n.by_field("scope"));
             let mut p = match recv {
                 Some(r) => path_of(r, src).unwrap_or_else(|| vec![UNKNOWN.into()]),
                 None => Vec::new(),
@@ -474,12 +473,12 @@ pub fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
         }
     }
     if k == "type_conversion_expression" {
-        return Some((RefKind::Call, path_of(n.child_by_field_name("type")?, src)?));
+        return Some((RefKind::Call, path_of(n.by_field("type")?, src)?));
     }
     let f = n
-        .child_by_field_name("function")
-        .or_else(|| kids(n).into_iter().find(|c| !c.kind().contains("argument")))?;
-    if f.kind() == "import" {
+        .by_field("function")
+        .or_else(|| kids(n).into_iter().find(|c| !c.kind_str().contains("argument")))?;
+    if f.kind_str() == "import" {
         return None; // JS `import()`: an import, read by the module
     }
     // Swift `Self()`: a construction of the type around
@@ -499,21 +498,21 @@ fn types_in(
 ) {
     let mut stack = vec![(n, context)];
     while let Some((node, ctx)) = stack.pop() {
-        let k = node.kind();
+        let k = node.kind_str();
         if matches!(k, "generic_type" | "generic_name" | "parameterized_type" | "template_type")
-            || (k == "user_type" && kids(node).iter().any(|c| c.kind() == "type_arguments"))
+            || (k == "user_type" && kids(node).iter().any(|c| c.kind_str() == "type_arguments"))
         {
             // (Scala `a.b.C[Int]`: the type is written with its package)
             let stable = node
-                .child_by_field_name("type")
-                .filter(|t| t.kind() == "stable_type_identifier")
+                .by_field("type")
+                .filter(|t| t.kind_str() == "stable_type_identifier")
                 .map(|t| stable_path(t, src));
             if let Some(p) = stable.or_else(|| path_of(node, src)) {
                 out.push((p, ctx));
             }
             for c in kids(node) {
                 if matches!(
-                    c.kind(),
+                    c.kind_str(),
                     "type_arguments"
                         | "type_parameter"
                         | "template_argument_list"
@@ -532,10 +531,10 @@ fn types_in(
         // C++ `Outer::Inner`, `ns::Type` (one written with arguments,
         // `std::vector<Foo>`, is read through its name below)
         let qualified_type = k == "qualified_identifier"
-            && node.child_by_field_name("name").is_some_and(|c| c.kind() == "type_identifier")
-            && node
-                .child_by_field_name("scope")
-                .is_some_and(|c| matches!(c.kind(), "namespace_identifier" | "type_identifier"));
+            && node.by_field("name").is_some_and(|c| c.kind_str() == "type_identifier")
+            && node.by_field("scope").is_some_and(|c| {
+                matches!(c.kind_str(), "namespace_identifier" | "type_identifier")
+            });
         if TYPE_KINDS.contains(&k) || k == "identifier" || qualified_type {
             if let Some(p) = path_of(node, src) {
                 out.push((p, ctx));
@@ -556,7 +555,7 @@ fn types_in(
         // a parameter of a function type (`(ctx: RefinementCtx) => void`):
         // its type is a type, its name is not
         if matches!(k, "required_parameter" | "optional_parameter" | "rest_parameter") {
-            if let Some(t) = node.child_by_field_name("type") {
+            if let Some(t) = node.by_field("type") {
                 stack.push((t, "parameter_type"));
             }
             continue;
@@ -589,7 +588,7 @@ fn signature_types(def: Node, src: &[u8], out: &mut Vec<(Vec<String>, &'static s
             Some("receiver") => {}
             Some("parameters") => param_types(child, src, out),
             // Go `(*Response, Directive, error)`: every result names its type
-            Some("result") if child.kind() == "parameter_list" => {
+            Some("result") if child.kind_str() == "parameter_list" => {
                 for one in kids(child) {
                     types_in(one, src, "return_type", out);
                 }
@@ -598,7 +597,9 @@ fn signature_types(def: Node, src: &[u8], out: &mut Vec<(Vec<String>, &'static s
                 types_in(child, src, "return_type", out)
             }
             // Java / C / C++ method and function: `type` is the result
-            Some("type") if !def.kind().contains("field") && !def.kind().contains("property") => {
+            Some("type")
+                if !def.kind_str().contains("field") && !def.kind_str().contains("property") =>
+            {
                 types_in(child, src, "return_type", out)
             }
             // C / C++: the parameters sit inside the declarator chain
@@ -612,13 +613,13 @@ fn signature_types(def: Node, src: &[u8], out: &mut Vec<(Vec<String>, &'static s
                     stack.extend(kids(d));
                 }
             }
-            _ => match child.kind() {
+            _ => match child.kind_str() {
                 "function_value_parameters"
                 | "parameter_list"
                 | "formal_parameters"
                 | "parameter" => param_types(child, src, out),
                 // Kotlin: the result type is a bare child of the function
-                "user_type" | "nullable_type" if def.kind() == "function_declaration" => {
+                "user_type" | "nullable_type" if def.kind_str() == "function_declaration" => {
                     types_in(child, src, "return_type", out)
                 }
                 _ => {}
@@ -641,12 +642,12 @@ fn param_types(params: Node, src: &[u8], out: &mut Vec<(Vec<String>, &'static st
             }
             if field == Some("type")
                 || matches!(
-                    child.kind(),
+                    child.kind_str(),
                     "type_annotation" | "user_type" | "nullable_type" | "named_type"
                 )
             {
                 types_in(child, src, "parameter_type", out);
-            } else if !NAME_KINDS.contains(&child.kind()) {
+            } else if !NAME_KINDS.contains(&child.kind_str()) {
                 stack.push(child);
             }
         }
@@ -658,14 +659,14 @@ fn decorators(def: Node, src: &[u8], out: &mut Vec<Vec<String>>) {
     let mut found: Vec<Node> = Vec::new();
     // Python: the decorated_definition around it
     if let Some(p) = def.parent() {
-        if p.kind() == "decorated_definition" {
-            found.extend(kids(p).into_iter().filter(|c| c.kind() == "decorator"));
+        if p.kind_str() == "decorated_definition" {
+            found.extend(kids(p).into_iter().filter(|c| c.kind_str() == "decorator"));
         }
     }
     // TS / JS: decorators stacked before it
     let mut prev = if found.is_empty() { def.prev_named_sibling() } else { None };
     while let Some(p) = prev {
-        if p.kind() != "decorator" {
+        if p.kind_str() != "decorator" {
             break;
         }
         found.push(p);
@@ -673,10 +674,10 @@ fn decorators(def: Node, src: &[u8], out: &mut Vec<Vec<String>>) {
     }
     // Java / Kotlin modifiers, C# attribute lists, PHP attributes
     for c in kids(def) {
-        if matches!(c.kind(), "modifiers" | "attribute_list" | "decorator") {
+        if matches!(c.kind_str(), "modifiers" | "attribute_list" | "decorator") {
             let mut stack = vec![c];
             while let Some(n) = stack.pop() {
-                if DECORATOR_KINDS.contains(&n.kind()) && n.kind() != "attribute_item" {
+                if DECORATOR_KINDS.contains(&n.kind_str()) && n.kind_str() != "attribute_item" {
                     found.push(n);
                 } else {
                     stack.extend(kids(n));
@@ -686,19 +687,17 @@ fn decorators(def: Node, src: &[u8], out: &mut Vec<Vec<String>>) {
     }
     for d in found {
         let target = d
-            .child_by_field_name("name")
-            .or_else(|| kids(d).into_iter().find(|c| c.kind() != "arguments"));
+            .by_field("name")
+            .or_else(|| kids(d).into_iter().find(|c| c.kind_str() != "arguments"));
         let Some(mut t) = target else { continue };
         // Kotlin `@Deprecated("old")`: the annotation's type, before its arguments
-        if t.kind() == "constructor_invocation" {
+        if t.kind_str() == "constructor_invocation" {
             if let Some(ty) = kids(t).into_iter().next() {
                 t = ty;
             }
         }
-        if is_call_kind(t.kind()) {
-            if let Some(f) =
-                t.child_by_field_name("function").or_else(|| kids(t).into_iter().next())
-            {
+        if is_call_kind(t.kind_str()) {
+            if let Some(f) = t.by_field("function").or_else(|| kids(t).into_iter().next()) {
                 t = f;
             }
         }
@@ -718,7 +717,7 @@ fn is_callable(kind: crate::facts::DefKind) -> bool {
 pub fn bound_name(n: Node, src: &[u8]) -> Option<String> {
     let mut cur = n;
     for _ in 0..6 {
-        match cur.kind() {
+        match cur.kind_str() {
             "identifier"
             | "simple_identifier"
             | "field_identifier"
@@ -733,21 +732,21 @@ pub fn bound_name(n: Node, src: &[u8]) -> Option<String> {
             _ => {}
         }
         cur = cur
-            .child_by_field_name("declarator")
-            .or_else(|| cur.child_by_field_name("name"))
-            .or_else(|| cur.child_by_field_name("pattern"))
+            .by_field("declarator")
+            .or_else(|| cur.by_field("name"))
+            .or_else(|| cur.by_field("pattern"))
             .or_else(|| {
                 kids(cur).into_iter().find(|c| {
                     matches!(
-                        c.kind(),
+                        c.kind_str(),
                         "identifier"
                             | "simple_identifier"
                             | "variable_name"
                             | "bound_identifier"
                             | "name"
                             | "field_identifier"
-                    ) || c.kind().ends_with("declarator")
-                        || c.kind().ends_with("pattern")
+                    ) || c.kind_str().ends_with("declarator")
+                        || c.kind_str().ends_with("pattern")
                 })
             })?;
     }
@@ -865,25 +864,19 @@ fn union_alts(param: Node, src: &[u8]) -> Vec<Vec<String>> {
     if param.language().name() != Some("python") {
         return Vec::new();
     }
-    let Some(t) = param.child_by_field_name("type") else { return Vec::new() };
-    let t = if t.kind() == "type" { kids(t).into_iter().next().unwrap_or(t) } else { t };
+    let Some(t) = param.by_field("type") else { return Vec::new() };
+    let t = if t.kind_str() == "type" { kids(t).into_iter().next().unwrap_or(t) } else { t };
     let mut members = Vec::new();
     let mut stack = vec![t];
     let mut union = false;
     while let Some(n) = stack.pop() {
-        match n.kind() {
-            "binary_operator"
-                if n.child_by_field_name("operator").is_some_and(|o| o.kind() == "|") =>
-            {
+        match n.kind_str() {
+            "binary_operator" if n.by_field("operator").is_some_and(|o| o.kind_str() == "|") => {
                 union = true;
-                stack.extend(
-                    [n.child_by_field_name("right"), n.child_by_field_name("left")]
-                        .into_iter()
-                        .flatten(),
-                );
+                stack.extend([n.by_field("right"), n.by_field("left")].into_iter().flatten());
             }
             "subscript"
-                if n.child_by_field_name("value").is_some_and(|v| {
+                if n.by_field("value").is_some_and(|v| {
                     matches!(
                         path_of(v, src).as_ref().and_then(|p| p.last()).map(String::as_str),
                         Some("Union" | "Optional")
@@ -942,7 +935,7 @@ fn sealed_type(t: Node, src: &[u8]) -> bool {
 
 /// The first type a type position names, through wrappers.
 fn first_type(n: Node, src: &[u8]) -> Option<Vec<String>> {
-    if matches!(n.kind(), "implicit_type" | "placeholder_type_specifier")
+    if matches!(n.kind_str(), "implicit_type" | "placeholder_type_specifier")
         || (n.child_count() == 0 && text(n, src) == "var")
     {
         return None; // `var`, `auto`: the type is the value's
@@ -977,10 +970,10 @@ fn first_type_argument(n: Node) -> Option<Node> {
         let mut next = Vec::new();
         for x in level {
             if matches!(
-                x.kind(),
+                x.kind_str(),
                 "type_arguments" | "type_argument_list" | "template_argument_list"
             ) {
-                return kids(x).into_iter().find(|c| c.kind() != "lifetime" && !is_comment(c));
+                return kids(x).into_iter().find(|c| c.kind_str() != "lifetime" && !is_comment(c));
             }
             next.extend(kids(x));
         }
@@ -995,35 +988,33 @@ fn first_type_argument(n: Node) -> Option<Node> {
 /// A cast: what the value is, written at the site.
 fn is_cast(n: Node) -> bool {
     matches!(
-        n.kind(),
+        n.kind_str(),
         "cast_expression" | "as_expression" | "type_assertion" | "type_assertion_expression"
     )
 }
 
 fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
-    match v.kind() {
+    match v.kind_str() {
         // a cast says what the value is: C# / Java `(Foo)x`, C# `x as Foo`
         // (`right`), TS `x as Foo` and Kotlin `x as Foo` / `as?` (the type
         // child), TS `<Foo>x`
-        "cast_expression" => v.child_by_field_name("type").and_then(|t| first_type(t, src)),
+        "cast_expression" => v.by_field("type").and_then(|t| first_type(t, src)),
         "as_expression" => v
-            .child_by_field_name("right")
+            .by_field("right")
             .or_else(|| {
                 kids(v).into_iter().rev().find(|c| {
                     matches!(
-                        c.kind(),
+                        c.kind_str(),
                         "type_identifier" | "user_type" | "generic_type" | "nullable_type"
-                    ) || c.kind().ends_with("_type")
+                    ) || c.kind_str().ends_with("_type")
                 })
             })
             .and_then(|t| first_type(t, src)),
         // Go `x.(*Foo)`
-        "type_assertion_expression" => {
-            v.child_by_field_name("type").and_then(|t| first_type(t, src))
-        }
+        "type_assertion_expression" => v.by_field("type").and_then(|t| first_type(t, src)),
         "type_assertion" => kids(v)
             .into_iter()
-            .find(|c| c.kind() == "type_arguments")
+            .find(|c| c.kind_str() == "type_arguments")
             .and_then(|t| kids(t).into_iter().next())
             .and_then(|t| first_type(t, src)),
         // Go `xs[1:3]`: what it slices
@@ -1040,12 +1031,12 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
         // x)` is s, grown
         "call_expression"
             if crate::parse::current() == Some(crate::lang::Lang::Go)
-                && v.child_by_field_name("function")
+                && v.by_field("function")
                     .is_some_and(|f| matches!(text(f, src).as_str(), "make" | "append")) =>
         {
-            let args = v.child_by_field_name("arguments")?;
+            let args = v.by_field("arguments")?;
             let first = kids(args).into_iter().find(|c| !is_comment(c))?;
-            if text(v.child_by_field_name("function")?, src) == "append" {
+            if text(v.by_field("function")?, src) == "append" {
                 return path_of(first, src).filter(|p| p[0] != UNKNOWN);
             }
             let mut p = elem_type(first, src)?;
@@ -1055,9 +1046,9 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
         // Go `new(T)`: a T (a pointer to one, which the walk does not tell apart)
         "call_expression"
             if crate::parse::current() == Some(crate::lang::Lang::Go)
-                && v.child_by_field_name("function").is_some_and(|f| text(f, src) == "new") =>
+                && v.by_field("function").is_some_and(|f| text(f, src) == "new") =>
         {
-            let args = v.child_by_field_name("arguments")?;
+            let args = v.by_field("arguments")?;
             let t = kids(args).into_iter().find(|c| !is_comment(c))?;
             first_type(t, src).or_else(|| path_of(t, src))
         }
@@ -1065,7 +1056,7 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
             kids(v).into_iter().find_map(|c| {
                 value_type(c, src).or_else(|| {
                     // (Go `&xs[i]`: the element's address)
-                    (c.kind() == "index_expression"
+                    (c.kind_str() == "index_expression"
                         && crate::parse::current() == Some(crate::lang::Lang::Go))
                     .then(|| path_of(c, src))
                     .flatten()
@@ -1084,7 +1075,7 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
         // collection of what each gives)
         _ => {
             if matches!(
-                v.kind(),
+                v.kind_str(),
                 "list_comprehension" | "set_comprehension" | "generator_expression"
             ) {
                 return path_of(v, src).filter(|p| p.first().is_some_and(|s| s != UNKNOWN));
@@ -1093,7 +1084,7 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
             // dl.Request`)
             let read = || {
                 matches!(
-                    v.kind(),
+                    v.kind_str(),
                     "selector_expression"
                         | "member_expression"
                         | "field_expression"
@@ -1107,14 +1098,15 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
                 .filter(|p| p.len() >= 2 && !p.iter().any(|s| s == "()" || s.starts_with('[')))
             };
             // (`const request = first`: what the name holds)
-            if matches!(v.kind(), "identifier" | "simple_identifier") {
+            if matches!(v.kind_str(), "identifier" | "simple_identifier") {
                 return path_of(v, src)
                     .filter(|p| p.len() == 1 && p[0] != "self" && p[0] != "super");
             }
             let Some(called) = callee(v, src).map(|(_, p)| p) else {
                 return read().filter(|p| p.first().is_some_and(|s| s != UNKNOWN));
             };
-            let mapped = if is_call_kind(v.kind()) { mapped_call(v, src, &called) } else { None };
+            let mapped =
+                if is_call_kind(v.kind_str()) { mapped_call(v, src, &called) } else { None };
             Some(mapped.unwrap_or(called)).filter(|p| p.first().is_some_and(|s| s != UNKNOWN))
         }
     }
@@ -1138,27 +1130,24 @@ fn slot_facts(n: Node, src: &[u8]) -> Vec<crate::facts::SlotFact> {
             byte: v.start_byte(),
         });
     };
-    match n.kind() {
+    match n.kind_str() {
         "init_declarator" => {
-            let Some(list) =
-                n.child_by_field_name("value").filter(|v| v.kind() == "initializer_list")
+            let Some(list) = n.by_field("value").filter(|v| v.kind_str() == "initializer_list")
             else {
                 return out;
             };
-            let Some(name) = n.child_by_field_name("declarator").and_then(|d| bound_name(d, src))
-            else {
+            let Some(name) = n.by_field("declarator").and_then(|d| bound_name(d, src)) else {
                 return out;
             };
             for (i, item) in kids(list).into_iter().filter(|c| !is_comment(c)).enumerate() {
-                match item.kind() {
+                match item.kind_str() {
                     "identifier" => fact(vec![name.clone()], None, u32::try_from(i).ok(), item),
                     "initializer_pair" => {
                         let designators: Vec<Node> = kids(item)
                             .into_iter()
-                            .filter(|c| c.kind() == "field_designator")
+                            .filter(|c| c.kind_str() == "field_designator")
                             .collect();
-                        let value =
-                            item.child_by_field_name("value").filter(|v| v.kind() == "identifier");
+                        let value = item.by_field("value").filter(|v| v.kind_str() == "identifier");
                         if let ([one], Some(v)) = (designators.as_slice(), value) {
                             let field = kids(*one).into_iter().next().map(|f| text(f, src));
                             fact(vec![name.clone()], field, None, v);
@@ -1169,9 +1158,9 @@ fn slot_facts(n: Node, src: &[u8]) -> Vec<crate::facts::SlotFact> {
             }
         }
         "assignment_expression" => {
-            let left = n.child_by_field_name("left").filter(|l| l.kind() == "field_expression");
-            let right = n.child_by_field_name("right").filter(|r| r.kind() == "identifier");
-            let op = n.child_by_field_name("operator").map(|o| text(o, src));
+            let left = n.by_field("left").filter(|l| l.kind_str() == "field_expression");
+            let right = n.by_field("right").filter(|r| r.kind_str() == "identifier");
+            let op = n.by_field("operator").map(|o| text(o, src));
             if let (Some(l), Some(r), Some("=")) = (left, right, op.as_deref()) {
                 if let Some(mut path) = path_of(l, src) {
                     if path.len() >= 2 {
@@ -1190,16 +1179,15 @@ fn slot_facts(n: Node, src: &[u8]) -> Vec<crate::facts::SlotFact> {
 /// Wrapper<T, true>;`): a declaration with no type before its declarator, a
 /// trailing result, and the result's template the declarator's own name.
 fn deduction_guide(n: Node, src: &[u8]) -> Option<String> {
-    if n.kind() != "declaration" || n.child_by_field_name("type").is_some() {
+    if n.kind_str() != "declaration" || n.by_field("type").is_some() {
         return None;
     }
-    let decl = n.child_by_field_name("declarator").filter(|d| d.kind() == "function_declarator")?;
-    let name =
-        text(decl.child_by_field_name("declarator").filter(|d| d.kind() == "identifier")?, src);
-    let trailing = kids(decl).into_iter().find(|c| c.kind() == "trailing_return_type")?;
-    let mut t = kids(trailing).into_iter().find(|c| c.kind() == "type_descriptor")?;
-    t = t.child_by_field_name("type")?;
-    let of = if t.kind() == "template_type" { t.child_by_field_name("name")? } else { t };
+    let decl = n.by_field("declarator").filter(|d| d.kind_str() == "function_declarator")?;
+    let name = text(decl.by_field("declarator").filter(|d| d.kind_str() == "identifier")?, src);
+    let trailing = kids(decl).into_iter().find(|c| c.kind_str() == "trailing_return_type")?;
+    let mut t = kids(trailing).into_iter().find(|c| c.kind_str() == "type_descriptor")?;
+    t = t.by_field("type")?;
+    let of = if t.kind_str() == "template_type" { t.by_field("name")? } else { t };
     (text(of, src) == name).then_some(name)
 }
 
@@ -1208,22 +1196,22 @@ fn deduction_guide(n: Node, src: &[u8]) -> Option<String> {
 fn template_args(t: Node, src: &[u8]) -> Vec<String> {
     let mut t = t;
     for _ in 0..3 {
-        match t.kind() {
-            "type_descriptor" => match t.child_by_field_name("type") {
+        match t.kind_str() {
+            "type_descriptor" => match t.by_field("type") {
                 Some(x) => t = x,
                 None => return Vec::new(),
             },
-            "qualified_identifier" => match t.child_by_field_name("name") {
+            "qualified_identifier" => match t.by_field("name") {
                 Some(x) => t = x,
                 None => return Vec::new(),
             },
             _ => break,
         }
     }
-    if t.kind() != "template_type" {
+    if t.kind_str() != "template_type" {
         return Vec::new();
     }
-    t.child_by_field_name("arguments")
+    t.by_field("arguments")
         .map(|a| kids(a).into_iter().filter(|c| !is_comment(c)).map(|c| text(c, src)).collect())
         .unwrap_or_default()
 }
@@ -1245,11 +1233,11 @@ fn misread_variable<'t>(
     anc: &[Node],
     locals: &[Local],
 ) -> Option<Misread<'t>> {
-    if n.kind() != "declaration" || anc.last()?.kind() != "compound_statement" {
+    if n.kind_str() != "declaration" || anc.last()?.kind_str() != "compound_statement" {
         return None;
     }
-    let decl = n.child_by_field_name("declarator").filter(|d| d.kind() == "function_declarator")?;
-    let name = decl.child_by_field_name("declarator").filter(|d| d.kind() == "identifier")?;
+    let decl = n.by_field("declarator").filter(|d| d.kind_str() == "function_declarator")?;
+    let name = decl.by_field("declarator").filter(|d| d.kind_str() == "identifier")?;
     let params = params_field(decl)?;
     let mut args = Vec::new();
     // `Random rnd(test::RandomSeed());`: a call where a parameter's type
@@ -1260,37 +1248,37 @@ fn misread_variable<'t>(
     let mut this_arg = false;
     let mut qualified = Vec::new();
     for p in kids(params).into_iter().filter(|c| !is_comment(c)) {
-        if p.kind() != "parameter_declaration" {
+        if p.kind_str() != "parameter_declaration" {
             return None;
         }
-        let ty = p.child_by_field_name("type");
+        let ty = p.by_field("type");
         if p.named_child_count() == 1 {
             match ty {
-                Some(t) if t.kind() == "type_identifier" && text(t, src) == "this" => {
+                Some(t) if t.kind_str() == "type_identifier" && text(t, src) == "this" => {
                     this_arg = true;
                     continue;
                 }
-                Some(t) if t.kind() == "qualified_identifier" => {
+                Some(t) if t.kind_str() == "qualified_identifier" => {
                     qualified.push(t);
                     continue;
                 }
                 _ => {}
             }
         }
-        match p.child_by_field_name("declarator") {
+        match p.by_field("declarator") {
             Some(d)
-                if d.kind() == "abstract_function_declarator"
-                    && d.child_by_field_name("declarator").is_none()
+                if d.kind_str() == "abstract_function_declarator"
+                    && d.by_field("declarator").is_none()
                     && params_field(d).is_some_and(|ps| kids(ps).is_empty()) =>
             {
-                calls.push(p.child_by_field_name("type")?);
+                calls.push(p.by_field("type")?);
                 continue;
             }
             // a bare name and nothing else: no declarator, no qualifier
             Some(_) => return None,
             None => {}
         }
-        let ty = p.child_by_field_name("type").filter(|t| t.kind() == "type_identifier")?;
+        let ty = p.by_field("type").filter(|t| t.kind_str() == "type_identifier")?;
         if p.named_child_count() != 1 {
             return None;
         }
@@ -1305,26 +1293,24 @@ fn misread_variable<'t>(
     let func = anc
         .iter()
         .rev()
-        .find(|a| matches!(a.kind(), "function_definition" | "lambda_expression"))?;
+        .find(|a| matches!(a.kind_str(), "function_definition" | "lambda_expression"))?;
     let (lo, at) = (func.start_byte(), n.start_byte());
     let params_of = func
-        .child_by_field_name("declarator")
+        .by_field("declarator")
         .and_then(|d| {
             let mut cur = d;
             for _ in 0..4 {
                 if let Some(p) = params_field(cur) {
                     return Some(p);
                 }
-                cur = cur.child_by_field_name("declarator")?;
+                cur = cur.by_field("declarator")?;
             }
             None
         })
         .map(|ps| {
             kids(ps)
                 .into_iter()
-                .filter_map(|p| {
-                    p.child_by_field_name("declarator").and_then(|d| bound_name(d, src))
-                })
+                .filter_map(|p| p.by_field("declarator").and_then(|d| bound_name(d, src)))
                 .collect::<Vec<String>>()
         })
         .unwrap_or_default();
@@ -1336,7 +1322,7 @@ fn misread_variable<'t>(
         return None;
     }
     // (as a declared local's type is written: `first_type`)
-    let ty = first_type(n.child_by_field_name("type")?, src)?;
+    let ty = first_type(n.by_field("type")?, src)?;
     Some((text(name, src), ty, args, calls, qualified, this_arg))
 }
 
@@ -1351,27 +1337,27 @@ fn declared_construction(
 ) -> Option<(Vec<String>, Option<u8>)> {
     let count =
         |list: Node| u8::try_from(kids(list).iter().filter(|c| !is_comment(c)).count()).ok();
-    match n.kind() {
+    match n.kind_str() {
         "implicit_object_creation_expression" => {
-            let decl =
-                anc.iter().rev().take(3).find(|a| {
-                    matches!(a.kind(), "variable_declaration" | "property_declaration")
-                })?;
-            let path = path_of(decl.child_by_field_name("type")?, src)?;
-            let args = kids(n).into_iter().find(|c| c.kind() == "argument_list").and_then(count);
+            let decl = anc.iter().rev().take(3).find(|a| {
+                matches!(a.kind_str(), "variable_declaration" | "property_declaration")
+            })?;
+            let path = path_of(decl.by_field("type")?, src)?;
+            let args =
+                kids(n).into_iter().find(|c| c.kind_str() == "argument_list").and_then(count);
             Some((path, args))
         }
         "init_declarator" if lang == Some(crate::lang::Lang::Cpp) => {
-            let value = n.child_by_field_name("value")?;
-            if !matches!(value.kind(), "argument_list" | "initializer_list") {
+            let value = n.by_field("value")?;
+            if !matches!(value.kind_str(), "argument_list" | "initializer_list") {
                 return None;
             }
             // the object itself, not a pointer or a reference to one
-            if n.child_by_field_name("declarator")?.kind() != "identifier" {
+            if n.by_field("declarator")?.kind_str() != "identifier" {
                 return None;
             }
-            let decl = anc.last().filter(|a| a.kind() == "declaration")?;
-            let path = path_of(decl.child_by_field_name("type")?, src)?;
+            let decl = anc.last().filter(|a| a.kind_str() == "declaration")?;
+            let path = path_of(decl.by_field("type")?, src)?;
             Some((path, count(value)))
         }
         _ => None,
@@ -1381,13 +1367,13 @@ fn declared_construction(
 /// The receiver type of a callable's last function-typed parameter that has
 /// one: Kotlin `fun withIndent(block: Builder.() -> Unit)`.
 fn lambda_receiver(n: Node, src: &[u8]) -> Option<Vec<String>> {
-    let params = kids(n).into_iter().find(|c| c.kind() == "function_value_parameters")?;
-    kids(params).into_iter().rev().filter(|p| p.kind() == "parameter").find_map(|p| {
+    let params = kids(n).into_iter().find(|c| c.kind_str() == "function_value_parameters")?;
+    kids(params).into_iter().rev().filter(|p| p.kind_str() == "parameter").find_map(|p| {
         let mut stack = kids(p);
         while let Some(c) = stack.pop() {
-            match c.kind() {
+            match c.kind_str() {
                 "function_type" => {
-                    let recv = kids(c).into_iter().find(|x| x.kind() == "receiver_type")?;
+                    let recv = kids(c).into_iter().find(|x| x.kind_str() == "receiver_type")?;
                     return first_type(recv, src);
                 }
                 "nullable_type" | "parenthesized_type" | "type_modifiers" => stack.extend(kids(c)),
@@ -1402,19 +1388,19 @@ fn lambda_receiver(n: Node, src: &[u8]) -> Option<Vec<String>> {
 /// its receiver, if it has one, comes from.
 fn receiver_lambda(n: Node, src: &[u8]) -> Option<(usize, usize, crate::facts::ReceiverOf)> {
     use crate::facts::ReceiverOf;
-    if n.kind() != "call_expression" {
+    if n.kind_str() != "call_expression" {
         return None;
     }
-    let suffix = kids(n).into_iter().find(|c| c.kind() == "call_suffix")?;
+    let suffix = kids(n).into_iter().find(|c| c.kind_str() == "call_suffix")?;
     let ks = kids(suffix);
-    let lambda = ks.iter().find(|c| c.kind() == "annotated_lambda")?;
+    let lambda = ks.iter().find(|c| c.kind_str() == "annotated_lambda")?;
     let (_, path) = callee(n, src)?;
     let last = path.last()?.as_str();
     let of = match last {
         // the scope functions whose lambda has the value as its receiver
         "apply" | "run" if path.len() > 1 => ReceiverOf::Value(path[..path.len() - 1].to_vec()),
         "with" if path.len() == 1 => {
-            let args = ks.iter().find(|c| c.kind() == "value_arguments")?;
+            let args = ks.iter().find(|c| c.kind_str() == "value_arguments")?;
             let arg = kids(*args).into_iter().next()?;
             let value = kids(arg).into_iter().last()?;
             ReceiverOf::Value(path_of(value, src).filter(|p| p[0] != UNKNOWN)?)
@@ -1479,19 +1465,19 @@ fn is_closure(kind: &str) -> bool {
 
 /// The value of a `return` statement.
 fn returned_value<'t>(n: Node<'t>, src: &[u8]) -> Option<Node<'t>> {
-    let v = match n.kind() {
+    let v = match n.kind_str() {
         "return_statement" | "return_expression" | "return" => {
             kids(n).into_iter().find(|c| !is_comment(c))?
         }
         // Kotlin `return x`, `return@label x` (also `throw`, `break`)
         "jump_expression" if text(n, src).starts_with("return") => {
-            kids(n).into_iter().rfind(|c| c.kind() != "label" && !is_comment(c))?
+            kids(n).into_iter().rfind(|c| c.kind_str() != "label" && !is_comment(c))?
         }
-        "control_transfer_statement" => n.child_by_field_name("result")?,
+        "control_transfer_statement" => n.by_field("result")?,
         _ => return None,
     };
     // Ruby `return Foo.new`: the one argument
-    if v.kind() == "argument_list" {
+    if v.kind_str() == "argument_list" {
         let ks = kids(v);
         return (ks.len() == 1).then(|| ks[0]);
     }
@@ -1501,14 +1487,21 @@ fn returned_value<'t>(n: Node<'t>, src: &[u8]) -> Option<Node<'t>> {
 /// The value a definition's body is, where it is an expression: Kotlin `fun
 /// f() = x`, Scala `def f = x`, `() => x`, the last expression of a Ruby method.
 fn body_value(n: Node) -> Option<Node> {
-    if let Some(fb) = kids(n).into_iter().find(|c| c.kind() == "function_body") {
-        return fb.child(0).filter(|c| c.kind() == "=").and_then(|_| kids(fb).into_iter().last());
+    if let Some(fb) = kids(n).into_iter().find(|c| c.kind_str() == "function_body") {
+        return fb
+            .child(0)
+            .filter(|c| c.kind_str() == "=")
+            .and_then(|_| kids(fb).into_iter().last());
     }
-    let body = n.child_by_field_name("body")?;
-    match body.kind() {
+    let body = n.by_field("body")?;
+    match body.kind_str() {
         "body_statement" => kids(body).into_iter().rfind(|c| !is_comment(c)),
         k if k.contains("block") || k.contains("statement") || k == "function_body" => None,
-        _ if matches!(n.kind(), "arrow_function" | "function_definition" | "lambda_expression") => {
+        _ if matches!(
+            n.kind_str(),
+            "arrow_function" | "function_definition" | "lambda_expression"
+        ) =>
+        {
             Some(body)
         }
         _ => None,
@@ -1528,19 +1521,18 @@ fn returned_path(v: Node, src: &[u8]) -> Option<Vec<String>> {
 /// `return { show, hide: close }`: the members of an object literal a
 /// function returns, each with the name its value is.
 fn note_members(def: &mut Def, v: Node, src: &[u8]) {
-    if !def.returned_members.is_empty() || v.kind() != "object" {
+    if !def.returned_members.is_empty() || v.kind_str() != "object" {
         return;
     }
     for c in kids(v) {
-        match c.kind() {
+        match c.kind_str() {
             "shorthand_property_identifier" => {
                 let t = text(c, src);
                 def.returned_members.push((t.clone(), t));
             }
             "pair" => {
-                let key =
-                    c.child_by_field_name("key").filter(|k| k.kind() == "property_identifier");
-                let value = c.child_by_field_name("value").filter(|x| x.kind() == "identifier");
+                let key = c.by_field("key").filter(|k| k.kind_str() == "property_identifier");
+                let value = c.by_field("value").filter(|x| x.kind_str() == "identifier");
                 if let (Some(k), Some(x)) = (key, value) {
                     def.returned_members.push((text(k, src), text(x, src)));
                 }
@@ -1552,7 +1544,10 @@ fn note_members(def: &mut Def, v: Node, src: &[u8]) {
 
 fn note_parts(def: &mut Def, v: Node, src: &[u8]) {
     if !def.returned_parts.is_empty()
-        || !matches!(v.kind(), "array" | "tuple_expression" | "tuple" | "list" | "array_literal")
+        || !matches!(
+            v.kind_str(),
+            "array" | "tuple_expression" | "tuple" | "list" | "array_literal"
+        )
     {
         return;
     }
@@ -1562,9 +1557,12 @@ fn note_parts(def: &mut Def, v: Node, src: &[u8]) {
         .filter(|c| !is_comment(c))
         .map(|c| {
             // (C#'s and Swift's items sit in an argument / a `value`)
-            let c =
-                if c.kind() == "argument" { kids(c).into_iter().last().unwrap_or(c) } else { c };
-            if matches!(c.kind(), "identifier" | "simple_identifier") {
+            let c = if c.kind_str() == "argument" {
+                kids(c).into_iter().last().unwrap_or(c)
+            } else {
+                c
+            };
+            if matches!(c.kind_str(), "identifier" | "simple_identifier") {
                 text(c, src)
             } else {
                 String::new()
@@ -1583,16 +1581,16 @@ fn note_return(def: &mut Def, path: Vec<String>) {
 }
 
 fn is_comment(n: &Node) -> bool {
-    n.kind().contains("comment")
+    n.kind_str().contains("comment")
 }
 
 /// How many arguments a call passes: the entries of its argument list, and a
 /// trailing lambda (Kotlin, Swift) as one more.
 fn arg_count(n: Node) -> Option<u8> {
     // C# `new Options { Flag = true }`: no list, no argument
-    if n.kind() == "object_creation_expression"
-        && n.child_by_field_name("arguments").is_none()
-        && n.child_by_field_name("initializer").is_some()
+    if n.kind_str() == "object_creation_expression"
+        && n.by_field("arguments").is_none()
+        && n.by_field("initializer").is_some()
     {
         return Some(0);
     }
@@ -1603,15 +1601,18 @@ fn arg_count(n: Node) -> Option<u8> {
 
 /// Whether a call passes `this` / `self` as one of its arguments.
 fn passes_self(n: Node, src: &[u8]) -> bool {
-    let list = n.child_by_field_name("arguments").or_else(|| {
-        let sfx = kids(n).into_iter().find(|c| c.kind() == "call_suffix")?;
-        kids(sfx).into_iter().find(|c| c.kind() == "value_arguments")
+    let list = n.by_field("arguments").or_else(|| {
+        let sfx = kids(n).into_iter().find(|c| c.kind_str() == "call_suffix")?;
+        kids(sfx).into_iter().find(|c| c.kind_str() == "value_arguments")
     });
     list.is_some_and(|l| {
         kids(l).into_iter().any(|a| {
             // the argument itself, or the value of `name = this`
-            let v =
-                if a.kind().contains("argument") { kids(a).into_iter().last() } else { Some(a) };
+            let v = if a.kind_str().contains("argument") {
+                kids(a).into_iter().last()
+            } else {
+                Some(a)
+            };
             v.and_then(|v| path_of(v, src)).is_some_and(|p| p == ["self"])
         })
     })
@@ -1620,10 +1621,10 @@ fn passes_self(n: Node, src: &[u8]) -> bool {
 /// RSpec `shared_examples 'name' do … end` (true) or `it_behaves_like 'name'`
 /// / `include_examples 'name'` (false), with the name.
 fn shared_examples_call(n: Node, src: &[u8]) -> Option<(String, bool)> {
-    if n.kind() != "call" || n.child_by_field_name("receiver").is_some() {
+    if n.kind_str() != "call" || n.by_field("receiver").is_some() {
         return None;
     }
-    let method = text(n.child_by_field_name("method")?, src);
+    let method = text(n.by_field("method")?, src);
     let declares = match method.as_str() {
         "shared_examples" | "shared_examples_for" | "shared_context" => true,
         "it_behaves_like" | "it_should_behave_like" | "include_examples" | "include_context" => {
@@ -1631,8 +1632,8 @@ fn shared_examples_call(n: Node, src: &[u8]) -> Option<(String, bool)> {
         }
         _ => return None,
     };
-    let first = kids(n.child_by_field_name("arguments")?).into_iter().next()?;
-    let name = match first.kind() {
+    let first = kids(n.by_field("arguments")?).into_iter().next()?;
+    let name = match first.kind_str() {
         "string" => string_value(first, src),
         "simple_symbol" => text(first, src).trim_start_matches(':').to_string(),
         _ => return None,
@@ -1644,21 +1645,21 @@ fn shared_examples_call(n: Node, src: &[u8]) -> Option<(String, bool)> {
 /// :a`, `def_delegators :@x, :a, :b`, `Struct.new(:a, :b)` (and any `X.new`
 /// given only symbols, such as a struct-like base class).
 fn ruby_attrs(n: Node, src: &[u8]) -> Vec<String> {
-    if n.kind() != "call" {
+    if n.kind_str() != "call" {
         return Vec::new();
     }
-    let Some(method) = n.child_by_field_name("method").map(|m| text(m, src)) else {
+    let Some(method) = n.by_field("method").map(|m| text(m, src)) else {
         return Vec::new();
     };
-    let Some(args) = n.child_by_field_name("arguments") else { return Vec::new() };
+    let Some(args) = n.by_field("arguments") else { return Vec::new() };
     let ks = kids(args);
     let symbols: Vec<String> = ks
         .iter()
-        .filter(|a| a.kind() == "simple_symbol")
+        .filter(|a| a.kind_str() == "simple_symbol")
         .map(|a| text(*a, src).trim_start_matches(':').to_string())
         .filter(|s| !s.starts_with('@'))
         .collect();
-    let declares = n.child_by_field_name("receiver").is_none()
+    let declares = n.by_field("receiver").is_none()
         && matches!(
             method.as_str(),
             "attr_accessor"
@@ -1681,19 +1682,21 @@ fn ruby_attrs(n: Node, src: &[u8]) -> Vec<String> {
 /// The names of the type parameters a declaration writes: `<T, R>`.
 fn type_params(n: Node, src: &[u8]) -> Vec<String> {
     // C++ writes them on the `template <typename T>` around the declaration
-    let template = n.parent().filter(|p| p.kind() == "template_declaration");
+    let template = n.parent().filter(|p| p.kind_str() == "template_declaration");
     let lists: Vec<Node> = match template {
-        Some(t) => kids(t).into_iter().filter(|c| c.kind() == "template_parameter_list").collect(),
+        Some(t) => {
+            kids(t).into_iter().filter(|c| c.kind_str() == "template_parameter_list").collect()
+        }
         None => Vec::new(),
     };
     if !lists.is_empty() {
         return lists
             .into_iter()
             .flat_map(kids)
-            .filter(|tp| tp.kind().contains("type_parameter"))
+            .filter(|tp| tp.kind_str().contains("type_parameter"))
             .filter_map(|tp| {
-                tp.child_by_field_name("name")
-                    .or_else(|| kids(tp).into_iter().find(|c| c.kind() == "type_identifier"))
+                tp.by_field("name")
+                    .or_else(|| kids(tp).into_iter().find(|c| c.kind_str() == "type_identifier"))
                     .map(|c| text(c, src))
             })
             .collect();
@@ -1709,22 +1712,20 @@ fn type_params_bounds(n: Node, src: &[u8]) -> (Vec<String>, Vec<Option<Vec<Strin
     // Python 3.12 `def f[T: Base](…)`, `class C[U]` (PEP 695): one
     // `type_parameter` whose `type`s are the parameters, a bound written
     // `T: Base` (a `constrained_type`)
-    if let Some(list) =
-        n.child_by_field_name("type_parameters").filter(|l| l.kind() == "type_parameter")
-    {
-        for t in kids(list).into_iter().filter(|c| c.kind() == "type") {
+    if let Some(list) = n.by_field("type_parameters").filter(|l| l.kind_str() == "type_parameter") {
+        for t in kids(list).into_iter().filter(|c| c.kind_str() == "type") {
             let inner = kids(t);
             match inner.first() {
-                Some(c) if c.kind() == "identifier" => {
+                Some(c) if c.kind_str() == "identifier" => {
                     names.push(text(*c, src));
                     bounds.push(None);
                 }
-                Some(c) if c.kind() == "constrained_type" => {
+                Some(c) if c.kind_str() == "constrained_type" => {
                     let parts: Vec<Node> =
-                        kids(*c).into_iter().filter(|x| x.kind() == "type").collect();
+                        kids(*c).into_iter().filter(|x| x.kind_str() == "type").collect();
                     if let Some(name) = parts
                         .first()
-                        .and_then(|p| kids(*p).into_iter().find(|x| x.kind() == "identifier"))
+                        .and_then(|p| kids(*p).into_iter().find(|x| x.kind_str() == "identifier"))
                     {
                         names.push(text(name, src));
                         bounds.push(parts.get(1).and_then(|b| bound_path(&text(*b, src))));
@@ -1737,19 +1738,20 @@ fn type_params_bounds(n: Node, src: &[u8]) -> (Vec<String>, Vec<Option<Vec<Strin
     }
     let lists = kids(n)
         .into_iter()
-        .filter(|c| matches!(c.kind(), "type_parameters" | "type_parameter_list"));
+        .filter(|c| matches!(c.kind_str(), "type_parameters" | "type_parameter_list"));
     for tp in lists.flat_map(kids) {
         // (Scala writes the names and their bounds side by side)
-        if tp.kind().contains("identifier") {
+        if tp.kind_str().contains("identifier") {
             names.push(text(tp, src));
             bounds.push(None);
-        } else if tp.kind() == "upper_bound" {
+        } else if tp.kind_str() == "upper_bound" {
             // (`[A: Read]` asks for a `Read[A]`: it says nothing of `A`)
             if let Some(last) = bounds.last_mut().filter(|b| b.is_none()) {
                 *last = bound_path(&text(tp, src));
             }
-        } else if tp.kind().ends_with("bound") {
-        } else if let Some(id) = kids(tp).into_iter().find(|c| c.kind().contains("identifier")) {
+        } else if tp.kind_str().ends_with("bound") {
+        } else if let Some(id) = kids(tp).into_iter().find(|c| c.kind_str().contains("identifier"))
+        {
             names.push(text(id, src));
             let written = &src[id.end_byte().min(tp.end_byte())..tp.end_byte()];
             bounds.push(bound_path(&String::from_utf8_lossy(written)));
@@ -1758,7 +1760,7 @@ fn type_params_bounds(n: Node, src: &[u8]) -> (Vec<String>, Vec<Option<Vec<Strin
     // Scala 3 `extension [A, B](x: F[A]) def m(…)`: the extension's are the
     // method's too
     let around = n.parent().into_iter().chain(n.parent().and_then(|p| p.parent()));
-    if let Some(ext) = around.into_iter().find(|a| a.kind() == "extension_definition") {
+    if let Some(ext) = around.into_iter().find(|a| a.kind_str() == "extension_definition") {
         let (more, their) = type_params_bounds(ext, src);
         names.extend(more);
         bounds.extend(their);
@@ -1766,19 +1768,19 @@ fn type_params_bounds(n: Node, src: &[u8]) -> (Vec<String>, Vec<Option<Vec<Strin
     // `where T: Foo`, `where T : Foo`
     let clauses = kids(n).into_iter().filter(|c| {
         matches!(
-            c.kind(),
+            c.kind_str(),
             "where_clause" | "type_constraints" | "type_parameter_constraints_clause"
         )
     });
     for clause in clauses {
-        let rows = if clause.kind() == "type_parameter_constraints_clause" {
+        let rows = if clause.kind_str() == "type_parameter_constraints_clause" {
             vec![clause]
         } else {
             kids(clause)
         };
         for row in rows {
             let row = match kids(row).as_slice() {
-                [only] if only.kind().ends_with("constraint") => *only,
+                [only] if only.kind_str().ends_with("constraint") => *only,
                 _ => row,
             };
             let ks = kids(row);
@@ -1865,11 +1867,11 @@ fn self_params(n: Node, src: &[u8], name: &str) -> Vec<String> {
     };
     let mut out = Vec::new();
     for list in kids(n) {
-        match list.kind() {
+        match list.kind_str() {
             "type_parameters" | "type_parameter_list" => {
                 for tp in kids(list) {
                     let ks = kids(tp);
-                    let Some(id) = ks.iter().find(|c| c.kind().contains("identifier")) else {
+                    let Some(id) = ks.iter().find(|c| c.kind_str().contains("identifier")) else {
                         continue;
                     };
                     let bound: String = ks
@@ -1903,7 +1905,7 @@ fn self_params(n: Node, src: &[u8], name: &str) -> Vec<String> {
 /// The call a declaration's value is (`val x = f(…)`, `var x = a.b<T>()`).
 fn declared_call(n: Node) -> Option<Node> {
     fn call(c: Node) -> Option<Node> {
-        is_call_kind(c.kind()).then_some(c)
+        is_call_kind(c.kind_str()).then_some(c)
     }
     value_node(n).and_then(call).or_else(|| {
         // Kotlin keeps the value beside the declaration; C# in the declarator
@@ -1924,7 +1926,7 @@ fn given_type(call: Node, src: &[u8]) -> Option<Vec<String>> {
         if hops > 40 {
             break;
         }
-        let k = c.kind();
+        let k = c.kind_str();
         if matches!(k, "type_arguments" | "type_argument_list") {
             let ks: Vec<Node> = kids(c).into_iter().filter(|x| !is_comment(x)).collect();
             return match ks.as_slice() {
@@ -1947,7 +1949,7 @@ fn given_type(call: Node, src: &[u8]) -> Option<Vec<String>> {
     let literals: Vec<Node> = kids(list?)
         .into_iter()
         .map(|a| {
-            if a.kind().contains("argument") {
+            if a.kind_str().contains("argument") {
                 kids(a).into_iter().last().unwrap_or(a)
             } else {
                 a
@@ -1955,7 +1957,7 @@ fn given_type(call: Node, src: &[u8]) -> Option<Vec<String>> {
         })
         .filter(|v| {
             let t = text(*v, src);
-            matches!(v.kind(), "class_literal" | "typeof_expression")
+            matches!(v.kind_str(), "class_literal" | "typeof_expression")
                 || t.ends_with("::class")
                 || t.ends_with("::class.java")
                 || t.ends_with("::class.javaObjectType")
@@ -1965,8 +1967,10 @@ fn given_type(call: Node, src: &[u8]) -> Option<Vec<String>> {
     // the type named first in it
     let mut stack = vec![*one];
     while let Some(c) = stack.pop() {
-        if matches!(c.kind(), "type_identifier" | "identifier" | "user_type" | "simple_identifier")
-        {
+        if matches!(
+            c.kind_str(),
+            "type_identifier" | "identifier" | "user_type" | "simple_identifier"
+        ) {
             return first_type(c, src).or_else(|| path_of(c, src));
         }
         stack.extend(kids(c).into_iter().rev());
@@ -1976,28 +1980,28 @@ fn given_type(call: Node, src: &[u8]) -> Option<Vec<String>> {
 
 /// The argument list of a call, and how many trailing lambdas follow it.
 fn argument_list(n: Node) -> Option<(Option<Node>, usize)> {
-    if let Some(a) = n.child_by_field_name("arguments") {
+    if let Some(a) = n.by_field("arguments") {
         return Some((Some(a), 0));
     }
-    if let Some(sfx) = kids(n).into_iter().find(|c| c.kind() == "call_suffix") {
+    if let Some(sfx) = kids(n).into_iter().find(|c| c.kind_str() == "call_suffix") {
         let ks = kids(sfx);
-        let lambdas = ks.iter().filter(|c| c.kind().contains("lambda")).count();
-        return Some((ks.into_iter().find(|c| c.kind() == "value_arguments"), lambdas));
+        let lambdas = ks.iter().filter(|c| c.kind_str().contains("lambda")).count();
+        return Some((ks.into_iter().find(|c| c.kind_str() == "value_arguments"), lambdas));
     }
-    kids(n).into_iter().find(|c| c.kind().contains("argument")).map(|a| (Some(a), 0))
+    kids(n).into_iter().find(|c| c.kind_str().contains("argument")).map(|a| (Some(a), 0))
 }
 
 /// What a value is, as an argument: a literal's kind, or the path the
 /// resolver can type.
 fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
     use crate::facts::Arg;
-    let k = v.kind();
+    let k = v.kind_str();
     // Swift `.post`, `.status(301)`
     let implicit = implicit_member_call(v, src).or_else(|| {
         (k == "prefix_expression" && src.get(v.start_byte()) == Some(&b'.'))
-            .then(|| v.child_by_field_name("target"))
+            .then(|| v.by_field("target"))
             .flatten()
-            .filter(|t| t.kind() == "simple_identifier")
+            .filter(|t| t.kind_str() == "simple_identifier")
             .map(|t| text(t, src))
     });
     if let Some(name) = implicit {
@@ -2031,7 +2035,7 @@ fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
         && crate::parse::current() == Some(crate::lang::Lang::CSharp)
     {
         // (`delegate { … }` writes no list: it fits a delegate of any)
-        if k == "anonymous_method_expression" && v.child_by_field_name("parameters").is_none() {
+        if k == "anonymous_method_expression" && v.by_field("parameters").is_none() {
             Arg::Func
         } else {
             u8::try_from(closure_params(v, src).len()).map_or(Arg::Func, Arg::Lambda)
@@ -2062,7 +2066,7 @@ fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
         let op = v
             .children(&mut cursor)
             .find(|c| !c.is_named())
-            .map(|c| c.kind().to_string())
+            .map(|c| c.kind_str().to_string())
             .unwrap_or_default();
         let has = |want: Arg| ks.iter().any(|c| arg_kind(*c, src) == want);
         if matches!(
@@ -2087,7 +2091,7 @@ fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
         }
     } else if matches!(k, "cast_expression" | "as_expression") {
         // `(Foo) x`, `x as Foo`: the type it is cast to
-        v.child_by_field_name("type")
+        v.by_field("type")
             .or_else(|| kids(v).into_iter().last())
             .and_then(|t| first_type(t, src))
             .map_or(Arg::Unknown, Arg::Path)
@@ -2117,23 +2121,20 @@ fn arg_facts_of(list: Option<Node>, lambdas: usize, src: &[u8]) -> Vec<crate::fa
     let mut out = Vec::new();
     for a in list.into_iter().flat_map(kids).filter(|c| !is_comment(c)) {
         let ks = kids(a);
-        let wrapped = a.kind().contains("argument");
+        let wrapped = a.kind_str().contains("argument");
         let label = a
-            .child_by_field_name("name")
+            .by_field("name")
             .filter(|_| wrapped)
             .or_else(|| {
                 // Kotlin `name = x`; C# `name: x` (`name_colon`)
                 let mut cursor = a.walk();
-                let named = a.children(&mut cursor).any(|c| !c.is_named() && c.kind() == "=");
+                let named = a.children(&mut cursor).any(|c| !c.is_named() && c.kind_str() == "=");
                 (wrapped && named && ks.len() > 1).then(|| ks[0])
             })
-            .or_else(|| ks.iter().copied().find(|c| c.kind() == "name_colon"))
+            .or_else(|| ks.iter().copied().find(|c| c.kind_str() == "name_colon"))
             .map(|l| text(l, src).trim_end_matches(':').trim().to_string());
-        let value = if wrapped {
-            a.child_by_field_name("value").or_else(|| ks.last().copied())
-        } else {
-            Some(a)
-        };
+        let value =
+            if wrapped { a.by_field("value").or_else(|| ks.last().copied()) } else { Some(a) };
         out.push(ArgFact { label, kind: value.map_or(Arg::Unknown, |v| arg_kind(v, src)) });
     }
     out.extend((0..lambdas).map(|_| ArgFact { label: None, kind: Arg::Func }));
@@ -2147,14 +2148,14 @@ fn arg_facts_of(list: Option<Node>, lambdas: usize, src: &[u8]) -> Vec<crate::fa
 /// chain (`void *create(int n)` is a `pointer_declarator` around the
 /// `function_declarator`, `Foo& get(int i)` a `reference_declarator`).
 fn declarator_params(n: Node) -> Option<Node> {
-    let mut d = n.child_by_field_name("declarator")?;
+    let mut d = n.by_field("declarator")?;
     for _ in 0..6 {
         if let Some(ps) = params_field(d) {
             return Some(ps);
         }
-        d = d.child_by_field_name("declarator").or_else(|| {
+        d = d.by_field("declarator").or_else(|| {
             // (`reference_declarator` names no field for what it wraps)
-            kids(d).into_iter().find(|c| c.kind().ends_with("declarator"))
+            kids(d).into_iter().find(|c| c.kind_str().ends_with("declarator"))
         })?;
     }
     None
@@ -2164,7 +2165,10 @@ fn declarator_params(n: Node) -> Option<Node> {
 fn param_list(n: Node, src: &[u8]) -> Vec<crate::facts::ParamFact> {
     let list = params_field(n).or_else(|| declarator_params(n)).or_else(|| {
         kids(n).into_iter().find(|c| {
-            matches!(c.kind(), "function_value_parameters" | "parameter_list" | "formal_parameters")
+            matches!(
+                c.kind_str(),
+                "function_value_parameters" | "parameter_list" | "formal_parameters"
+            )
         })
     });
     // Swift writes the parameters as the declaration's own children
@@ -2184,7 +2188,7 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
     for c in holder.children(&mut cursor) {
         if !c.is_named() {
             // Kotlin and Swift write a default beside the parameter
-            after_eq = c.kind() == "=";
+            after_eq = c.kind_str() == "=";
             continue;
         }
         if is_comment(&c) {
@@ -2197,37 +2201,37 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
             }
             continue;
         }
-        if c.kind() == "parameter_modifiers" {
+        if c.kind_str() == "parameter_modifiers" {
             vararg = text(c, src).contains("vararg");
             continue;
         }
         // `internal constructor(…)`: the constructor's own modifiers
-        if c.kind() == "modifiers" {
+        if c.kind_str() == "modifiers" {
             continue;
         }
-        if only_parameters && c.kind() != "parameter" {
+        if only_parameters && c.kind_str() != "parameter" {
             continue;
         }
         let t = text(c, src);
-        if c.kind() == "receiver_parameter"
-            || (matches!(c.kind(), "identifier" | "self_parameter")
+        if c.kind_str() == "receiver_parameter"
+            || (matches!(c.kind_str(), "identifier" | "self_parameter")
                 && matches!(t.as_str(), "self" | "cls" | "&self" | "&mut self" | "mut self"))
         {
             continue;
         }
         let typed = locals_of(c, src, true).into_iter().next();
         let name = c
-            .child_by_field_name("external_name")
+            .by_field("external_name")
             .map(|e| text(e, src))
             .or_else(|| typed.as_ref().map(|(name, ..)| name.clone()))
             .or_else(|| bound_name(c, src))
             .unwrap_or_default();
-        let k = c.kind();
+        let k = c.kind_str();
         let mut tokens = c.walk();
         let (mut eq, mut dots) = (false, false);
         for x in c.children(&mut tokens) {
-            eq |= !x.is_named() && x.kind() == "=";
-            dots |= x.kind() == "..." || x.kind() == "variadic_parameter";
+            eq |= !x.is_named() && x.kind_str() == "=";
+            dots |= x.kind_str() == "..." || x.kind_str() == "variadic_parameter";
         }
         // a function type names no type of its own: `Function` stands for it
         let mut ty = typed.map(|(_, ty, ..)| ty).unwrap_or_default();
@@ -2244,11 +2248,13 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
             let mut hops = 0;
             while let Some(x) = stack.pop() {
                 hops += 1;
-                if x.kind().contains("function_type") || x.kind() == "lambda_type" {
+                if x.kind_str().contains("function_type") || x.kind_str() == "lambda_type" {
                     ty = vec!["Function".into()];
                     break;
                 }
-                if hops < 12 && (x.kind().contains("type") || x.kind().contains("annotation")) {
+                if hops < 12
+                    && (x.kind_str().contains("type") || x.kind_str().contains("annotation"))
+                {
                     stack.extend(kids(x));
                 }
             }
@@ -2256,7 +2262,7 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
         // (Go `repos ...*Repo` is a `[]*Repo`)
         let elem = written_elem(c, src).or_else(|| {
             (k == "variadic_parameter_declaration")
-                .then(|| c.child_by_field_name("type").and_then(|t| first_type(t, src)))
+                .then(|| c.by_field("type").and_then(|t| first_type(t, src)))
                 .flatten()
         });
         out.push(ParamFact {
@@ -2268,15 +2274,13 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
             optional: eq
                 || k.contains("default")
                 || k == "optional_parameter"
-                || ["value", "default_value", "default"]
-                    .iter()
-                    .any(|f| c.child_by_field_name(f).is_some()),
+                || ["value", "default_value", "default"].iter().any(|f| c.by_field(f).is_some()),
             variadic: std::mem::take(&mut vararg)
                 || dots
                 || ["splat", "variadic", "spread", "rest"].iter().any(|w| k.contains(w))
                 || t.starts_with("params "),
             written: c
-                .child_by_field_name("type")
+                .by_field("type")
                 .map(|ty| text(ty, src).split_whitespace().collect())
                 .unwrap_or_default(),
             alts,
@@ -2287,7 +2291,7 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
 
 fn is_self_member(n: Node, src: &[u8]) -> Option<String> {
     for (obj, member) in MEMBER_FIELDS {
-        if let (Some(o), Some(m)) = (n.child_by_field_name(obj), n.child_by_field_name(member)) {
+        if let (Some(o), Some(m)) = (n.by_field(obj), n.by_field(member)) {
             let head = path_of(o, src)?;
             if head == ["self"] {
                 return Some(text(m, src));
@@ -2392,7 +2396,7 @@ type Param = (String, Vec<String>, bool);
 /// `rescue => e`. Typed where the source writes a type, else untyped: either
 /// way the name is not an outer one.
 fn closure_params(n: Node, src: &[u8]) -> Vec<Param> {
-    let mut stack: Vec<(Node, usize)> = match n.kind() {
+    let mut stack: Vec<(Node, usize)> = match n.kind_str() {
         "block_parameters"
         | "lambda_parameters"
         | "closure_parameters"
@@ -2407,15 +2411,15 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<Param> {
         | "func_literal"
         | "lambda" => ["parameter", "parameters"]
             .iter()
-            .filter_map(|f| n.child_by_field_name(f))
+            .filter_map(|f| n.by_field(f))
             .map(|p| (p, 0))
             .collect(),
         // Swift `{ p in … }`, `{ (p: Plane) -> Pilot in … }`
         "lambda_literal" => n
-            .child_by_field_name("type")
+            .by_field("type")
             .into_iter()
             .flat_map(kids)
-            .filter(|c| c.kind() == "lambda_function_type_parameters")
+            .filter(|c| c.kind_str() == "lambda_function_type_parameters")
             .flat_map(kids)
             .map(|p| (p, 0))
             .collect(),
@@ -2425,7 +2429,7 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<Param> {
     // element, an index); `_` keeps its place
     let mut out: Vec<(usize, Param)> = Vec::new();
     while let Some((p, depth)) = stack.pop() {
-        let k = p.kind();
+        let k = p.kind_str();
         // (C# `d => …`: the parameter is the node itself)
         if matches!(k, "identifier" | "simple_identifier" | "variable_name" | "implicit_parameter")
         {
@@ -2448,12 +2452,12 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<Param> {
             continue;
         }
         if k == "pair_pattern" {
-            stack.extend(p.child_by_field_name("value").map(|v| (v, depth + 1)));
+            stack.extend(p.by_field("value").map(|v| (v, depth + 1)));
             continue;
         }
         if matches!(k, "array_pattern" | "object_pattern" | "rest_pattern" | "assignment_pattern") {
             let inner = if k == "assignment_pattern" {
-                p.child_by_field_name("left").into_iter().collect()
+                p.by_field("left").into_iter().collect()
             } else {
                 kids(p)
             };
@@ -2461,8 +2465,8 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<Param> {
             continue;
         }
         if let Some(pattern) = p
-            .child_by_field_name("pattern")
-            .filter(|x| matches!(x.kind(), "array_pattern" | "object_pattern"))
+            .by_field("pattern")
+            .filter(|x| matches!(x.kind_str(), "array_pattern" | "object_pattern"))
         {
             stack.push((pattern, depth + 1));
             continue;
@@ -2477,7 +2481,7 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<Param> {
             continue;
         }
         // a parameter with a default or a pattern: its name, not its value
-        match p.child_by_field_name("name").or_else(|| p.child_by_field_name("pattern")) {
+        match p.by_field("name").or_else(|| p.by_field("pattern")) {
             Some(name) => stack.push((name, depth + 1)),
             None => stack.extend(kids(p).into_iter().map(|c| (c, depth + 1))),
         }
@@ -2491,7 +2495,7 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<Param> {
 fn param_node<'t>(ps: Node<'t>, name: &str, src: &[u8]) -> Option<Node<'t>> {
     let mut stack = vec![(ps, 0)];
     while let Some((n, depth)) = stack.pop() {
-        let k = n.kind();
+        let k = n.kind_str();
         if k.contains("parameter") && !k.ends_with("parameters") && !k.ends_with("_list") {
             if locals_of(n, src, true).iter().any(|(x, ..)| x == name) {
                 return Some(n);
@@ -2509,17 +2513,17 @@ fn param_node<'t>(ps: Node<'t>, name: &str, src: &[u8]) -> Option<Node<'t>> {
 /// `client.Get<User>(id)` (the called name is a `generic_name`), Java
 /// `this.<User>get(id)`.
 fn call_targs(n: Node) -> u8 {
-    let called = n.child_by_field_name("function").map(|f| {
-        if f.kind() == "member_access_expression" {
-            f.child_by_field_name("name").unwrap_or(f)
+    let called = n.by_field("function").map(|f| {
+        if f.kind_str() == "member_access_expression" {
+            f.by_field("name").unwrap_or(f)
         } else {
             f
         }
     });
     let list = called
-        .filter(|x| x.kind() == "generic_name")
-        .and_then(|x| kids(x).into_iter().find(|c| c.kind() == "type_argument_list"))
-        .or_else(|| n.child_by_field_name("type_arguments"));
+        .filter(|x| x.kind_str() == "generic_name")
+        .and_then(|x| kids(x).into_iter().find(|c| c.kind_str() == "type_argument_list"))
+        .or_else(|| n.by_field("type_arguments"));
     list.map(|l| kids(l).len().min(255) as u8).unwrap_or(0)
 }
 
@@ -2541,22 +2545,20 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<Bound> {
     // Go `switch v := x.(type) { case *Repo: … }`: in a clause of one type v
     // is that type, in one of several, `nil` or `default` what x is (the
     // spec's "Type switches"); each clause is a block of its own
-    if n.kind() == "type_switch_statement" && crate::parse::current() == Some(crate::lang::Lang::Go)
+    if n.kind_str() == "type_switch_statement"
+        && crate::parse::current() == Some(crate::lang::Lang::Go)
     {
         let Some(name) = n
-            .child_by_field_name("alias")
-            .and_then(|a| kids(a).into_iter().find(|c| c.kind() == "identifier"))
+            .by_field("alias")
+            .and_then(|a| kids(a).into_iter().find(|c| c.kind_str() == "identifier"))
             .map(|a| text(a, src))
             .filter(|a| a != "_")
         else {
             return out;
         };
-        let guard = n
-            .child_by_field_name("value")
-            .and_then(|v| path_of(v, src))
-            .filter(|p| p[0] != UNKNOWN);
+        let guard = n.by_field("value").and_then(|v| path_of(v, src)).filter(|p| p[0] != UNKNOWN);
         for clause in kids(n) {
-            if !matches!(clause.kind(), "type_case" | "default_case") {
+            if !matches!(clause.kind_str(), "type_case" | "default_case") {
                 continue;
             }
             let mut cursor = clause.walk();
@@ -2578,30 +2580,24 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<Bound> {
     }
     let typed = |ty: Option<Node>, name: Option<Node>, out: &mut Vec<_>| {
         let ty = ty.and_then(|t| first_type(t, src));
-        let name = name.filter(|x| x.kind() == "identifier").map(|x| text(x, src));
+        let name = name.filter(|x| x.kind_str() == "identifier").map(|x| text(x, src));
         if let (Some(ty), Some(name)) = (ty, name) {
             out.push((name, ty, true, None));
         }
     };
-    match n.kind() {
+    match n.kind_str() {
         // Scala `case r: Repo =>`, Java `try (Repo r = open())`
-        "typed_pattern" => {
-            typed(n.child_by_field_name("type"), n.child_by_field_name("pattern"), &mut out)
-        }
-        "resource" => typed(n.child_by_field_name("type"), n.child_by_field_name("name"), &mut out),
+        "typed_pattern" => typed(n.by_field("type"), n.by_field("pattern"), &mut out),
+        "resource" => typed(n.by_field("type"), n.by_field("name"), &mut out),
         "enhanced_for_statement" | "foreach_statement" => {
-            let name = n.child_by_field_name("name").or_else(|| n.child_by_field_name("left"));
-            typed(n.child_by_field_name("type"), name, &mut out);
+            let name = n.by_field("name").or_else(|| n.by_field("left"));
+            typed(n.by_field("type"), name, &mut out);
         }
-        "instanceof_expression" => {
-            typed(n.child_by_field_name("right"), n.child_by_field_name("name"), &mut out)
-        }
-        "declaration_pattern" => {
-            typed(n.child_by_field_name("type"), n.child_by_field_name("name"), &mut out)
-        }
+        "instanceof_expression" => typed(n.by_field("right"), n.by_field("name"), &mut out),
+        "declaration_pattern" => typed(n.by_field("type"), n.by_field("name"), &mut out),
         "let_condition" | "let_declaration" => {
-            let pattern = n.child_by_field_name("pattern");
-            let value = n.child_by_field_name("value").and_then(|v| held_path(v, src));
+            let pattern = n.by_field("pattern");
+            let value = n.by_field("value").and_then(|v| held_path(v, src));
             if let Some(p) = pattern {
                 out.extend(
                     held_by_pattern(p, value.as_deref(), src)
@@ -2611,11 +2607,10 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<Bound> {
             }
         }
         "match_expression" => {
-            let value = n.child_by_field_name("value").and_then(|v| held_path(v, src));
-            let arms = n.child_by_field_name("body").map(kids).unwrap_or_default();
-            for arm in arms.into_iter().filter(|a| a.kind() == "match_arm") {
-                let pattern =
-                    arm.child_by_field_name("pattern").and_then(|p| kids(p).into_iter().next());
+            let value = n.by_field("value").and_then(|v| held_path(v, src));
+            let arms = n.by_field("body").map(kids).unwrap_or_default();
+            for arm in arms.into_iter().filter(|a| a.kind_str() == "match_arm") {
+                let pattern = arm.by_field("pattern").and_then(|p| kids(p).into_iter().next());
                 if let Some(p) = pattern {
                     let arm_range = Some((arm.start_byte(), arm.end_byte()));
                     out.extend(
@@ -2639,7 +2634,7 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<Bound> {
                     continue;
                 }
                 let name = text(*c, src);
-                let eq = all.get(i + 1).is_some_and(|(_, x)| x.kind() == "=");
+                let eq = all.get(i + 1).is_some_and(|(_, x)| x.kind_str() == "=");
                 let value = all.get(i + 2).filter(|_| eq).and_then(|(_, v)| held_path(*v, src));
                 // `if let pet {`, `if let pet = pet`, `guard let self`: the
                 // name goes on meaning what it meant
@@ -2661,7 +2656,7 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<Bound> {
 fn held_path(v: Node, src: &[u8]) -> Option<Vec<String>> {
     value_type(v, src).or_else(|| {
         let mut v = v;
-        while matches!(v.kind(), "reference_expression" | "parenthesized_expression") {
+        while matches!(v.kind_str(), "reference_expression" | "parenthesized_expression") {
             v = kids(v).into_iter().last()?;
         }
         path_of(v, src)
@@ -2677,23 +2672,23 @@ fn held_by_pattern(
     src: &[u8],
 ) -> Vec<(String, Vec<String>, bool)> {
     let mut p = p;
-    while matches!(p.kind(), "reference_pattern" | "ref_pattern" | "mut_pattern") {
+    while matches!(p.kind_str(), "reference_pattern" | "ref_pattern" | "mut_pattern") {
         match kids(p).into_iter().last() {
             Some(inner) => p = inner,
             None => return Vec::new(),
         }
     }
-    if p.kind() != "tuple_struct_pattern" {
+    if p.kind_str() != "tuple_struct_pattern" {
         return Vec::new();
     }
-    let Some(ty) = p.child_by_field_name("type") else { return Vec::new() };
+    let Some(ty) = p.by_field("type") else { return Vec::new() };
     let binds: Vec<Node> = kids(p).into_iter().filter(|c| c.id() != ty.id()).collect();
     let name_of = |c: Node| {
         let mut c = c;
-        while matches!(c.kind(), "reference_pattern" | "ref_pattern" | "mut_pattern") {
+        while matches!(c.kind_str(), "reference_pattern" | "ref_pattern" | "mut_pattern") {
             c = kids(c).into_iter().last()?;
         }
-        (c.kind() == "identifier").then(|| text(c, src)).filter(|n| n != "_")
+        (c.kind_str() == "identifier").then(|| text(c, src)).filter(|n| n != "_")
     };
     let variant = text(ty, src);
     // a name the pattern binds whose type the walk cannot tell (`Err(e)`,
@@ -2733,34 +2728,33 @@ fn held_by_pattern(
 }
 
 fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, bool, bool)> {
-    let k = n.kind();
+    let k = n.kind_str();
     let mut out = Vec::new();
     // C# `TryGet(k, out var r)`, `out Item r`: a local of the block around
     // the call, of the type the out parameter is declared with (the
     // standard's 12.17)
     if k == "invocation_expression" && crate::parse::current() == Some(crate::lang::Lang::CSharp) {
         let callee = n
-            .child_by_field_name("function")
+            .by_field("function")
             .and_then(|f| path_of(f, src))
             .filter(|p| !p.iter().any(|s| s == UNKNOWN));
-        let args = n.child_by_field_name("arguments").map(kids).unwrap_or_default();
+        let args = n.by_field("arguments").map(kids).unwrap_or_default();
         for (i, a) in args.into_iter().filter(|c| !is_comment(c)).enumerate() {
-            if !a.child(0).is_some_and(|c| c.kind() == "out") {
+            if !a.child(0).is_some_and(|c| c.kind_str() == "out") {
                 continue;
             }
-            let Some(decl) = kids(a).into_iter().find(|c| c.kind() == "declaration_expression")
+            let Some(decl) = kids(a).into_iter().find(|c| c.kind_str() == "declaration_expression")
             else {
                 continue;
             };
-            let Some(name) = decl.child_by_field_name("name").and_then(|x| bound_name(x, src))
-            else {
+            let Some(name) = decl.by_field("name").and_then(|x| bound_name(x, src)) else {
                 continue;
             };
             if name == "_" {
                 continue;
             }
-            let ty = decl.child_by_field_name("type");
-            match ty.filter(|t| t.kind() != "implicit_type").and_then(|t| first_type(t, src)) {
+            let ty = decl.by_field("type");
+            match ty.filter(|t| t.kind_str() != "implicit_type").and_then(|t| first_type(t, src)) {
                 Some(t) => out.push((name, t, true, false)),
                 None => {
                     let path = callee.clone().map(|mut p| {
@@ -2777,12 +2771,12 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
     }
     // parameters: `x: Foo`, `Foo x`, `x Foo`, `$x: Foo`
     if in_params && k.contains("parameter") && !k.ends_with("parameters") && !k.ends_with("_list") {
-        let ty = n.child_by_field_name("type").and_then(|t| first_type(t, src)).or_else(|| {
+        let ty = n.by_field("type").and_then(|t| first_type(t, src)).or_else(|| {
             kids(n)
                 .into_iter()
                 .find(|c| {
                     matches!(
-                        c.kind(),
+                        c.kind_str(),
                         "user_type" | "nullable_type" | "type_annotation" | "named_type" | "type"
                     )
                 })
@@ -2795,18 +2789,22 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
             let mut names: Vec<String> = Vec::new();
             let mut cursor = n.walk();
             for (i, c) in n.children(&mut cursor).enumerate() {
-                if n.field_name_for_child(i as u32) == Some("name") && c.kind() == "identifier" {
+                if n.field_name_for_child(i as u32) == Some("name") && c.kind_str() == "identifier"
+                {
                     names.push(text(c, src));
                 }
             }
             if names.is_empty() {
                 let named = n
-                    .child_by_field_name("name")
-                    .or_else(|| n.child_by_field_name("pattern"))
-                    .or_else(|| n.child_by_field_name("declarator"))
+                    .by_field("name")
+                    .or_else(|| n.by_field("pattern"))
+                    .or_else(|| n.by_field("declarator"))
                     .or_else(|| {
                         kids(n).into_iter().find(|c| {
-                            matches!(c.kind(), "identifier" | "simple_identifier" | "variable_name")
+                            matches!(
+                                c.kind_str(),
+                                "identifier" | "simple_identifier" | "variable_name"
+                            )
                         })
                     });
                 names.extend(named.and_then(|x| bound_name(x, src)));
@@ -2814,8 +2812,10 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
             // a parameter that is also a field: TS `private svc: Svc`, PHP
             // promotion, Kotlin / Scala `val x: Foo` in a constructor
             let field = kids(n).iter().any(|c| {
-                matches!(c.kind(), "accessibility_modifier" | "visibility_modifier" | "readonly")
-                    || (c.kind() == "binding_pattern_kind")
+                matches!(
+                    c.kind_str(),
+                    "accessibility_modifier" | "visibility_modifier" | "readonly"
+                ) || (c.kind_str() == "binding_pattern_kind")
             }) || matches!(k, "property_promotion_parameter" | "class_parameter");
             for name in names {
                 if name != "self" && name != "this" {
@@ -2832,7 +2832,7 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
             // made is set, no name is declared)
             if n.parent().is_some_and(|p| {
                 matches!(
-                    p.kind(),
+                    p.kind_str(),
                     "initializer_expression"
                         | "anonymous_object_creation_expression"
                         | "with_initializer"
@@ -2841,15 +2841,13 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
             }) {
                 return out;
             }
-            let (Some(l), Some(r)) =
-                (n.child_by_field_name("left"), n.child_by_field_name("right"))
-            else {
+            let (Some(l), Some(r)) = (n.by_field("left"), n.by_field("right")) else {
                 return out;
             };
             let Some(ty) = value_type(r, src) else {
                 // assigned something the walk cannot type: still a local that
                 // shadows outer names
-                if matches!(l.kind(), "identifier" | "variable_name") {
+                if matches!(l.kind_str(), "identifier" | "variable_name") {
                     if let Some(name) = bound_name(l, src) {
                         out.push((name, Vec::new(), false, false));
                     }
@@ -2858,10 +2856,10 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
             };
             if let Some(f) = is_self_member(l, src) {
                 out.push((f, ty, false, true));
-            } else if l.kind() == "instance_variable" {
+            } else if l.kind_str() == "instance_variable" {
                 out.push((text(l, src).trim_start_matches('@').to_string(), ty, false, true));
             } else if let Some(name) = bound_name(l, src) {
-                if l.child_count() == 0 || l.kind() == "variable_name" {
+                if l.child_count() == 0 || l.kind_str() == "variable_name" {
                     out.push((name, ty, false, false));
                 }
             }
@@ -2871,7 +2869,7 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
         // is a definition, `Scala::state_defs`)
         "val_definition" | "var_definition"
             if n.parent()
-                .is_some_and(|p| matches!(p.kind(), "compilation_unit" | "template_body")) => {}
+                .is_some_and(|p| matches!(p.kind_str(), "compilation_unit" | "template_body")) => {}
         "variable_declarator"
         | "let_declaration"
         | "init_declarator"
@@ -2879,21 +2877,21 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
         | "var_definition" => {
             // `const { show, hide: close } = useToast()`: each name is that
             // member of what the value is
-            let pattern = n.child_by_field_name("name").filter(|x| x.kind() == "object_pattern");
+            let pattern = n.by_field("name").filter(|x| x.kind_str() == "object_pattern");
             if let Some(pattern) = pattern {
-                let value = n.child_by_field_name("value");
+                let value = n.by_field("value");
                 let Some(mut of) = value.and_then(|v| value_type(v, src)) else { return out };
-                if value.is_some_and(|v| v.kind() == "call_expression") {
+                if value.is_some_and(|v| v.kind_str() == "call_expression") {
                     of.push(UNKNOWN.into());
                 }
                 for c in kids(pattern) {
-                    let (key, name) = match c.kind() {
+                    let (key, name) = match c.kind_str() {
                         "shorthand_property_identifier_pattern" => (text(c, src), text(c, src)),
                         "pair_pattern" => {
-                            let k = c.child_by_field_name("key").map(|x| text(x, src));
+                            let k = c.by_field("key").map(|x| text(x, src));
                             let v = c
-                                .child_by_field_name("value")
-                                .filter(|x| x.kind() == "identifier")
+                                .by_field("value")
+                                .filter(|x| x.kind_str() == "identifier")
                                 .map(|x| text(x, src));
                             match (k, v) {
                                 (Some(k), Some(v)) => (k, v),
@@ -2909,12 +2907,12 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                 return out;
             }
             let name = n
-                .child_by_field_name("name")
-                .or_else(|| n.child_by_field_name("pattern"))
-                .or_else(|| n.child_by_field_name("declarator"))
+                .by_field("name")
+                .or_else(|| n.by_field("pattern"))
+                .or_else(|| n.by_field("declarator"))
                 .and_then(|x| bound_name(x, src));
-            let declared = n.child_by_field_name("type").and_then(|t| first_type(t, src));
-            let value = n.child_by_field_name("value");
+            let declared = n.by_field("type").and_then(|t| first_type(t, src));
+            let value = n.by_field("value");
             let valued = value.and_then(|v| value_type(v, src));
             // (a cast writes the type as surely as a declaration does)
             let cast = value.is_some_and(is_cast);
@@ -2951,7 +2949,7 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                 || (k == "property_declaration"
                     && n.parent().is_some_and(|p| {
                         matches!(
-                            p.kind(),
+                            p.kind_str(),
                             "class_body"
                                 | "declaration_list"
                                 | "protocol_body"
@@ -2959,13 +2957,12 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                                 | "field_declaration_list"
                         )
                     }));
-            let declared =
-                n.child_by_field_name("type").and_then(|t| first_type(t, src)).or_else(|| {
-                    kids(n)
-                        .into_iter()
-                        .find(|c| matches!(c.kind(), "user_type" | "type_annotation"))
-                        .and_then(|t| first_type(t, src))
-                });
+            let declared = n.by_field("type").and_then(|t| first_type(t, src)).or_else(|| {
+                kids(n)
+                    .into_iter()
+                    .find(|c| matches!(c.kind_str(), "user_type" | "type_annotation"))
+                    .and_then(|t| first_type(t, src))
+            });
             // (C, C++ `Foo x;`: the declarator is the bare name)
             let c_like = k == "declaration"
                 && matches!(
@@ -2975,29 +2972,28 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
             let mut declarators: Vec<Node> = kids(n)
                 .into_iter()
                 .filter(|c| {
-                    c.kind().ends_with("declarator")
-                        || c.kind() == "variable_declaration"
-                        || (c_like && c.kind() == "identifier")
+                    c.kind_str().ends_with("declarator")
+                        || c.kind_str() == "variable_declaration"
+                        || (c_like && c.kind_str() == "identifier")
                 })
                 .collect();
             if declarators.is_empty() {
                 declarators.push(n);
             }
             for d in declarators {
-                let inner: Vec<Node> = if d.kind() == "variable_declaration" {
+                let inner: Vec<Node> = if d.kind_str() == "variable_declaration" {
                     kids(d)
                         .into_iter()
                         .filter(|c| {
-                            c.kind().ends_with("declarator") || c.kind() == "simple_identifier"
+                            c.kind_str().ends_with("declarator")
+                                || c.kind_str() == "simple_identifier"
                         })
                         .collect()
                 } else {
                     vec![d]
                 };
-                let d_type = if d.kind() == "variable_declaration" {
-                    d.child_by_field_name("type")
-                        .and_then(|t| first_type(t, src))
-                        .or_else(|| declared.clone())
+                let d_type = if d.kind_str() == "variable_declaration" {
+                    d.by_field("type").and_then(|t| first_type(t, src)).or_else(|| declared.clone())
                 } else {
                     declared.clone()
                 };
@@ -3007,7 +3003,7 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                         continue;
                     }
                     let name = if x.id() == n.id() {
-                        n.child_by_field_name("name").and_then(|nm| bound_name(nm, src))
+                        n.by_field("name").and_then(|nm| bound_name(nm, src))
                     } else {
                         bound_name(x, src)
                     };
@@ -3015,7 +3011,7 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                     // Kotlin `val c = Plain()`: the value sits beside the
                     // `variable_declaration`, in the property declaration
                     let beside = || {
-                        (d.kind() == "variable_declaration" && k == "property_declaration")
+                        (d.kind_str() == "variable_declaration" && k == "property_declaration")
                             .then(|| {
                                 kids(n)
                                     .into_iter()
@@ -3025,14 +3021,14 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                             .flatten()
                     };
                     let value = x
-                        .child_by_field_name("value")
+                        .by_field("value")
                         .or_else(|| {
                             // (C# `var x = await f()`: no field names the value)
                             kids(x).into_iter().find(|c| {
                                 callee(*c, src).is_some()
                                     || is_cast(*c)
                                     || matches!(
-                                        c.kind(),
+                                        c.kind_str(),
                                         "await_expression"
                                             | "try_expression"
                                             // (`var sut = Parser.Default`: what
@@ -3060,7 +3056,7 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
         // Python `with Foo() as x:`
         "as_pattern" => {
             let value = kids(n).into_iter().next();
-            let alias = n.child_by_field_name("alias").and_then(|a| bound_name(a, src));
+            let alias = n.by_field("alias").and_then(|a| bound_name(a, src));
             if let (Some(v), Some(name)) = (value, alias) {
                 if let Some(t) = value_type(v, src) {
                     out.push((name, t, false, false));
@@ -3069,8 +3065,8 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
         }
         // Go `var buf bytes.Buffer`, `var a, b = f(), g()`: every name
         "var_spec" => {
-            let ty = n.child_by_field_name("type").and_then(|t| first_type(t, src));
-            let values = n.child_by_field_name("value").map(kids).unwrap_or_default();
+            let ty = n.by_field("type").and_then(|t| first_type(t, src));
+            let values = n.by_field("value").map(kids).unwrap_or_default();
             let mut cursor = n.walk();
             let names: Vec<Node> = n.children_by_field_name("name", &mut cursor).collect();
             for (i, name) in names.into_iter().enumerate() {
@@ -3089,16 +3085,14 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
         // Go `case r := <-ch:` in a `select`: a local of the clause, the
         // channel's element (`case r = <-ch:` assigns and declares nothing)
         "receive_statement" => {
-            let (Some(l), Some(r)) =
-                (n.child_by_field_name("left"), n.child_by_field_name("right"))
-            else {
+            let (Some(l), Some(r)) = (n.by_field("left"), n.by_field("right")) else {
                 return out;
             };
             if !text(n, src).contains(":=") {
                 return out;
             }
             let names: Vec<Node> =
-                kids(l).into_iter().filter(|c| c.kind() == "identifier").collect();
+                kids(l).into_iter().filter(|c| c.kind_str() == "identifier").collect();
             if let Some(first) = names.first().filter(|x| text(**x, src) != "_") {
                 out.push((text(*first, src), value_type(r, src).unwrap_or_default(), false, false));
             }
@@ -3108,16 +3102,14 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
         }
         // Go `x := Foo{}`, `a, b := …`
         "short_var_declaration" => {
-            let (Some(l), Some(r)) =
-                (n.child_by_field_name("left"), n.child_by_field_name("right"))
-            else {
+            let (Some(l), Some(r)) = (n.by_field("left"), n.by_field("right")) else {
                 return out;
             };
             // (every name it declares is a local, typed or not: `endpoint :=
             // "/secure"` hides a package's `endpoint`)
             let values = kids(r);
             for (i, name) in kids(l).into_iter().enumerate() {
-                if name.kind() != "identifier" || text(name, src) == "_" {
+                if name.kind_str() != "identifier" || text(name, src) == "_" {
                     continue;
                 }
                 let t = values.get(i).and_then(|v| value_type(*v, src)).unwrap_or_default();
@@ -3133,7 +3125,7 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
 pub fn string_value(n: Node, src: &[u8]) -> String {
     let mut stack = vec![n];
     while let Some(c) = stack.pop() {
-        if c.kind().contains("content") || c.kind() == "string_fragment" {
+        if c.kind_str().contains("content") || c.kind_str() == "string_fragment" {
             return text(c, src);
         }
         stack.extend(kids(c));
@@ -3178,7 +3170,7 @@ fn rust_impl_bounds(root: Node, src: &[u8], defs: &mut [Def]) {
     let mut found: HashMap<(usize, usize), Option<Vec<String>>> = HashMap::new();
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
-        if n.kind() != "impl_item" {
+        if n.kind_str() != "impl_item" {
             stack.extend(kids(n));
             continue;
         }
@@ -3186,7 +3178,7 @@ fn rust_impl_bounds(root: Node, src: &[u8], defs: &mut [Def]) {
         if names.is_empty() {
             continue;
         }
-        let Some(ty) = n.child_by_field_name("type").filter(|t| t.kind() == "generic_type") else {
+        let Some(ty) = n.by_field("type").filter(|t| t.kind_str() == "generic_type") else {
             // a blanket impl (`impl<S: Sink> Sink for &mut S`): every
             // parameter is its methods'
             let own: Vec<(String, Option<Vec<String>>)> =
@@ -3194,13 +3186,13 @@ fn rust_impl_bounds(root: Node, src: &[u8], defs: &mut [Def]) {
             give_impl_params(n, &own, defs);
             continue;
         };
-        let Some(base) = ty.child_by_field_name("type").map(|b| text(b, src)) else { continue };
+        let Some(base) = ty.by_field("type").map(|b| text(b, src)) else { continue };
         let args: Vec<String> = ty
-            .child_by_field_name("type_arguments")
+            .by_field("type_arguments")
             .map(kids)
             .unwrap_or_default()
             .into_iter()
-            .filter(|a| !matches!(a.kind(), "lifetime" | "<" | ">" | ","))
+            .filter(|a| !matches!(a.kind_str(), "lifetime" | "<" | ">" | ","))
             .map(|a| text(a, src))
             .collect();
         let Some(si) = defs
@@ -3381,8 +3373,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             });
         // (JS `var` is the function's, whatever block it is written in)
         let hoisted = ecma
-            && (n.kind() == "variable_declaration"
-                || anc.last().is_some_and(|a| a.kind() == "variable_declaration"));
+            && (n.kind_str() == "variable_declaration"
+                || anc.last().is_some_and(|a| a.kind_str() == "variable_declaration"));
         if scoped && !hoisted {
             // (what a definition's own node declares, its parameters, is its)
             let around = std::iter::once(&n).chain(anc.iter().rev());
@@ -3391,11 +3383,11 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 .find(|a| {
                     // (Go `for x := …; …; … { … }`: the clause declares for
                     // the whole statement, body included)
-                    let clause = go && matches!(a.kind(), "for_clause" | "range_clause");
+                    let clause = go && matches!(a.kind_str(), "for_clause" | "range_clause");
                     !clause
-                        && (is_scope(a.kind())
+                        && (is_scope(a.kind_str())
                             || by_node.contains_key(&a.id())
-                            || (go && GO_STATEMENT_BLOCKS.contains(&a.kind())))
+                            || (go && GO_STATEMENT_BLOCKS.contains(&a.kind_str())))
                 })
                 .map_or(0, |a| a.end_byte());
         }
@@ -3403,11 +3395,11 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         if steps > 2_000_000 {
             break;
         }
-        if rust && n.kind() == "macro_invocation" {
+        if rust && n.kind_str() == "macro_invocation" {
             macros.push(n);
             // (outside any definition, its arguments are a scope: `rgtest!(name,
             // |dir: Dir, mut cmd: TestCommand| { … })`)
-            if let Some(tt) = kids(n).into_iter().find(|c| c.kind() == "token_tree") {
+            if let Some(tt) = kids(n).into_iter().find(|c| c.kind_str() == "token_tree") {
                 blocks.push((
                     tt.start_byte(),
                     tt.end_byte(),
@@ -3418,32 +3410,30 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // a declaration whose value is a function: `const f: T = () => …`
-        if n.child_by_field_name("value").is_some_and(|v| is_closure(v.kind())) {
+        if n.by_field("value").is_some_and(|v| is_closure(v.kind_str())) {
             function_decls.insert(n.start_byte());
         }
         // `var Dataset = (function () { function Dataset() {} … return
         // Dataset })()`: the function called where it is written, as the
         // value of a declaration; the declared name is what it returns
-        if is_closure(n.kind()) {
-            let mut up = anc.iter().rev().filter(|a| a.kind() != "parenthesized_expression");
+        if is_closure(n.kind_str()) {
+            let mut up = anc.iter().rev().filter(|a| a.kind_str() != "parenthesized_expression");
             let call = up.next().filter(|c| {
-                c.kind() == "call_expression"
-                    && c.child_by_field_name("function").is_some_and(|f| {
+                c.kind_str() == "call_expression"
+                    && c.by_field("function").is_some_and(|f| {
                         f.start_byte() <= n.start_byte() && n.end_byte() <= f.end_byte()
                     })
             });
-            let decl = call.and(up.next()).filter(|d| d.kind() == "variable_declarator");
+            let decl = call.and(up.next()).filter(|d| d.kind_str() == "variable_declarator");
             if let Some(d) = decl {
-                if let Some(name) =
-                    d.child_by_field_name("name").filter(|x| x.kind() == "identifier")
-                {
+                if let Some(name) = d.by_field("name").filter(|x| x.kind_str() == "identifier") {
                     invoked.insert(n.start_byte(), (text(name, src), d.start_byte()));
                 }
             }
         }
         // (Ruby's `{ … }` block is a `block` under its call)
-        if is_closure(n.kind())
-            || (n.kind() == "block" && anc.last().is_some_and(|a| a.kind() == "call"))
+        if is_closure(n.kind_str())
+            || (n.kind_str() == "block" && anc.last().is_some_and(|a| a.kind_str() == "call"))
         {
             blocks.push((
                 n.start_byte(),
@@ -3488,7 +3478,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             if facts.defs[di].kind.is_callable() {
                 facts.defs[di].receiver = m.receiver_of(n, src);
             }
-            if matches!(n.kind(), "object_creation_expression" | "object_literal") {
+            if matches!(n.kind_str(), "object_creation_expression" | "object_literal") {
                 facts.defs[di].anonymous = true;
             }
             if facts.defs[di].kind.is_class_like() {
@@ -3501,12 +3491,12 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 facts.defs[di].base_targs = base_targs(n, src);
                 // Rust `struct Script(Arc<Mutex<State>>)`: its numbered fields
                 if let Some(list) =
-                    kids(n).into_iter().find(|c| c.kind() == "ordered_field_declaration_list")
+                    kids(n).into_iter().find(|c| c.kind_str() == "ordered_field_declaration_list")
                 {
                     let types: Vec<Node> = kids(list)
                         .into_iter()
-                        .filter(|c| !is_comment(c) && !c.kind().contains("visibility"))
-                        .filter(|c| c.kind() != "attribute_item")
+                        .filter(|c| !is_comment(c) && !c.kind_str().contains("visibility"))
+                        .filter(|c| c.kind_str() != "attribute_item")
                         .collect();
                     facts.defs[di].rets =
                         types.iter().map(|t| first_type(*t, src).unwrap_or_default()).collect();
@@ -3515,7 +3505,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
                 // Kotlin `class Name(val a: A, b: B = …)`: the primary
                 // constructor's parameters are the class's
-                if let Some(pc) = kids(n).into_iter().find(|c| c.kind() == "primary_constructor") {
+                if let Some(pc) =
+                    kids(n).into_iter().find(|c| c.kind_str() == "primary_constructor")
+                {
                     facts.defs[di].plist = params_in(pc, false, src);
                     facts.defs[di].params = u8::try_from(facts.defs[di].plist.len()).ok();
                 }
@@ -3525,11 +3517,11 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 facts.defs[di].type_params = type_params(n, src);
                 // Go `type byName []*Command`, `type Header map[string][]string`:
                 // a defined collection type holds its element (and keys)
-                if matches!(n.kind(), "type_spec" | "type_alias")
+                if matches!(n.kind_str(), "type_spec" | "type_alias")
                     && crate::parse::current() == Some(crate::lang::Lang::Go)
                 {
                     facts.defs[di].elem = written_elem(n, src)
-                        .or_else(|| n.child_by_field_name("type").and_then(|t| map_value(t, src)));
+                        .or_else(|| n.by_field("type").and_then(|t| map_value(t, src)));
                     facts.defs[di].keyed = written_keyed(n, src);
                     facts.defs[di].key = written_key(n, src);
                     // the type named on the right: an alias is that type
@@ -3537,10 +3529,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     // fields, embeddings and, of an interface, its methods
                     // (`type Copy Base`: `value_path`)
                     let named = n
-                        .child_by_field_name("type")
+                        .by_field("type")
                         .filter(|t| {
                             matches!(
-                                t.kind(),
+                                t.kind_str(),
                                 "type_identifier"
                                     | "qualified_type"
                                     | "generic_type"
@@ -3549,7 +3541,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             )
                         })
                         .and_then(|t| first_type(t, src).or_else(|| path_of(t, src)));
-                    if n.kind() == "type_alias" {
+                    if n.kind_str() == "type_alias" {
                         facts.defs[di].declared_type = named;
                     } else {
                         facts.defs[di].value_path = named;
@@ -3563,7 +3555,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 // Go `func (b Box[U]) Go(u U)`: the receiver's type arguments
                 // are the method's names for the type's parameters (bounded
                 // as the type's are: `type_param_around`)
-                if n.kind() == "method_declaration" {
+                if n.kind_str() == "method_declaration" {
                     let named = go_receiver_type_params(n, src);
                     facts.defs[di].type_bounds.extend(named.iter().map(|_| None));
                     facts.defs[di].type_params.extend(named);
@@ -3611,10 +3603,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
                 let mut pstack: Vec<Node> = Vec::new();
                 pstack.extend(params_field(n));
-                pstack.extend(n.child_by_field_name("receiver"));
+                pstack.extend(n.by_field("receiver"));
                 pstack.extend(kids(n).into_iter().filter(|c| {
                     matches!(
-                        c.kind(),
+                        c.kind_str(),
                         "parameter"
                             | "function_value_parameters"
                             | "parameter_list"
@@ -3632,7 +3624,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                         for c in kids(ps) {
                             // an untyped parameter written as a bare name
                             // (Python, JS, Ruby): it shadows outer names
-                            if matches!(c.kind(), "identifier" | "simple_identifier") {
+                            if matches!(c.kind_str(), "identifier" | "simple_identifier") {
                                 let name = text(c, src);
                                 if name != "self" && name != "cls" {
                                     locals.push(Local {
@@ -3657,7 +3649,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                     });
                                 }
                             } else if matches!(
-                                c.kind(),
+                                c.kind_str(),
                                 "default_parameter"
                                     | "list_splat_pattern"
                                     | "dictionary_splat_pattern"
@@ -3666,14 +3658,14 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                     | "optional_parameter"
                                     | "splat_parameter"
                                     | "hash_splat_parameter"
-                            ) && !(c.kind() == "optional_parameter"
-                                && c.child_by_field_name("type").is_some())
+                            ) && !(c.kind_str() == "optional_parameter"
+                                && c.by_field("type").is_some())
                             {
                                 let name = c
-                                    .child_by_field_name("name")
-                                    .or_else(|| c.child_by_field_name("left"))
+                                    .by_field("name")
+                                    .or_else(|| c.by_field("left"))
                                     .or_else(|| {
-                                        kids(c).into_iter().find(|x| x.kind() == "identifier")
+                                        kids(c).into_iter().find(|x| x.kind_str() == "identifier")
                                     })
                                     .map(|x| text(x, src));
                                 if let Some(name) = name {
@@ -3736,7 +3728,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 let mut types = Vec::new();
                 for c in kids(n) {
                     if matches!(
-                        c.kind(),
+                        c.kind_str(),
                         "parameter_list" | "primary_constructor" | "class_parameters"
                     ) {
                         param_types(c, src, &mut types);
@@ -3748,8 +3740,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 // (C#'s primary constructor is a `parameter_list` on the class)
                 let csharp = facts.lang == Some(crate::lang::Lang::CSharp);
                 for c in kids(n) {
-                    if matches!(c.kind(), "primary_constructor" | "class_parameters")
-                        || (csharp && c.kind() == "parameter_list")
+                    if matches!(c.kind_str(), "primary_constructor" | "class_parameters")
+                        || (csharp && c.kind_str() == "parameter_list")
                     {
                         let mut st = vec![c];
                         while let Some(x) = st.pop() {
@@ -3788,16 +3780,16 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         } else if m.is_field(n) {
             let declared = n
-                .child_by_field_name("type")
+                .by_field("type")
                 .or_else(|| {
                     kids(n)
                         .into_iter()
-                        .find(|c| c.kind() == "variable_declaration")
-                        .and_then(|v| v.child_by_field_name("type"))
+                        .find(|c| c.kind_str() == "variable_declaration")
+                        .and_then(|v| v.by_field("type"))
                 })
                 // (Swift `var fav: ColorOptions`: the annotation is a child
                 // with no field name)
-                .or_else(|| kids(n).into_iter().find(|c| c.kind() == "type_annotation"));
+                .or_else(|| kids(n).into_iter().find(|c| c.kind_str() == "type_annotation"));
             if let Some(t) = declared {
                 let mut types = Vec::new();
                 types_in(t, src, "field", &mut types);
@@ -3808,7 +3800,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         // a variable's declared type: `x: Foo = …`, `let x: Foo`, `Foo x = …`
         if matches!(
-            n.kind(),
+            n.kind_str(),
             "assignment"
                 | "variable_declarator"
                 | "let_declaration"
@@ -3829,7 +3821,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 | "val_declaration"
                 | "var_declaration"
         ) {
-            if let Some(t) = n.child_by_field_name("type") {
+            if let Some(t) = n.by_field("type") {
                 let mut types = Vec::new();
                 types_in(t, src, "variable_type", &mut types);
                 for (p, ctx) in types {
@@ -3839,7 +3831,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         // Rust `struct Wrapper(pub Inner);`, `enum E { Loaded(Ignore) }`: the
         // types of a tuple struct's or variant's fields
-        if n.kind() == "ordered_field_declaration_list" {
+        if n.kind_str() == "ordered_field_declaration_list" {
             let mut cursor = n.walk();
             let written: Vec<Node> = n.children_by_field_name("type", &mut cursor).collect();
             for t in written {
@@ -3854,7 +3846,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // interface's property, call, construct and index signatures
         if ecma
             && matches!(
-                n.kind(),
+                n.kind_str(),
                 "type_alias_declaration"
                     | "property_signature"
                     | "call_signature"
@@ -3863,15 +3855,15 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             )
         {
             let mut types = Vec::new();
-            match n.kind() {
+            match n.kind_str() {
                 "type_alias_declaration" => {
-                    if let Some(t) = n.child_by_field_name("value") {
+                    if let Some(t) = n.by_field("value") {
                         types_in(t, src, "alias", &mut types);
                         // (`infer A` declares `A` for the type it is written in)
                         let mut inferred = Vec::new();
                         let mut stack = vec![t];
                         while let Some(x) = stack.pop() {
-                            if x.kind() == "infer_type" {
+                            if x.kind_str() == "infer_type" {
                                 inferred.extend(kids(x).into_iter().next().map(|c| text(c, src)));
                             }
                             stack.extend(kids(x));
@@ -3883,7 +3875,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 "call_signature" | "construct_signature" => signature_types(n, src, &mut types),
                 _ => {
                     for f in ["type", "index_type"] {
-                        if let Some(t) = n.child_by_field_name(f) {
+                        if let Some(t) = n.by_field(f) {
                             types_in(t, src, "field", &mut types);
                         }
                     }
@@ -3895,12 +3887,12 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         // the types a type parameter is bound by: `[T <: Txn[T]]`, `[T: Show]`,
         // `<T extends Foo>`, `<S: Sink>`
-        if matches!(n.kind(), "type_parameters" | "type_parameter_list") {
+        if matches!(n.kind_str(), "type_parameters" | "type_parameter_list") {
             let mut types = Vec::new();
             for tp in kids(n) {
-                if tp.kind().ends_with("bound") {
+                if tp.kind_str().ends_with("bound") {
                     types_in(tp, src, "bound", &mut types);
-                } else if !tp.kind().contains("identifier") {
+                } else if !tp.kind_str().contains("identifier") {
                     for c in kids(tp).into_iter().skip(1) {
                         types_in(c, src, "bound", &mut types);
                     }
@@ -3911,8 +3903,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // Scala patterns that name a type: `case Succ(p)`, `case o: Obj[In]`
-        if matches!(n.kind(), "case_class_pattern" | "typed_pattern") {
-            if let Some(t) = n.child_by_field_name("type") {
+        if matches!(n.kind_str(), "case_class_pattern" | "typed_pattern") {
+            if let Some(t) = n.by_field("type") {
                 let mut types = Vec::new();
                 types_in(t, src, "pattern", &mut types);
                 for (p, ctx) in types {
@@ -3924,7 +3916,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // Foo`, `s as Foo`, `(Foo) s`, `s instanceof Foo`, `s.(Foo)`, `catch
         // (e: Foo)`; and Kotlin's `val x: Foo`, whose type has no field name
         if matches!(
-            n.kind(),
+            n.kind_str(),
             "instanceof_expression"
                 | "cast_expression"
                 | "is_expression"
@@ -3948,33 +3940,31 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         ) {
             let kotlin = facts.lang == Some(crate::lang::Lang::Kotlin);
             let ks = kids(n);
-            let written: Vec<Node> = if n.kind() == "variable_declaration" {
+            let written: Vec<Node> = if n.kind_str() == "variable_declaration" {
                 // (C# gives a declaration's type a field: `Foo<T> x = …`)
                 if kotlin {
                     ks.into_iter().skip(1).collect()
                 } else {
-                    n.child_by_field_name("type").into_iter().collect()
+                    n.by_field("type").into_iter().collect()
                 }
-            } else if let Some(t) =
-                n.child_by_field_name("type").or_else(|| n.child_by_field_name("right"))
-            {
+            } else if let Some(t) = n.by_field("type").or_else(|| n.by_field("right")) {
                 vec![t]
-            } else if n.kind() == "catch_clause" {
+            } else if n.kind_str() == "catch_clause" {
                 Vec::new() // (JS: it names no type)
             } else {
                 // (after the value tested: what is left that writes a type)
                 let tested = usize::from(
-                    !(n.kind().starts_with("catch")
-                        || matches!(n.kind(), "type_test" | "typeof_expression")),
+                    !(n.kind_str().starts_with("catch")
+                        || matches!(n.kind_str(), "type_test" | "typeof_expression")),
                 );
                 ks.into_iter()
                     .skip(tested)
-                    .filter(|c| c.kind().contains("type") || c.kind().contains("pattern"))
+                    .filter(|c| c.kind_str().contains("type") || c.kind_str().contains("pattern"))
                     .collect()
             };
             let mut types = Vec::new();
             for t in written {
-                if !matches!(t.kind(), "declaration_pattern" | "type_pattern") {
+                if !matches!(t.kind_str(), "declaration_pattern" | "type_pattern") {
                     types_in(t, src, "cast", &mut types);
                 }
             }
@@ -3985,14 +3975,16 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // what a type alias is written with (TypeScript's has its own rule
         // above), and what a `where` clause bounds a type parameter by
         if matches!(
-            n.kind(),
+            n.kind_str(),
             "typealias_declaration" | "type_alias" | "type_item" | "alias_declaration"
         ) {
-            let named = n.child_by_field_name("type").map(|t| vec![t]).unwrap_or_else(|| {
+            let named = n.by_field("type").map(|t| vec![t]).unwrap_or_else(|| {
                 kids(n)
                     .into_iter()
                     .skip(1)
-                    .filter(|c| !c.kind().contains("parameter") && !c.kind().contains("modifier"))
+                    .filter(|c| {
+                        !c.kind_str().contains("parameter") && !c.kind_str().contains("modifier")
+                    })
                     .collect()
             });
             let mut types = Vec::new();
@@ -4006,7 +3998,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // Positions `benchmarks/positions.py` listed as never read.
         // A closure's own signature: `func(next Handler) Handler { … }`,
         // `|a: Arg| -> Ret { … }`, `function (Foo $x): Bar { … }`
-        if is_closure(n.kind()) && !by_node.contains_key(&n.id()) {
+        if is_closure(n.kind_str()) && !by_node.contains_key(&n.id()) {
             let mut types = Vec::new();
             signature_types(n, src, &mut types);
             for (p, ctx) in types {
@@ -4015,7 +4007,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         {
             let mut types = Vec::new();
-            match n.kind() {
+            match n.kind_str() {
                 // Java `throws Err`, Swift `throws(ParserError)`
                 "throws" | "throws_clause" => {
                     for t in kids(n) {
@@ -4024,7 +4016,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
                 // Java `El... many`
                 "spread_parameter" => {
-                    for t in kids(n).into_iter().filter(|c| c.kind() != "variable_declarator") {
+                    for t in kids(n).into_iter().filter(|c| c.kind_str() != "variable_declarator") {
                         types_in(t, src, "parameter_type", &mut types);
                     }
                 }
@@ -4036,27 +4028,26 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
                 // Swift `var handler: (any Handler)? { get }` in a protocol
                 "protocol_property_declaration" => {
-                    for t in kids(n).into_iter().filter(|c| c.kind() == "type_annotation") {
+                    for t in kids(n).into_iter().filter(|c| c.kind_str() == "type_annotation") {
                         types_in(t, src, "field", &mut types);
                     }
                 }
                 // Rust `Mode::L(Limited { n }) => …`: the struct a pattern
                 // takes apart
                 "struct_pattern" => {
-                    if let Some(t) = n.child_by_field_name("type") {
+                    if let Some(t) = n.by_field("type") {
                         types_in(t, src, "pattern", &mut types);
                     }
                 }
                 // C# `new Err[2]`, Java `new El[] { … }`: the element type
                 "array_creation_expression" => {
-                    if let Some(t) = n.child_by_field_name("type") {
+                    if let Some(t) = n.by_field("type") {
                         types_in(t, src, "constructor", &mut types);
                     }
                 }
                 // Swift `(any Handler).self`: a type named as a value
                 "navigation_expression" => {
-                    let named =
-                        n.child_by_field_name("element").filter(|t| t.kind().ends_with("_type"));
+                    let named = n.by_field("element").filter(|t| t.kind_str().ends_with("_type"));
                     if let Some(t) = named {
                         types_in(t, src, "value", &mut types);
                     }
@@ -4069,14 +4060,14 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         if facts.lang == Some(crate::lang::Lang::Go) {
             let mut types = Vec::new();
-            match n.kind() {
+            match n.kind_str() {
                 // `type Key Opt`, `type Mid []func(Handler) Handler`: what a
                 // defined type is defined as (a struct's fields and an
                 // interface's methods are read where they are written)
                 "type_spec" => {
                     let written = n
-                        .child_by_field_name("type")
-                        .filter(|t| !matches!(t.kind(), "struct_type" | "interface_type"));
+                        .by_field("type")
+                        .filter(|t| !matches!(t.kind_str(), "struct_type" | "interface_type"));
                     if let Some(t) = written {
                         types_in(t, src, "alias", &mut types);
                     }
@@ -4084,9 +4075,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 // `[]*Opt{…}`, `map[string]Handler{…}`: the types a literal
                 // of a slice, an array or a map is made of
                 "composite_literal" => {
-                    let written = n.child_by_field_name("type").filter(|t| {
+                    let written = n.by_field("type").filter(|t| {
                         matches!(
-                            t.kind(),
+                            t.kind_str(),
                             "slice_type" | "array_type" | "map_type" | "implicit_length_array_type"
                         )
                     });
@@ -4098,7 +4089,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 // written as an argument
                 "argument_list" => {
                     for a in kids(n) {
-                        if a.kind().ends_with("_type") || a.kind() == "type_identifier" {
+                        if a.kind_str().ends_with("_type") || a.kind_str() == "type_identifier" {
                             types_in(a, src, "type_argument", &mut types);
                         }
                     }
@@ -4111,18 +4102,18 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         if matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp)) {
             let mut types = Vec::new();
-            match n.kind() {
+            match n.kind_str() {
                 // `printbuffer p = { 0 };`, `item *q;`, `int f(item x);`: the
                 // type a declaration is written with
                 "declaration" => {
-                    if let Some(t) = n.child_by_field_name("type") {
+                    if let Some(t) = n.by_field("type") {
                         types_in(t, src, "variable_type", &mut types);
                     }
                 }
                 // a member function declared in its class: `static Pool*
                 // Get(Slice& s);`, `virtual Handle* Lookup(…) = 0;`
                 "field_declaration" => {
-                    if let Some(t) = n.child_by_field_name("type") {
+                    if let Some(t) = n.by_field("type") {
                         types_in(t, src, "field", &mut types);
                     }
                 }
@@ -4135,7 +4126,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     }
                 }
                 "template_function" | "template_method" => {
-                    if let Some(a) = n.child_by_field_name("arguments") {
+                    if let Some(a) = n.by_field("arguments") {
                         for t in kids(a) {
                             types_in(t, src, "generic_arg", &mut types);
                         }
@@ -4144,9 +4135,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 // `typedef item *item_ptr;`: what the name stands for (a
                 // struct written there with its body is a definition)
                 "type_definition" => {
-                    let written = n
-                        .child_by_field_name("type")
-                        .filter(|t| t.child_by_field_name("body").is_none());
+                    let written = n.by_field("type").filter(|t| t.by_field("body").is_none());
                     if let Some(t) = written {
                         types_in(t, src, "alias", &mut types);
                     }
@@ -4158,8 +4147,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // (a C# `where_clause` is a LINQ query's: only Rust's bounds types)
-        if matches!(n.kind(), "type_constraints" | "type_parameter_constraints_clause")
-            || (n.kind() == "where_clause" && facts.lang == Some(crate::lang::Lang::Rust))
+        if matches!(n.kind_str(), "type_constraints" | "type_parameter_constraints_clause")
+            || (n.kind_str() == "where_clause" && facts.lang == Some(crate::lang::Lang::Rust))
         {
             let mut types = Vec::new();
             types_in(n, src, "bound", &mut types);
@@ -4168,15 +4157,15 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // JS / TS / PHP `s instanceof Foo`
-        if n.kind() == "binary_expression"
-            && n.child_by_field_name("operator").is_some_and(|o| o.kind() == "instanceof")
+        if n.kind_str() == "binary_expression"
+            && n.by_field("operator").is_some_and(|o| o.kind_str() == "instanceof")
         {
-            if let Some(p) = n.child_by_field_name("right").and_then(|r| path_of(r, src)) {
+            if let Some(p) = n.by_field("right").and_then(|r| path_of(r, src)) {
                 push(&mut refs, n, RefKind::Type, p, "cast", None);
             }
         }
         // `typeof Backbone.Model`: the value whose type is meant
-        if n.kind() == "type_query" {
+        if n.kind_str() == "type_query" {
             if let Some(p) = kids(n).into_iter().next().and_then(|v| path_of(v, src)) {
                 push(&mut refs, n, RefKind::Type, p, "type_query", None);
             }
@@ -4185,7 +4174,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // the query (up to an `into`, which starts a scope of its own), and
         // each clause a call of the source's query method (the standard's
         // 12.20.3; context `language_call`, kept only where it resolves)
-        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind() == "query_expression" {
+        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind_str() == "query_expression" {
             let (scopes, calls) = csharp_query(n, src);
             for (lo, hi, params) in &scopes {
                 for (name, ..) in params {
@@ -4269,20 +4258,21 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             params.retain(|(name, ..)| name != "_" || sole_discard);
             if !params.is_empty() {
                 // a parameter list stands for the block around it
-                let body = if n.kind().ends_with("_parameters") || n.kind() == "exception_variable"
+                let body = if n.kind_str().ends_with("_parameters")
+                    || n.kind_str() == "exception_variable"
                 {
                     anc.last().copied().unwrap_or(n)
                 } else {
                     n
                 };
                 // JS: a function passed to a call, with its parameters in order
-                if matches!(n.kind(), "function_expression" | "arrow_function" | "function")
-                    && anc.last().is_some_and(|a| a.kind() == "arguments")
+                if matches!(n.kind_str(), "function_expression" | "arrow_function" | "function")
+                    && anc.last().is_some_and(|a| a.kind_str() == "arguments")
                 {
                     let call = anc.len().checked_sub(2).and_then(|i| anc.get(i));
                     if let Some(callee) = call
-                        .filter(|c| c.kind() == "call_expression")
-                        .and_then(|c| c.child_by_field_name("function"))
+                        .filter(|c| c.kind_str() == "call_expression")
+                        .and_then(|c| c.by_field("function"))
                         .and_then(|c| path_of(c, src))
                     {
                         let names = params.iter().map(|(name, ..)| name.clone()).collect();
@@ -4318,7 +4308,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         if !by_node.contains_key(&n.id()) {
             // an untyped `x = …` declares a local only where assigning declares
             // (Python, Ruby); elsewhere it writes a variable declared before
-            let plain_assignment = matches!(n.kind(), "assignment" | "assignment_expression")
+            let plain_assignment = matches!(n.kind_str(), "assignment" | "assignment_expression")
                 && !m.assignment_declares();
             // `let (a, b) = f()`: each name is a part of what `f` returns
             let parts = destructured(n, src);
@@ -4377,16 +4367,14 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             // (a Rust `let` is in force once it has ended: its own value
             // still sees the declaration before it, `let r = r.clone();`)
             let declared_at =
-                if n.kind() == "let_declaration" { n.end_byte() } else { n.start_byte() };
+                if n.kind_str() == "let_declaration" { n.end_byte() } else { n.start_byte() };
             for (name, mut path, declared, field) in
                 locals_of(n, src, false).into_iter().filter(|_| !taken_apart)
             {
                 // Ruby `s = stubs`: a bare name on the right is a call (or
                 // another local), and the local is what that gives
                 if path.is_empty() && facts.lang == Some(crate::lang::Lang::Ruby) {
-                    if let Some(r) =
-                        n.child_by_field_name("right").filter(|r| r.kind() == "identifier")
-                    {
+                    if let Some(r) = n.by_field("right").filter(|r| r.kind_str() == "identifier") {
                         path = vec![text(r, src)];
                     }
                 }
@@ -4435,7 +4423,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         // type arguments anywhere: `Deserialize<Person>()`, `IRequest<Envelope>`,
         // `List<Foo>` in a body (signatures repeat them; edges are unique)
-        if matches!(n.kind(), "type_arguments" | "type_argument_list") {
+        if matches!(n.kind_str(), "type_arguments" | "type_argument_list") {
             let mut types = Vec::new();
             for c in kids(n) {
                 types_in(c, src, "generic_arg", &mut types);
@@ -4449,9 +4437,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // `infix fun`); context `operator`, resolved only through a's type
         // (C++ `a + b`: `a.operator+(b)` when a's class declares it,
         // [over.match.oper])
-        if facts.lang == Some(crate::lang::Lang::Cpp) && n.kind() == "binary_expression" {
-            let op = n.child_by_field_name("operator").map(|o| text(o, src));
-            let lhs = n.child_by_field_name("left").and_then(|l| path_of(l, src));
+        if facts.lang == Some(crate::lang::Lang::Cpp) && n.kind_str() == "binary_expression" {
+            let op = n.by_field("operator").map(|o| text(o, src));
+            let lhs = n.by_field("left").and_then(|l| path_of(l, src));
             if let (Some(op), Some(mut path)) = (op, lhs) {
                 if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | ">")
                     && !path.iter().any(|s| s == UNKNOWN)
@@ -4528,19 +4516,20 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // (C# `new Bag { 1, { 2, 3 } }`: each element is a call of the `Add`
         // of the type created, the standard's 12.8.17.4; context `language_call`,
         // kept only where it resolves to one)
-        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind() == "initializer_expression" {
+        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind_str() == "initializer_expression"
+        {
             let made = n
                 .parent()
-                .filter(|m| m.kind() == "object_creation_expression")
-                .and_then(|m| m.child_by_field_name("type"))
+                .filter(|m| m.kind_str() == "object_creation_expression")
+                .and_then(|m| m.by_field("type"))
                 .and_then(|t| path_of(t, src))
                 .filter(|p| !p.iter().any(|s| s == UNKNOWN));
             if let Some(ty) = made {
                 for e in kids(n).into_iter().filter(|c| !is_comment(c)) {
-                    if matches!(e.kind(), "assignment_expression") {
+                    if matches!(e.kind_str(), "assignment_expression") {
                         continue;
                     }
-                    let args = if e.kind() == "initializer_expression" {
+                    let args = if e.kind_str() == "initializer_expression" {
                         kids(e).iter().filter(|c| !is_comment(c)).count()
                     } else {
                         1
@@ -4557,7 +4546,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         // (C# `await c` calls the `GetAwaiter` of c's type, the standard's
         // 12.9.8.2; context `language_call`, kept only where it resolves to one)
-        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind() == "await_expression" {
+        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind_str() == "await_expression" {
             let of = kids(n).into_iter().find(|c| !is_comment(c)).and_then(|x| path_of(x, src));
             if let Some(mut path) = of.filter(|p| !p.iter().any(|s| s == UNKNOWN)) {
                 path.push("GetAwaiter".into());
@@ -4571,10 +4560,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // (C# `foreach (var x in bag)` calls the `GetEnumerator` of bag's type,
         // `await foreach` its `GetAsyncEnumerator`: the standard's 13.9.5;
         // context `language_call`, kept only where it resolves to one)
-        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind() == "foreach_statement" {
-            let of = n.child_by_field_name("right").and_then(|r| path_of(r, src));
+        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind_str() == "foreach_statement" {
+            let of = n.by_field("right").and_then(|r| path_of(r, src));
             if let Some(mut path) = of.filter(|p| !p.iter().any(|s| s == UNKNOWN)) {
-                let awaited = n.child(0).is_some_and(|c| c.kind() == "await");
+                let awaited = n.child(0).is_some_and(|c| c.kind_str() == "await");
                 path.push(if awaited { "GetAsyncEnumerator" } else { "GetEnumerator" }.into());
                 let at = refs.len();
                 push(&mut refs, n, RefKind::Call, path, "language_call", None);
@@ -4585,13 +4574,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         if facts.lang == Some(crate::lang::Lang::Kotlin) {
             let named = kids(n);
-            let method = match n.kind() {
+            let method = match n.kind_str() {
                 "additive_expression" | "multiplicative_expression" => {
                     let mut cursor = n.walk();
                     let op = n
                         .children(&mut cursor)
                         .find(|c| !c.is_named())
-                        .map(|c| c.kind().to_string())
+                        .map(|c| c.kind_str().to_string())
                         .unwrap_or_default();
                     match op.as_str() {
                         "+" => Some("plus".to_string()),
@@ -4603,9 +4592,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     }
                 }
                 "indexing_expression" => Some("get".to_string()),
-                "infix_expression" => {
-                    named.get(1).filter(|x| x.kind() == "simple_identifier").map(|x| text(*x, src))
-                }
+                "infix_expression" => named
+                    .get(1)
+                    .filter(|x| x.kind_str() == "simple_identifier")
+                    .map(|x| text(*x, src)),
                 _ => None,
             };
             if let Some(m) = method {
@@ -4617,8 +4607,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // JSX: `<FormMessage />`, `<Table.Cell>` render a component
-        if matches!(n.kind(), "jsx_opening_element" | "jsx_self_closing_element") {
-            if let Some(path) = n.child_by_field_name("name").and_then(|x| path_of(x, src)) {
+        if matches!(n.kind_str(), "jsx_opening_element" | "jsx_self_closing_element") {
+            if let Some(path) = n.by_field("name").and_then(|x| path_of(x, src)) {
                 if path.first().is_some_and(|h| h.chars().next().is_some_and(|c| c.is_uppercase()))
                 {
                     push(&mut refs, n, RefKind::Call, path, "jsx", None);
@@ -4659,7 +4649,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         if let Some(v) = returned_value(n, src) {
             let home = anc.iter().rev().find_map(|a| match by_node.get(&a.id()) {
                 Some(&di) if facts.defs[di].kind.is_callable() => Some(Some(di)),
-                _ if is_closure(a.kind()) => Some(None),
+                _ if is_closure(a.kind_str()) => Some(None),
                 _ => None,
             });
             if let Some(Some(di)) = home {
@@ -4678,7 +4668,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             for (kind, path, context) in extra {
                 push(&mut refs, n, kind, path, context, None);
             }
-        } else if n.parent().is_some_and(|p| p.kind() == "decorator") {
+        } else if n.parent().is_some_and(|p| p.kind_str() == "decorator") {
             // the decorator expression itself is the definition's decorator
             // reference, not a call of the enclosing scope
         } else if let Some((name, of)) = implicit_member_value(n, src, &anc) {
@@ -4732,14 +4722,14 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
             // functions handed over as values: `MockTransport(app)`,
             // `map(str.strip, xs)`, `hooks = [on_request]` inside an argument
-            if let Some(args) = n.child_by_field_name("arguments").or_else(|| {
+            if let Some(args) = n.by_field("arguments").or_else(|| {
                 kids(n)
                     .into_iter()
-                    .find(|c| c.kind().contains("argument") || c.kind() == "call_suffix")
+                    .find(|c| c.kind_str().contains("argument") || c.kind_str() == "call_suffix")
             }) {
                 let mut st = kids(args);
                 while let Some(a) = st.pop() {
-                    match a.kind() {
+                    match a.kind_str() {
                         "identifier" | "simple_identifier" => push(
                             &mut refs,
                             a,
@@ -4769,9 +4759,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                         | "array_literal" | "collection_literal" => {
                             let ctx_kids = kids(a);
                             st.extend(
-                                ctx_kids
-                                    .into_iter()
-                                    .filter(|c| !matches!(c.kind(), "lambda" | "arrow_function")),
+                                ctx_kids.into_iter().filter(|c| {
+                                    !matches!(c.kind_str(), "lambda" | "arrow_function")
+                                }),
                             );
                         }
                         _ => {}
@@ -4787,7 +4777,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         // `this::helper`, `Util::twice`, `::handle`: the function the
         // reference names; Kotlin `Foo::class`: the class
-        if matches!(n.kind(), "callable_reference" | "method_reference") {
+        if matches!(n.kind_str(), "callable_reference" | "method_reference") {
             let ks: Vec<Node> = kids(n).into_iter().filter(|c| !is_comment(c)).collect();
             // (the grammar keeps `class` out of the tree)
             if text(n, src).ends_with("::class") {
@@ -4799,7 +4789,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // Swift `case option(ParsedArgument)`: the types a case carries
-        if n.kind() == "enum_type_parameters" {
+        if n.kind_str() == "enum_type_parameters" {
             let mut types = Vec::new();
             types_in(n, src, "field", &mut types);
             for (p, ctx) in types {
@@ -4807,20 +4797,20 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // Python `except Exit as e:`, `except (A, m.B):`: the types caught
-        if n.kind() == "except_clause" {
-            let mut caught = n
-                .child_by_field_name("value")
-                .or_else(|| kids(n).into_iter().find(|c| c.kind() != "block" && !is_comment(c)));
-            if let Some(c) = caught.filter(|c| c.kind() == "as_pattern") {
+        if n.kind_str() == "except_clause" {
+            let mut caught = n.by_field("value").or_else(|| {
+                kids(n).into_iter().find(|c| c.kind_str() != "block" && !is_comment(c))
+            });
+            if let Some(c) = caught.filter(|c| c.kind_str() == "as_pattern") {
                 caught = kids(c).into_iter().next();
             }
             let each: Vec<Node> = match caught {
-                Some(c) if matches!(c.kind(), "tuple" | "parenthesized_expression") => kids(c),
+                Some(c) if matches!(c.kind_str(), "tuple" | "parenthesized_expression") => kids(c),
                 Some(c) => vec![c],
                 None => Vec::new(),
             };
             for c in each {
-                if matches!(c.kind(), "identifier" | "attribute") {
+                if matches!(c.kind_str(), "identifier" | "attribute") {
                     if let Some(p) = path_of(c, src) {
                         push(&mut refs, c, RefKind::Type, p, "except", None);
                     }
@@ -4829,10 +4819,11 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         // (Kotlin's grammar reads `Repo::class` outside an argument list as a
         // navigation with nothing after the `::class`)
-        if n.kind() == "navigation_expression" && facts.lang == Some(crate::lang::Lang::Kotlin) {
+        if n.kind_str() == "navigation_expression" && facts.lang == Some(crate::lang::Lang::Kotlin)
+        {
             let ks = kids(n);
             let bare = ks.len() == 2
-                && ks[1].kind() == "navigation_suffix"
+                && ks[1].kind_str() == "navigation_suffix"
                 && kids(ks[1]).is_empty()
                 && text(ks[1], src) == "::class";
             if bare {
@@ -4844,7 +4835,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // C# `: base(1, text)` / `: this("x")`: the constructor of the base
         // class, or another of the class itself
         // (Java `super(1, text);` / `this("x");` in a constructor)
-        if matches!(n.kind(), "constructor_initializer" | "explicit_constructor_invocation") {
+        if matches!(n.kind_str(), "constructor_initializer" | "explicit_constructor_invocation") {
             let written = text(n, src);
             let word = written.trim_start_matches(':').trim_start();
             let head = if word.starts_with("base") || word.starts_with("super") {
@@ -4854,7 +4845,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             };
             let passed = kids(n)
                 .into_iter()
-                .find(|c| c.kind() == "argument_list")
+                .find(|c| c.kind_str() == "argument_list")
                 .map(|l| kids(l).iter().filter(|c| !is_comment(c)).count());
             let at = refs.len();
             push(&mut refs, n, RefKind::New, vec![head.to_string()], "constructor", None);
@@ -4863,7 +4854,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // PHP `Repo::class`: the class named
-        if n.kind() == "class_constant_access_expression" {
+        if n.kind_str() == "class_constant_access_expression" {
             let ks = kids(n);
             if ks.len() == 2 && text(ks[1], src) == "class" {
                 if let Some(p) = path_of(ks[0], src).filter(|p| p[0] != "self" && p[0] != "super") {
@@ -4872,7 +4863,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // JS `this` in a function expression no definition holds
-        if n.kind() == "this"
+        if n.kind_str() == "this"
             && matches!(
                 facts.lang,
                 Some(
@@ -4888,15 +4879,15 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         // JS `Object.defineProperty(this, 'router', …)`, `Object.create(p, {
         // app: … })`: properties defined at run time
-        if n.kind() == "call_expression"
+        if n.kind_str() == "call_expression"
             && matches!(
                 facts.lang,
                 Some(crate::lang::Lang::JavaScript | crate::lang::Lang::TypeScript)
             )
         {
-            let callee = n.child_by_field_name("function").and_then(|c| path_of(c, src));
+            let callee = n.by_field("function").and_then(|c| path_of(c, src));
             let args: Vec<Node> = n
-                .child_by_field_name("arguments")
+                .by_field("arguments")
                 .map(|a| kids(a).into_iter().filter(|c| !is_comment(c)).collect())
                 .unwrap_or_default();
             match (callee.as_deref(), args.as_slice()) {
@@ -4904,10 +4895,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     facts.runtime_props.extend(string_arg(*name, src));
                 }
                 (Some([o, c]), [_, props, ..])
-                    if o == "Object" && c == "create" && props.kind() == "object" =>
+                    if o == "Object" && c == "create" && props.kind_str() == "object" =>
                 {
-                    for pair in kids(*props).into_iter().filter(|p| p.kind() == "pair") {
-                        if let Some(k) = pair.child_by_field_name("key") {
+                    for pair in kids(*props).into_iter().filter(|p| p.kind_str() == "pair") {
+                        if let Some(k) = pair.by_field("key") {
                             facts
                                 .runtime_props
                                 .push(text(k, src).trim_matches(['\'', '"']).to_string());
@@ -4918,17 +4909,17 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // JS `const article = req.article`: a name given a request's property
-        if n.kind() == "variable_declarator"
+        if n.kind_str() == "variable_declarator"
             && matches!(
                 facts.lang,
                 Some(crate::lang::Lang::JavaScript | crate::lang::Lang::TypeScript)
             )
         {
-            let name = n.child_by_field_name("name").filter(|x| x.kind() == "identifier");
-            let value = n.child_by_field_name("value").filter(|v| v.kind() == "member_expression");
+            let name = n.by_field("name").filter(|x| x.kind_str() == "identifier");
+            let value = n.by_field("value").filter(|v| v.kind_str() == "member_expression");
             if let (Some(name), Some(v)) = (name, value) {
-                let object = v.child_by_field_name("object").filter(|o| o.kind() == "identifier");
-                if let (Some(o), Some(p)) = (object, v.child_by_field_name("property")) {
+                let object = v.by_field("object").filter(|o| o.kind_str() == "identifier");
+                if let (Some(o), Some(p)) = (object, v.by_field("property")) {
                     if matches!(text(o, src).as_str(), "req" | "request") {
                         facts.request_aliases.push((text(name, src), text(p, src)));
                     }
@@ -4936,18 +4927,15 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // JS `req.article = …`: a property put on a request
-        if n.kind() == "assignment_expression"
+        if n.kind_str() == "assignment_expression"
             && matches!(
                 facts.lang,
                 Some(crate::lang::Lang::JavaScript | crate::lang::Lang::TypeScript)
             )
         {
-            if let Some(left) =
-                n.child_by_field_name("left").filter(|l| l.kind() == "member_expression")
-            {
-                let object =
-                    left.child_by_field_name("object").filter(|o| o.kind() == "identifier");
-                let prop = left.child_by_field_name("property");
+            if let Some(left) = n.by_field("left").filter(|l| l.kind_str() == "member_expression") {
+                let object = left.by_field("object").filter(|o| o.kind_str() == "identifier");
+                let prop = left.by_field("property");
                 if let (Some(o), Some(p)) = (object, prop) {
                     if matches!(text(o, src).as_str(), "req" | "request") {
                         facts.request_props.push(text(p, src));
@@ -4956,20 +4944,21 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // JS `mongoose.model('Article', ArticleSchema)`: a model registered
-        if n.kind() == "call_expression"
+        if n.kind_str() == "call_expression"
             && matches!(
                 facts.lang,
                 Some(crate::lang::Lang::JavaScript | crate::lang::Lang::TypeScript)
             )
         {
-            let callee = n.child_by_field_name("function").and_then(|c| path_of(c, src));
+            let callee = n.by_field("function").and_then(|c| path_of(c, src));
             if callee.is_some_and(|c| c == ["mongoose", "model"] || c == ["model"]) {
                 let args: Vec<Node> = n
-                    .child_by_field_name("arguments")
+                    .by_field("arguments")
                     .map(|a| kids(a).into_iter().filter(|c| !is_comment(c)).collect())
                     .unwrap_or_default();
                 if let [name, schema, ..] = args.as_slice() {
-                    if let (Some(name), "identifier") = (string_arg(*name, src), schema.kind()) {
+                    if let (Some(name), "identifier") = (string_arg(*name, src), schema.kind_str())
+                    {
                         facts.models.push((name, text(*schema, src)));
                     }
                 }
@@ -4997,13 +4986,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // the alias names
         // Kotlin / Swift `typealias Store = Repo`: another name for one type
         // (a function type, a tuple or a union names no type of its own)
-        if matches!(n.kind(), "type_alias" | "typealias_declaration")
+        if matches!(n.kind_str(), "type_alias" | "typealias_declaration")
             && matches!(facts.lang, Some(crate::lang::Lang::Kotlin | crate::lang::Lang::Swift))
         {
             let named = n
-                .child_by_field_name("value")
+                .by_field("value")
                 .or_else(|| kids(n).into_iter().rev().find(|c| !is_comment(c)))
-                .filter(|t| matches!(t.kind(), "user_type" | "type_identifier"));
+                .filter(|t| matches!(t.kind_str(), "user_type" | "type_identifier"));
             if let Some(ty) = named.and_then(|t| path_of(t, src)) {
                 let (lo, hi) = (n.start_byte(), n.end_byte());
                 for d in facts.defs.iter_mut() {
@@ -5019,13 +5008,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         // Python `global x` / `nonlocal x`: an assignment to x in the function
         // binds the module's (or the enclosing function's) name, no local
-        if matches!(n.kind(), "global_statement" | "nonlocal_statement") {
-            for c in kids(n).into_iter().filter(|c| c.kind() == "identifier") {
+        if matches!(n.kind_str(), "global_statement" | "nonlocal_statement") {
+            for c in kids(n).into_iter().filter(|c| c.kind_str() == "identifier") {
                 outer_names.push((n.start_byte(), text(c, src)));
             }
         }
         // Scala `export p.print` / `export q.{a, b}`: members forwarded
-        if n.kind() == "export_declaration" {
+        if n.kind_str() == "export_declaration" {
             let mut cursor = n.walk();
             let path: Vec<String> = n
                 .children_by_field_name("path", &mut cursor)
@@ -5034,9 +5023,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 .collect();
             let picked: Vec<String> = kids(n)
                 .into_iter()
-                .filter(|c| c.kind() == "namespace_selectors")
+                .filter(|c| c.kind_str() == "namespace_selectors")
                 .flat_map(kids)
-                .filter(|c| c.kind() == "identifier")
+                .filter(|c| c.kind_str() == "identifier")
                 .map(|c| text(c, src))
                 .collect();
             if picked.is_empty() {
@@ -5052,16 +5041,17 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // C++ `inline namespace v2 { … }`
-        if n.kind() == "namespace_definition" && kids(n).iter().any(|c| c.kind() == "inline")
-            || (n.kind() == "namespace_definition"
+        if n.kind_str() == "namespace_definition"
+            && kids(n).iter().any(|c| c.kind_str() == "inline")
+            || (n.kind_str() == "namespace_definition"
                 && text(n, src).trim_start().starts_with("inline"))
         {
             facts.inline_namespaces.push(n.start_byte());
         }
         // TS `import Internal = My.Internal;`: a name for what the path names
-        if n.kind() == "import_alias" {
+        if n.kind_str() == "import_alias" {
             let ks = kids(n);
-            let name = ks.first().filter(|c| c.kind() == "identifier").map(|c| text(*c, src));
+            let name = ks.first().filter(|c| c.kind_str() == "identifier").map(|c| text(*c, src));
             let of = ks.get(1).and_then(|c| path_of(*c, src));
             if let (Some(name), Some(of)) = (name, of) {
                 if of.first() != Some(&name) {
@@ -5070,8 +5060,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         // C++ `namespace u = util;`
-        if n.kind() == "namespace_alias_definition" {
-            let name = n.child_by_field_name("name").map(|c| text(c, src));
+        if n.kind_str() == "namespace_alias_definition" {
+            let name = n.by_field("name").map(|c| text(c, src));
             let of =
                 kids(n).into_iter().rev().find(|c| !is_comment(c)).and_then(|c| path_of(c, src));
             if let (Some(name), Some(of)) = (name, of) {
@@ -5081,9 +5071,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
         if matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp))
-            && matches!(n.kind(), "type_definition" | "alias_declaration")
+            && matches!(n.kind_str(), "type_definition" | "alias_declaration")
         {
-            if let Some(t) = n.child_by_field_name("type") {
+            if let Some(t) = n.by_field("type") {
                 let (lo, hi) = (n.start_byte(), n.end_byte());
                 for d in facts.defs.iter_mut() {
                     if d.kind == crate::facts::DefKind::TypeAlias
@@ -5095,13 +5085,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                         // name (what its body holds is no target), none for an
                         // anonymous one
                         d.declared_type = if matches!(
-                            t.kind(),
+                            t.kind_str(),
                             "struct_specifier"
                                 | "union_specifier"
                                 | "enum_specifier"
                                 | "class_specifier"
                         ) {
-                            t.child_by_field_name("name").map(|nm| vec![text(nm, src)])
+                            t.by_field("name").map(|nm| vec![text(nm, src)])
                         } else {
                             first_type(t, src)
                         };
@@ -5198,14 +5188,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     // repeats the one before it, type and all (the spec's "Constant
     // declarations")
     if facts.lang == Some(crate::lang::Lang::Go) {
-        for decl in kids(root).into_iter().filter(|c| c.kind() == "const_declaration") {
+        for decl in kids(root).into_iter().filter(|c| c.kind_str() == "const_declaration") {
             // (the type and the value of the spec before)
             type Repeated = (Option<Vec<String>>, Option<Vec<String>>);
             let mut prev: Option<Repeated> = None;
-            for spec in kids(decl).into_iter().filter(|c| c.kind() == "const_spec") {
+            for spec in kids(decl).into_iter().filter(|c| c.kind_str() == "const_spec") {
                 let (lo, hi) = (spec.start_byte(), spec.end_byte());
-                let repeats = spec.child_by_field_name("type").is_none()
-                    && spec.child_by_field_name("value").is_none();
+                let repeats = spec.by_field("type").is_none() && spec.by_field("value").is_none();
                 let mine = facts.defs.iter_mut().filter(|d| {
                     d.kind == crate::facts::DefKind::Constant
                         && lo <= d.start_byte
@@ -5358,15 +5347,15 @@ pub const IMPLICIT: &str = "[.]";
 
 /// `.status(301)`: the name of an implicit member that is called.
 fn implicit_member_call(n: Node, src: &[u8]) -> Option<String> {
-    if n.kind() != "call_expression" {
+    if n.kind_str() != "call_expression" {
         return None;
     }
-    let head = kids(n).into_iter().next().filter(|c| c.kind() == "prefix_expression")?;
+    let head = kids(n).into_iter().next().filter(|c| c.kind_str() == "prefix_expression")?;
     if src.get(head.start_byte()) != Some(&b'.') {
         return None;
     }
-    let target = head.child_by_field_name("target")?;
-    (target.kind() == "simple_identifier").then(|| text(target, src))
+    let target = head.by_field("target")?;
+    (target.kind_str() == "simple_identifier").then(|| text(target, src))
 }
 
 /// `.body` written where a value is and not called, with the place that types
@@ -5379,33 +5368,33 @@ fn implicit_member_value(n: Node, src: &[u8], anc: &[Node]) -> Option<(String, I
     }
     let parent = anc.last()?;
     // `case .body:`: the grammar keeps the name, and drops the dot, in a pattern
-    if n.kind() == "simple_identifier" && parent.kind() == "pattern" {
-        let entry = anc.iter().rev().nth(2).filter(|e| e.kind() == "switch_entry")?;
-        let switch = anc.iter().rev().nth(3).filter(|s| s.kind() == "switch_statement")?;
+    if n.kind_str() == "simple_identifier" && parent.kind_str() == "pattern" {
+        let entry = anc.iter().rev().nth(2).filter(|e| e.kind_str() == "switch_entry")?;
+        let switch = anc.iter().rev().nth(3).filter(|s| s.kind_str() == "switch_statement")?;
         let _ = entry;
         let dot = src[..n.start_byte()].iter().rev().find(|b| !b.is_ascii_whitespace());
         if dot != Some(&b'.') || kids(*parent).len() != 1 {
             return None;
         }
-        let subject = switch.child_by_field_name("expr")?;
+        let subject = switch.by_field("expr")?;
         return Some((text(n, src), Implicit::Value(path_of(subject, src)?)));
     }
-    if n.kind() != "prefix_expression" || src.get(n.start_byte()) != Some(&b'.') {
+    if n.kind_str() != "prefix_expression" || src.get(n.start_byte()) != Some(&b'.') {
         return None;
     }
-    let target = n.child_by_field_name("target").filter(|t| t.kind() == "simple_identifier")?;
-    if parent.kind() == "call_expression" {
+    let target = n.by_field("target").filter(|t| t.kind_str() == "simple_identifier")?;
+    if parent.kind_str() == "call_expression" {
         return None; // `.status(301)`: `implicit_member_call`'s
     }
     let name = text(target, src);
-    let other = |field: &str| parent.child_by_field_name(field).filter(|o| o.id() != n.id());
-    let place = match parent.kind() {
+    let other = |field: &str| parent.by_field(field).filter(|o| o.id() != n.id());
+    let place = match parent.kind_str() {
         "equality_expression" => {
             let side = other("lhs").or_else(|| other("rhs"))?;
             Implicit::Value(path_of(side, src)?)
         }
         "assignment" => {
-            let t = parent.child_by_field_name("target")?;
+            let t = parent.by_field("target")?;
             let t = kids(t).into_iter().next().unwrap_or(t);
             Implicit::Value(path_of(t, src)?)
         }
@@ -5421,16 +5410,16 @@ fn implicit_member_value(n: Node, src: &[u8], anc: &[Node]) -> Option<(String, I
 /// written type, or what a `return` gives.
 fn implicit_place(anc: &[Node], src: &[u8]) -> Option<Implicit> {
     let parent = anc.last()?;
-    match parent.kind() {
+    match parent.kind_str() {
         "value_argument" => {
             let list = anc.get(anc.len().checked_sub(2)?)?;
-            let call = anc.iter().rev().find(|a| a.kind() == "call_expression")?;
+            let call = anc.iter().rev().find(|a| a.kind_str() == "call_expression")?;
             let index = kids(*list)
                 .into_iter()
-                .filter(|c| c.kind() == "value_argument")
+                .filter(|c| c.kind_str() == "value_argument")
                 .position(|c| c.id() == parent.id())?;
             let label = parent
-                .child_by_field_name("name")
+                .by_field("name")
                 .map(|l| text(l, src).trim_end_matches(':').trim().to_string())
                 .filter(|l| !l.is_empty());
             Some(Implicit::Arg {
@@ -5444,7 +5433,8 @@ fn implicit_place(anc: &[Node], src: &[u8]) -> Option<Implicit> {
         // `{ .status(1) }`: the one expression of a body is what it returns
         "statements" => {
             let body = anc.get(anc.len().checked_sub(2)?)?;
-            (body.kind() == "function_body" && kids(*parent).len() == 1).then_some(Implicit::Return)
+            (body.kind_str() == "function_body" && kids(*parent).len() == 1)
+                .then_some(Implicit::Return)
         }
         _ => None,
     }
@@ -5454,7 +5444,7 @@ fn implicit_place(anc: &[Node], src: &[u8]) -> Option<Implicit> {
 /// `macro_refs`), at their bytes and lines in the file.
 fn macro_state_uses(mac: Node, src: &[u8]) -> Vec<RefFact> {
     const PREFIX: &[u8] = b"fn __m(){";
-    let Some(tt) = kids(mac).into_iter().find(|c| c.kind() == "token_tree") else {
+    let Some(tt) = kids(mac).into_iter().find(|c| c.kind_str() == "token_tree") else {
         return Vec::new();
     };
     let tokens = &src[tt.start_byte()..tt.end_byte()];
@@ -5508,7 +5498,7 @@ fn macro_refs(
     if depth >= 3 {
         return none();
     }
-    let Some(tt) = kids(mac).into_iter().find(|c| c.kind() == "token_tree") else {
+    let Some(tt) = kids(mac).into_iter().find(|c| c.kind_str() == "token_tree") else {
         return none();
     };
     let tokens = &src[tt.start_byte()..tt.end_byte()];
@@ -5516,7 +5506,7 @@ fn macro_refs(
         return none();
     }
     let name = mac
-        .child_by_field_name("macro")
+        .by_field("macro")
         .map(|n| text(n, src))
         .unwrap_or_default()
         .rsplit("::")
@@ -5603,26 +5593,27 @@ fn macro_refs(
 fn value_node<'t>(node: Node<'t>) -> Option<Node<'t>> {
     ["value", "right", "default_value", "initializer"]
         .iter()
-        .find_map(|f| node.child_by_field_name(f))
+        .find_map(|f| node.by_field(f))
         .or_else(|| {
             // C/C++, Go and Kotlin keep it one level down
             kids(node).into_iter().find_map(|c| {
-                c.child_by_field_name("value")
-                    .or_else(|| (c.kind() == "expression_list").then(|| c.named_child(0)).flatten())
+                c.by_field("value").or_else(|| {
+                    (c.kind_str() == "expression_list").then(|| c.named_child(0)).flatten()
+                })
             })
         })
         .or_else(|| {
             // Kotlin `val store = Repo()`: what follows the `=`, with no field
-            if node.kind() != "property_declaration" {
+            if node.kind_str() != "property_declaration" {
                 return None;
             }
             let mut cursor = node.walk();
             let all: Vec<Node> = node.children(&mut cursor).collect();
-            let eq = all.iter().position(|c| c.kind() == "=")?;
+            let eq = all.iter().position(|c| c.kind_str() == "=")?;
             all.get(eq + 1).copied().filter(|c| c.is_named())
         })
         // Go `var store = &Repo{}`: the first of the values
-        .map(|v| match v.kind() {
+        .map(|v| match v.kind_str() {
             "expression_list" => v.named_child(0).unwrap_or(v),
             _ => v,
         })
@@ -5631,7 +5622,7 @@ fn value_node<'t>(node: Node<'t>) -> Option<Node<'t>> {
 /// A short string literal a declaration holds.
 fn state_value(node: Node, src: &[u8]) -> Option<String> {
     let v = value_node(node)?;
-    if !(v.kind().contains("string") || v.kind() == "encapsed_string") {
+    if !(v.kind_str().contains("string") || v.kind_str() == "encapsed_string") {
         return None;
     }
     let s = string_value(v, src);
@@ -5707,14 +5698,14 @@ fn mapped(of: &[String], var: &str, each: Vec<String>) -> Option<Vec<String>> {
 /// `handle` of the object, `[Foo::class, 'handle']` of `Foo`.
 fn php_callable(a: Node, src: &[u8]) -> Option<Vec<String>> {
     let items: Vec<Node> =
-        kids(a).into_iter().filter(|c| c.kind() == "array_element_initializer").collect();
+        kids(a).into_iter().filter(|c| c.kind_str() == "array_element_initializer").collect();
     let [of, name] = items.as_slice() else { return None };
     let (of, name) = (kids(*of).into_iter().next()?, kids(*name).into_iter().next()?);
-    if !matches!(name.kind(), "string" | "encapsed_string") {
+    if !matches!(name.kind_str(), "string" | "encapsed_string") {
         return None;
     }
     let name = string_value(name, src);
-    let mut p = match of.kind() {
+    let mut p = match of.kind_str() {
         "variable_name" if text(of, src) == "$this" => vec!["self".to_string()],
         "class_constant_access_expression" => {
             let ks = kids(of);
@@ -5734,7 +5725,7 @@ fn php_callable(a: Node, src: &[u8]) -> Option<Vec<String>> {
 /// Swift's `\.owner` a member of each element (an empty head, as Ruby's
 /// `&:owner`).
 fn referenced(f: Node, src: &[u8]) -> Option<Vec<String>> {
-    match f.kind() {
+    match f.kind_str() {
         "callable_reference" | "method_reference" => {
             let ks: Vec<Node> = kids(f).into_iter().filter(|c| !is_comment(c)).collect();
             let (last, of) = ks.split_last()?;
@@ -5751,7 +5742,9 @@ fn referenced(f: Node, src: &[u8]) -> Option<Vec<String>> {
         "key_path_expression" => {
             let names: Vec<String> = kids(f)
                 .into_iter()
-                .filter(|c| c.kind() == "navigation_suffix" || c.kind() == "simple_identifier")
+                .filter(|c| {
+                    c.kind_str() == "navigation_suffix" || c.kind_str() == "simple_identifier"
+                })
                 .filter_map(|c| path_of(c, src))
                 .flatten()
                 .collect();
@@ -5764,11 +5757,11 @@ fn referenced(f: Node, src: &[u8]) -> Option<Vec<String>> {
         "scoped_identifier" => path_of(f, src).filter(|p| p.len() >= 2),
         // Swift `\.owner`: the key path is the target of a navigation
         "navigation_expression"
-            if f.child_by_field_name("target").is_some_and(|t| {
-                t.kind() == "key_path_expression" && t.named_child_count() == 0
+            if f.by_field("target").is_some_and(|t| {
+                t.kind_str() == "key_path_expression" && t.named_child_count() == 0
             }) =>
         {
-            let suffix = f.child_by_field_name("suffix")?;
+            let suffix = f.by_field("suffix")?;
             let name = path_of(suffix, src)?;
             match name.as_slice() {
                 [one] => Some(vec![String::new(), one.clone()]),
@@ -5788,20 +5781,20 @@ fn lambda_result(body: Node, src: &[u8]) -> Option<Vec<String>> {
     }
     let statements: Vec<Node> = kids(body).into_iter().filter(|c| !is_comment(c)).collect();
     let tail = statements.last().copied().filter(|t| {
-        !t.kind().ends_with("declaration")
-            && !t.kind().contains("return")
+        !t.kind_str().ends_with("declaration")
+            && !t.kind_str().contains("return")
             && !matches!(
-                t.kind(),
+                t.kind_str(),
                 "let_declaration" | "expression_statement" | "local_variable_declaration"
             )
-            || (t.kind() == "expression_statement"
-                && matches!(body.kind(), "statements" | "block_body" | "body_statement"))
+            || (t.kind_str() == "expression_statement"
+                && matches!(body.kind_str(), "statements" | "block_body" | "body_statement"))
     });
     // the `return`s of the body, not of a lambda inside it
     let mut returned: Vec<Vec<String>> = Vec::new();
     let mut stack: Vec<(Node, usize)> = statements.iter().map(|c| (*c, 0)).collect();
     while let Some((n, depth)) = stack.pop() {
-        if is_closure(n.kind()) || depth > 6 {
+        if is_closure(n.kind_str()) || depth > 6 {
             continue;
         }
         if let Some(v) = returned_value(n, src) {
@@ -5813,8 +5806,11 @@ fn lambda_result(body: Node, src: &[u8]) -> Option<Vec<String>> {
     match (returned.first(), tail) {
         (Some(first), _) => returned.iter().all(|r| r == first).then(|| first.clone()),
         (None, Some(t)) => {
-            let t =
-                if t.kind() == "expression_statement" { kids(t).into_iter().last()? } else { t };
+            let t = if t.kind_str() == "expression_statement" {
+                kids(t).into_iter().last()?
+            } else {
+                t
+            };
             path_of(t, src)
         }
         _ => None,
@@ -5827,11 +5823,11 @@ fn lambda_result(body: Node, src: &[u8]) -> Option<Vec<String>> {
 fn lambda_local(body: Node, name: &str, src: &[u8]) -> Option<Option<Vec<String>>> {
     let mut stack: Vec<(Node, usize)> = kids(body).into_iter().map(|c| (c, 0)).collect();
     while let Some((n, depth)) = stack.pop() {
-        if is_closure(n.kind()) || depth > 3 {
+        if is_closure(n.kind_str()) || depth > 3 {
             continue;
         }
         let declares = matches!(
-            n.kind(),
+            n.kind_str(),
             "property_declaration"
                 | "let_declaration"
                 | "local_variable_declaration"
@@ -5845,10 +5841,10 @@ fn lambda_local(body: Node, name: &str, src: &[u8]) -> Option<Option<Vec<String>
         if declares {
             let named = ["name", "pattern", "left", "declarator"]
                 .iter()
-                .find_map(|f| n.child_by_field_name(f))
+                .find_map(|f| n.by_field(f))
                 .or_else(|| {
                     kids(n).into_iter().find(|c| {
-                        matches!(c.kind(), "variable_declaration" | "variable_declarator")
+                        matches!(c.kind_str(), "variable_declaration" | "variable_declarator")
                     })
                 })
                 .and_then(|x| bound_name(x, src));
@@ -5856,8 +5852,8 @@ fn lambda_local(body: Node, name: &str, src: &[u8]) -> Option<Option<Vec<String>
                 let value = value_node(n).or_else(|| {
                     // Kotlin `val o = x.owner`: the value beside the declaration
                     kids(n).into_iter().rev().find(|c| {
-                        !matches!(c.kind(), "variable_declaration" | "binding_pattern_kind")
-                            && !c.kind().contains("modifier")
+                        !matches!(c.kind_str(), "variable_declaration" | "binding_pattern_kind")
+                            && !c.kind_str().contains("modifier")
                     })
                 });
                 return Some(value.and_then(|v| path_of(v, src)));
@@ -5872,7 +5868,7 @@ fn lambda_local(body: Node, name: &str, src: &[u8]) -> Option<Option<Vec<String>
 fn single_expression(body: Node) -> Option<Node> {
     let mut cur = body;
     for _ in 0..6 {
-        match cur.kind() {
+        match cur.kind_str() {
             "statements" | "block" | "statement_block" | "block_body" | "body_statement"
             | "compound_statement" => {
                 let ks: Vec<Node> = kids(cur).into_iter().filter(|c| !is_comment(c)).collect();
@@ -5945,26 +5941,26 @@ fn mapped_path(n: Node, src: &[u8], of: &[String]) -> Result<Option<Vec<String>>
     let mut given: Vec<Node> = Vec::new();
     if let Some((list, _)) = argument_list(n) {
         for a in list.into_iter().flat_map(kids).filter(|c| !is_comment(c)) {
-            given.push(if a.kind().contains("argument") && a.kind() != "block_argument" {
+            given.push(if a.kind_str().contains("argument") && a.kind_str() != "block_argument" {
                 kids(a).into_iter().last().unwrap_or(a)
             } else {
                 a
             });
         }
     }
-    if let Some(sfx) = kids(n).into_iter().find(|c| c.kind() == "call_suffix") {
-        given.extend(kids(sfx).into_iter().filter_map(|c| match c.kind() {
-            "annotated_lambda" => kids(c).into_iter().find(|c| c.kind() == "lambda_literal"),
+    if let Some(sfx) = kids(n).into_iter().find(|c| c.kind_str() == "call_suffix") {
+        given.extend(kids(sfx).into_iter().filter_map(|c| match c.kind_str() {
+            "annotated_lambda" => kids(c).into_iter().find(|c| c.kind_str() == "lambda_literal"),
             // Swift's trailing closure
             "lambda_literal" => Some(c),
             _ => None,
         }));
     }
-    given.extend(n.child_by_field_name("block"));
+    given.extend(n.by_field("block"));
     let [f] = given.as_slice() else { return Err(()) };
     // Ruby `&:owner`: the method of that name on each element
-    if f.kind() == "block_argument" {
-        let Some(sym) = kids(*f).into_iter().find(|c| c.kind() == "simple_symbol") else {
+    if f.kind_str() == "block_argument" {
+        let Some(sym) = kids(*f).into_iter().find(|c| c.kind_str() == "simple_symbol") else {
             return Ok(None);
         };
         let name = text(sym, src).trim_start_matches(':').to_string();
@@ -5981,12 +5977,12 @@ fn mapped_path(n: Node, src: &[u8], of: &[String]) -> Result<Option<Vec<String>>
             }
         });
     }
-    if !(is_closure(f.kind()) || f.kind() == "block") {
+    if !(is_closure(f.kind_str()) || f.kind_str() == "block") {
         return Err(());
     }
-    let params = params_field(*f).or_else(|| f.child_by_field_name("parameter")).or_else(|| {
+    let params = params_field(*f).or_else(|| f.by_field("parameter")).or_else(|| {
         kids(*f).into_iter().find(|c| {
-            matches!(c.kind(), "lambda_parameters" | "block_parameters" | "closure_parameters")
+            matches!(c.kind_str(), "lambda_parameters" | "block_parameters" | "closure_parameters")
         })
     });
     let names = match params.map(|ps| closure_params(ps, src)) {
@@ -6002,8 +5998,8 @@ fn mapped_path(n: Node, src: &[u8], of: &[String]) -> Result<Option<Vec<String>>
             None => return Ok(None),
         },
     };
-    let body = f.child_by_field_name("body").or_else(|| {
-        kids(*f).into_iter().rfind(|c| !c.kind().contains("parameter") && !is_comment(c))
+    let body = f.by_field("body").or_else(|| {
+        kids(*f).into_iter().rfind(|c| !c.kind_str().contains("parameter") && !is_comment(c))
     });
     let each = body
         .and_then(|b| lambda_result(b, src))
@@ -6082,17 +6078,20 @@ fn elem_type(t: Node, src: &[u8]) -> Option<Vec<String>> {
     // an array or slice type, through a pointer, a reference or an annotation
     let mut stack = vec![(t, 0)];
     while let Some((n, depth)) = stack.pop() {
-        if matches!(n.kind(), "array_type" | "slice_type" | "variadic_parameter" | "channel_type") {
+        if matches!(
+            n.kind_str(),
+            "array_type" | "slice_type" | "variadic_parameter" | "channel_type"
+        ) {
             // (Go `chan *Job`, `<-chan *Job`: what is received)
             let inner = n
-                .child_by_field_name("element")
-                .or_else(|| n.child_by_field_name("value"))
+                .by_field("element")
+                .or_else(|| n.by_field("value"))
                 .or_else(|| kids(n).into_iter().find(|c| c.is_named()))?;
             return first_type(inner, src);
         }
         if depth < 3
             && matches!(
-                n.kind(),
+                n.kind_str(),
                 "type_annotation"
                     | "pointer_type"
                     | "reference_type"
@@ -6166,7 +6165,7 @@ fn generic_args<'t>(t: Node<'t>, src: &[u8]) -> Option<(String, Vec<Node<'t>>)> 
     while let Some((n, depth)) = stack.pop() {
         let args = kids(n).into_iter().find(|c| {
             matches!(
-                c.kind(),
+                c.kind_str(),
                 "type_arguments"
                     | "type_argument_list"
                     | "template_argument_list"
@@ -6180,7 +6179,7 @@ fn generic_args<'t>(t: Node<'t>, src: &[u8]) -> Option<(String, Vec<Node<'t>>)> 
         }
         if depth < 3
             && matches!(
-                n.kind(),
+                n.kind_str(),
                 "type_annotation"
                     | "nullable_type"
                     | "optional_type"
@@ -6225,17 +6224,17 @@ fn targ_elems_of(t: Node, src: &[u8]) -> Vec<Option<Vec<String>>> {
 fn written_targ_elems(node: Node, src: &[u8]) -> Vec<Option<Vec<String>>> {
     let mut places = vec![node];
     places.extend(
-        kids(node)
-            .into_iter()
-            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+        kids(node).into_iter().filter(|c| {
+            c.kind_str().ends_with("declaration") || c.kind_str().ends_with("declarator")
+        }),
     );
     places
         .into_iter()
-        .map(|n| match n.child_by_field_name("type") {
+        .map(|n| match n.by_field("type") {
             Some(t) => targ_elems_of(t, src),
             None => kids(n)
                 .into_iter()
-                .find(|c| matches!(c.kind(), "user_type" | "type_annotation" | "nullable_type"))
+                .find(|c| matches!(c.kind_str(), "user_type" | "type_annotation" | "nullable_type"))
                 .map(|t| targ_elems_of(t, src))
                 .unwrap_or_default(),
         })
@@ -6249,12 +6248,14 @@ fn return_targ_elems(def: Node, src: &[u8]) -> Vec<Option<Vec<String>>> {
     for (i, child) in def.children(&mut cursor).enumerate() {
         let result = match def.field_name_for_child(i as u32) {
             Some("return_type") | Some("returns") => true,
-            Some("result") => child.kind() != "parameter_list",
-            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some("result") => child.kind_str() != "parameter_list",
+            Some("type") => {
+                !def.kind_str().contains("field") && !def.kind_str().contains("property")
+            }
             Some(_) => false,
             None => {
-                matches!(child.kind(), "user_type" | "nullable_type")
-                    && def.kind() == "function_declaration"
+                matches!(child.kind_str(), "user_type" | "nullable_type")
+                    && def.kind_str() == "function_declaration"
             }
         };
         if result {
@@ -6288,12 +6289,12 @@ fn base_targs(class: Node, src: &[u8]) -> Vec<(Vec<String>, Vec<Vec<String>>)> {
     };
     let mut out = Vec::new();
     let mut stack: Vec<(Node, usize)> =
-        kids(class).into_iter().filter(|c| heritage(c.kind())).map(|c| (c, 0)).collect();
+        kids(class).into_iter().filter(|c| heritage(c.kind_str())).map(|c| (c, 0)).collect();
     while let Some((n, depth)) = stack.pop() {
         // TS `extends Repo<User>`: the name and its arguments side by side
-        if n.kind() == "extends_clause" {
-            let args = kids(n).into_iter().find(|c| c.kind() == "type_arguments");
-            let value = n.child_by_field_name("value").and_then(|v| path_of(v, src));
+        if n.kind_str() == "extends_clause" {
+            let args = kids(n).into_iter().find(|c| c.kind_str() == "type_arguments");
+            let value = n.by_field("value").and_then(|v| path_of(v, src));
             if let (Some(args), Some(name)) = (args, value) {
                 let args: Option<Vec<Vec<String>>> = kids(args)
                     .into_iter()
@@ -6306,14 +6307,15 @@ fn base_targs(class: Node, src: &[u8]) -> Vec<(Vec<String>, Vec<Vec<String>>)> {
                 continue;
             }
         }
-        let generic = matches!(n.kind(), "generic_type" | "generic_name")
-            || (n.kind() == "user_type" && kids(n).iter().any(|c| c.kind() == "type_arguments"));
+        let generic = matches!(n.kind_str(), "generic_type" | "generic_name")
+            || (n.kind_str() == "user_type"
+                && kids(n).iter().any(|c| c.kind_str() == "type_arguments"));
         if generic {
-            let name = match n.kind() {
+            let name = match n.kind_str() {
                 "user_type" => path_of(n, src),
                 _ => n
-                    .child_by_field_name("name")
-                    .or_else(|| n.child_by_field_name("type"))
+                    .by_field("name")
+                    .or_else(|| n.by_field("type"))
                     .or_else(|| kids(n).into_iter().next())
                     .and_then(|c| path_of(c, src)),
             };
@@ -6334,17 +6336,17 @@ fn base_targs(class: Node, src: &[u8]) -> Vec<(Vec<String>, Vec<Vec<String>>)> {
 fn written_targs(node: Node, src: &[u8]) -> Vec<Vec<String>> {
     let mut places = vec![node];
     places.extend(
-        kids(node)
-            .into_iter()
-            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+        kids(node).into_iter().filter(|c| {
+            c.kind_str().ends_with("declaration") || c.kind_str().ends_with("declarator")
+        }),
     );
     places
         .into_iter()
-        .map(|n| match n.child_by_field_name("type") {
+        .map(|n| match n.by_field("type") {
             Some(t) => targs_of(t, src),
             None => kids(n)
                 .into_iter()
-                .find(|c| matches!(c.kind(), "user_type" | "type_annotation" | "nullable_type"))
+                .find(|c| matches!(c.kind_str(), "user_type" | "type_annotation" | "nullable_type"))
                 .map(|t| targs_of(t, src))
                 .unwrap_or_default(),
         })
@@ -6356,11 +6358,11 @@ fn written_targs(node: Node, src: &[u8]) -> Vec<Vec<String>> {
 /// `self.0`, Swift `pair.1`) is its part (`[#0]`).
 fn member_path(m: Node, src: &[u8]) -> Option<Vec<String>> {
     // (Swift's member sits in a `navigation_suffix`)
-    let m = match m.kind() {
+    let m = match m.kind_str() {
         "navigation_suffix" => kids(m).into_iter().last()?,
         _ => m,
     };
-    if m.kind() == "integer_literal" {
+    if m.kind_str() == "integer_literal" {
         return text(m, src).parse().ok().map(|i| vec![tuple_part(i)]);
     }
     path_of(m, src)
@@ -6381,12 +6383,12 @@ pub fn tuple_index(seg: &str) -> Option<usize> {
 fn tuple_parts(t: Node, src: &[u8]) -> Vec<Vec<String>> {
     let mut stack = vec![(t, 0)];
     while let Some((n, depth)) = stack.pop() {
-        if n.kind() == "tuple_type" {
+        if n.kind_str() == "tuple_type" {
             return kids(n)
                 .into_iter()
                 .filter(|c| !is_comment(c))
                 .map(|c| {
-                    let ty = c.child_by_field_name("type").unwrap_or(c);
+                    let ty = c.by_field("type").unwrap_or(c);
                     first_type(ty, src).unwrap_or_default()
                 })
                 .collect();
@@ -6397,7 +6399,7 @@ fn tuple_parts(t: Node, src: &[u8]) -> Vec<Vec<String>> {
             }
             return Vec::new();
         }
-        if depth < 3 && matches!(n.kind(), "type_annotation" | "type" | "nullable_type") {
+        if depth < 3 && matches!(n.kind_str(), "type_annotation" | "type" | "nullable_type") {
             stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
         }
     }
@@ -6410,26 +6412,26 @@ fn return_tuple(def: Node, src: &[u8]) -> Vec<Vec<String>> {
     for (i, child) in def.children(&mut cursor).enumerate() {
         let result = match def.field_name_for_child(i as u32) {
             Some("return_type") | Some("returns") => true,
-            Some("result") if child.kind() == "parameter_list" => {
+            Some("result") if child.kind_str() == "parameter_list" => {
                 let parts: Vec<Vec<String>> = kids(child)
                     .into_iter()
-                    .filter(|c| c.kind() == "parameter_declaration")
+                    .filter(|c| c.kind_str() == "parameter_declaration")
                     .map(|c| {
-                        c.child_by_field_name("type")
-                            .and_then(|t| first_type(t, src))
-                            .unwrap_or_default()
+                        c.by_field("type").and_then(|t| first_type(t, src)).unwrap_or_default()
                     })
                     .collect();
                 return if parts.len() >= 2 { parts } else { Vec::new() };
             }
             Some("result") => true,
-            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some("type") => {
+                !def.kind_str().contains("field") && !def.kind_str().contains("property")
+            }
             // (Swift's grammar files the result type under `name`)
-            Some("name") => child.kind() == "tuple_type",
+            Some("name") => child.kind_str() == "tuple_type",
             Some(_) => false,
             None => {
-                matches!(child.kind(), "user_type" | "nullable_type" | "tuple_type")
-                    && def.kind() == "function_declaration"
+                matches!(child.kind_str(), "user_type" | "nullable_type" | "tuple_type")
+                    && def.kind_str() == "function_declaration"
             }
         };
         if result {
@@ -6446,13 +6448,16 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
     let one = |c: Node| -> String {
         let mut cur = c;
         for _ in 0..3 {
-            if matches!(cur.kind(), "identifier" | "simple_identifier") {
+            if matches!(cur.kind_str(), "identifier" | "simple_identifier") {
                 return text(cur, src);
             }
             let ks: Vec<Node> = kids(cur).into_iter().filter(|x| !is_comment(x)).collect();
             match ks.last() {
                 Some(x)
-                    if matches!(cur.kind(), "mut_pattern" | "variable_declaration" | "pattern") =>
+                    if matches!(
+                        cur.kind_str(),
+                        "mut_pattern" | "variable_declaration" | "pattern"
+                    ) =>
                 {
                     cur = *x
                 }
@@ -6463,7 +6468,7 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
     };
     let names_of = |p: Node| -> Option<Vec<String>> {
         if !matches!(
-            p.kind(),
+            p.kind_str(),
             "tuple_pattern"
                 | "array_pattern"
                 | "pattern_list"
@@ -6477,11 +6482,11 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
         let names: Vec<String> = kids(p).into_iter().filter(|c| !is_comment(c)).map(one).collect();
         (names.len() >= 2).then_some(names)
     };
-    let (pattern, value) = match n.kind() {
-        "let_declaration" => (n.child_by_field_name("pattern")?, n.child_by_field_name("value")?),
+    let (pattern, value) = match n.kind_str() {
+        "let_declaration" => (n.by_field("pattern")?, n.by_field("value")?),
         "assignment" | "short_var_declaration" => {
-            let right = n.child_by_field_name("right")?;
-            let right = if right.kind() == "expression_list" {
+            let right = n.by_field("right")?;
+            let right = if right.kind_str() == "expression_list" {
                 match kids(right).as_slice() {
                     [one] => *one,
                     _ => return None,
@@ -6494,22 +6499,22 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
             if go_comma_ok(right, src) {
                 return None;
             }
-            (n.child_by_field_name("left")?, right)
+            (n.by_field("left")?, right)
         }
         "variable_declarator" => {
             let p = n
-                .child_by_field_name("name")
-                .or_else(|| kids(n).into_iter().find(|c| c.kind() == "tuple_pattern"))?;
-            let v = n.child_by_field_name("value").or_else(|| {
+                .by_field("name")
+                .or_else(|| kids(n).into_iter().find(|c| c.kind_str() == "tuple_pattern"))?;
+            let v = n.by_field("value").or_else(|| {
                 kids(n).into_iter().find(|c| {
                     callee(*c, src).is_some()
-                        || matches!(c.kind(), "await_expression" | "try_expression")
+                        || matches!(c.kind_str(), "await_expression" | "try_expression")
                 })
             });
             // (C# `var (a, b) = p`: whatever p is, its parts)
             let v = match v {
                 Some(v) => v,
-                None if p.kind() == "tuple_pattern"
+                None if p.kind_str() == "tuple_pattern"
                     && crate::parse::current() == Some(crate::lang::Lang::CSharp) =>
                 {
                     kids(n).into_iter().skip(1).find(|c| !is_comment(c))?
@@ -6519,11 +6524,11 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
             (p, v)
         }
         "property_declaration" => {
-            let p = n.child_by_field_name("name").or_else(|| {
-                kids(n).into_iter().find(|c| c.kind() == "multi_variable_declaration")
+            let p = n.by_field("name").or_else(|| {
+                kids(n).into_iter().find(|c| c.kind_str() == "multi_variable_declaration")
             })?;
             let v = n
-                .child_by_field_name("value")
+                .by_field("value")
                 .or_else(|| kids(n).into_iter().rev().find(|c| callee(*c, src).is_some()))?;
             (p, v)
         }
@@ -6535,15 +6540,16 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
 /// Go: the names a method's receiver gives its type's parameters
 /// (`func (b *Box[K, V]) …`: `K`, `V`).
 fn go_receiver_type_params(n: Node, src: &[u8]) -> Vec<String> {
-    let Some(recv) = n.child_by_field_name("receiver") else { return Vec::new() };
+    let Some(recv) = n.by_field("receiver") else { return Vec::new() };
     let mut stack = vec![recv];
     while let Some(x) = stack.pop() {
-        if x.kind() == "type_arguments" {
+        if x.kind_str() == "type_arguments" {
             return kids(x)
                 .into_iter()
                 .filter_map(|a| {
-                    let id = if a.kind() == "type_elem" { kids(a).into_iter().next()? } else { a };
-                    (id.kind() == "type_identifier").then(|| text(id, src))
+                    let id =
+                        if a.kind_str() == "type_elem" { kids(a).into_iter().next()? } else { a };
+                    (id.kind_str() == "type_identifier").then(|| text(id, src))
                 })
                 .collect();
         }
@@ -6557,18 +6563,18 @@ fn go_receiver_type_params(n: Node, src: &[u8]) -> Vec<String> {
 fn csharp_operator<'t>(n: Node<'t>, src: &[u8]) -> Option<(Node<'t>, String)> {
     const BINARY: &[&str] =
         &["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "<<", ">>", "&", "|", "^"];
-    match n.kind() {
+    match n.kind_str() {
         "binary_expression" => {
-            let op = text(n.child_by_field_name("operator")?, src);
+            let op = text(n.by_field("operator")?, src);
             if !BINARY.contains(&op.as_str()) {
                 return None;
             }
-            Some((n.child_by_field_name("left")?, op))
+            Some((n.by_field("left")?, op))
         }
         "assignment_expression" => {
-            let op = text(n.child_by_field_name("operator")?, src);
+            let op = text(n.by_field("operator")?, src);
             let bare = op.strip_suffix('=').filter(|b| !b.is_empty() && BINARY.contains(b))?;
-            Some((n.child_by_field_name("left")?, bare.to_string()))
+            Some((n.by_field("left")?, bare.to_string()))
         }
         "prefix_unary_expression" | "postfix_unary_expression" => {
             let mut cursor = n.walk();
@@ -6587,40 +6593,38 @@ fn csharp_operator<'t>(n: Node<'t>, src: &[u8]) -> Option<(Node<'t>, String)> {
 /// element of it in a `foreach`) and how many names it gives.
 fn csharp_deconstruction(n: Node, src: &[u8]) -> Option<(Vec<String>, usize)> {
     let named = |x: Node| kids(x).into_iter().filter(|c| !is_comment(c)).count();
-    let (value, count, iterated) = match n.kind() {
+    let (value, count, iterated) = match n.kind_str() {
         "variable_declarator" => {
             let ks = kids(n);
-            let pattern = ks.first().filter(|c| c.kind() == "tuple_pattern")?;
+            let pattern = ks.first().filter(|c| c.kind_str() == "tuple_pattern")?;
             let value = ks.iter().skip(1).find(|c| !is_comment(c))?;
             (*value, named(*pattern), false)
         }
         "assignment_expression" => {
-            let left = n.child_by_field_name("left").filter(|l| l.kind() == "tuple_expression")?;
-            let op = n.child_by_field_name("operator").map(|o| text(o, src))?;
+            let left = n.by_field("left").filter(|l| l.kind_str() == "tuple_expression")?;
+            let op = n.by_field("operator").map(|o| text(o, src))?;
             if op != "=" {
                 return None;
             }
-            (n.child_by_field_name("right")?, named(left), false)
+            (n.by_field("right")?, named(left), false)
         }
         "foreach_statement" => {
-            let left = n.child_by_field_name("left").filter(|l| l.kind() == "tuple_pattern")?;
-            (n.child_by_field_name("right")?, named(left), true)
+            let left = n.by_field("left").filter(|l| l.kind_str() == "tuple_pattern")?;
+            (n.by_field("right")?, named(left), true)
         }
         "is_pattern_expression" => {
-            let pattern = n.child_by_field_name("pattern")?;
-            if pattern.kind() != "recursive_pattern"
-                || pattern.child_by_field_name("type").is_some()
-            {
+            let pattern = n.by_field("pattern")?;
+            if pattern.kind_str() != "recursive_pattern" || pattern.by_field("type").is_some() {
                 return None;
             }
             let clause =
-                kids(pattern).into_iter().find(|c| c.kind() == "positional_pattern_clause")?;
-            let subs = kids(clause).into_iter().filter(|c| c.kind() == "subpattern").count();
-            (n.child_by_field_name("expression")?, subs, false)
+                kids(pattern).into_iter().find(|c| c.kind_str() == "positional_pattern_clause")?;
+            let subs = kids(clause).into_iter().filter(|c| c.kind_str() == "subpattern").count();
+            (n.by_field("expression")?, subs, false)
         }
         _ => return None,
     };
-    if count < 2 || matches!(value.kind(), "tuple_expression") {
+    if count < 2 || matches!(value.kind_str(), "tuple_expression") {
         return None;
     }
     let mut path = path_of(value, src).filter(|p| !p.iter().any(|s| s == UNKNOWN))?;
@@ -6708,18 +6712,18 @@ pub fn csharp_delegate_params(name: &str, args: &[Vec<String>]) -> Option<Vec<Ve
 /// type, or, as an argument of a call, the `lambda_param` path of each
 /// parameter of the callee's delegate parameter.
 fn csharp_lambda_types(anc: &[Node], n: Node, src: &[u8]) -> Option<Vec<Vec<String>>> {
-    if !matches!(n.kind(), "lambda_expression" | "anonymous_method_expression") {
+    if !matches!(n.kind_str(), "lambda_expression" | "anonymous_method_expression") {
         return None;
     }
     let up = |i: usize| anc.len().checked_sub(i + 1).map(|j| anc[j]);
     let parent = up(0)?;
-    match parent.kind() {
+    match parent.kind_str() {
         "variable_declarator" => {
-            let decl = up(1).filter(|d| d.kind() == "variable_declaration")?;
-            let ty = decl.child_by_field_name("type").filter(|t| t.kind() == "generic_name")?;
+            let decl = up(1).filter(|d| d.kind_str() == "variable_declaration")?;
+            let ty = decl.by_field("type").filter(|t| t.kind_str() == "generic_name")?;
             let ks = kids(ty);
             let name = text(*ks.first()?, src);
-            let list = ks.iter().find(|c| c.kind() == "type_argument_list")?;
+            let list = ks.iter().find(|c| c.kind_str() == "type_argument_list")?;
             let args: Vec<Vec<String>> = kids(*list)
                 .into_iter()
                 .filter(|c| !is_comment(c))
@@ -6728,13 +6732,13 @@ fn csharp_lambda_types(anc: &[Node], n: Node, src: &[u8]) -> Option<Vec<Vec<Stri
             csharp_delegate_params(&name, &args)
         }
         "argument" => {
-            let list = up(1).filter(|l| l.kind() == "argument_list")?;
-            let call = up(2).filter(|c| c.kind() == "invocation_expression")?;
+            let list = up(1).filter(|l| l.kind_str() == "argument_list")?;
+            let call = up(2).filter(|c| c.kind_str() == "invocation_expression")?;
             let at = kids(list)
                 .into_iter()
                 .filter(|c| !is_comment(c))
                 .position(|c| c.id() == parent.id())?;
-            let callee = path_of(call.child_by_field_name("function")?, src)
+            let callee = path_of(call.by_field("function")?, src)
                 .filter(|p| !p.iter().any(|s| s == UNKNOWN))?;
             let count = closure_params(n, src).len();
             Some(
@@ -6763,10 +6767,10 @@ fn csharp_indexer<'t>(
     src: &[u8],
 ) -> Option<(Vec<String>, Node<'t>, Vec<crate::facts::Context>)> {
     let up = n.parent();
-    let (path, list) = match n.kind() {
+    let (path, list) = match n.kind_str() {
         "element_access_expression" => {
-            let list = n.child_by_field_name("subscript")?;
-            let path = match n.child_by_field_name("expression") {
+            let list = n.by_field("subscript")?;
+            let path = match n.by_field("expression") {
                 Some(e) => path_of(e, src)?,
                 // `base[i]`: the keyword is no named node
                 None if kids(n).len() == 1
@@ -6781,15 +6785,16 @@ fn csharp_indexer<'t>(
         // `s?[0]`: the element of what the access is conditional on
         "element_binding_expression" => {
             let up = up?;
-            if up.kind() == "conditional_access_expression" {
+            if up.kind_str() == "conditional_access_expression" {
                 (path_of(kids(up).into_iter().next()?, src)?, n)
-            } else if up.kind() == "assignment_expression"
-                && up.child_by_field_name("left").is_some_and(|l| l.id() == n.id())
+            } else if up.kind_str() == "assignment_expression"
+                && up.by_field("left").is_some_and(|l| l.id() == n.id())
             {
                 // `new Bag { ["x"] = 1 }`
-                let init = up.parent().filter(|i| i.kind() == "initializer_expression")?;
-                let made = init.parent().filter(|m| m.kind() == "object_creation_expression")?;
-                let ty = made.child_by_field_name("type")?;
+                let init = up.parent().filter(|i| i.kind_str() == "initializer_expression")?;
+                let made =
+                    init.parent().filter(|m| m.kind_str() == "object_creation_expression")?;
+                let ty = made.by_field("type")?;
                 return Some((path_of(ty, src)?, n, vec!["indexer{}"]));
             } else {
                 return None;
@@ -6802,10 +6807,10 @@ fn csharp_indexer<'t>(
     }
     let uses = match up {
         Some(a)
-            if a.kind() == "assignment_expression"
-                && a.child_by_field_name("left").is_some_and(|l| l.id() == n.id()) =>
+            if a.kind_str() == "assignment_expression"
+                && a.by_field("left").is_some_and(|l| l.id() == n.id()) =>
         {
-            let op = a.child_by_field_name("operator").map(|o| text(o, src)).unwrap_or_default();
+            let op = a.by_field("operator").map(|o| text(o, src)).unwrap_or_default();
             if op == "=" {
                 vec!["indexer="]
             } else {
@@ -6813,13 +6818,14 @@ fn csharp_indexer<'t>(
             }
         }
         Some(a)
-            if matches!(a.kind(), "prefix_unary_expression" | "postfix_unary_expression") && {
-                let mut cursor = a.walk();
-                let incremented = a
-                    .children(&mut cursor)
-                    .any(|c| !c.is_named() && matches!(c.kind(), "++" | "--"));
-                incremented
-            } =>
+            if matches!(a.kind_str(), "prefix_unary_expression" | "postfix_unary_expression")
+                && {
+                    let mut cursor = a.walk();
+                    let incremented = a
+                        .children(&mut cursor)
+                        .any(|c| !c.is_named() && matches!(c.kind_str(), "++" | "--"));
+                    incremented
+                } =>
         {
             vec!["indexer", "indexer="]
         }
@@ -6859,17 +6865,17 @@ fn csharp_query<'t>(n: Node<'t>, src: &[u8]) -> (Vec<ClosureScope>, Vec<Vec<Stri
     let mut i = 0;
     while i < children.len() {
         let c = children[i];
-        match c.kind() {
+        match c.kind_str() {
             "from_clause" | "join_clause" => {
                 let ks = named(c);
                 let name = c
-                    .child_by_field_name("name")
-                    .or_else(|| ks.iter().copied().find(|x| x.kind() == "identifier"));
-                let ty = c.child_by_field_name("type").and_then(|t| first_type(t, src));
+                    .by_field("name")
+                    .or_else(|| ks.iter().copied().find(|x| x.kind_str() == "identifier"));
+                let ty = c.by_field("type").and_then(|t| first_type(t, src));
                 // the source: the first expression after `in`
                 let mut cur = c.walk();
                 let all: Vec<Node> = c.children(&mut cur).collect();
-                let after_in = all.iter().position(|x| x.kind() == "in").and_then(|k| {
+                let after_in = all.iter().position(|x| x.kind_str() == "in").and_then(|k| {
                     all[k + 1..].iter().copied().find(|x| x.is_named() && !is_comment(x))
                 });
                 if let Some(name) = name.map(|x| text(x, src)) {
@@ -6879,14 +6885,14 @@ fn csharp_query<'t>(n: Node<'t>, src: &[u8]) -> (Vec<ClosureScope>, Vec<Vec<Stri
                     };
                     params.push((name, path.clone().unwrap_or_default(), ty.is_some()));
                 }
-                if c.kind() == "join_clause" {
+                if c.kind_str() == "join_clause" {
                     call(&source, "Join", &mut calls);
                 } else if source.is_none() {
                     source = after_in.and_then(|x| path_of(x, src)).filter(|p| p[0] != UNKNOWN);
                 } else {
                     call(&source, "SelectMany", &mut calls);
                 }
-                clauses += usize::from(source.is_some() && c.kind() != "from_clause");
+                clauses += usize::from(source.is_some() && c.kind_str() != "from_clause");
             }
             "let_clause" => {
                 let ks = named(c);
@@ -6920,7 +6926,7 @@ fn csharp_query<'t>(n: Node<'t>, src: &[u8]) -> (Vec<ClosureScope>, Vec<Vec<Stri
                 let degenerate = params.len() == 1
                     && clauses > 0
                     && ks.len() == 1
-                    && ks[0].kind() == "identifier"
+                    && ks[0].kind_str() == "identifier"
                     && text(ks[0], src) == params[0].0;
                 if !degenerate {
                     call(&source, "Select", &mut calls);
@@ -6932,7 +6938,7 @@ fn csharp_query<'t>(n: Node<'t>, src: &[u8]) -> (Vec<ClosureScope>, Vec<Vec<Stri
                     scopes.push((start, c.start_byte(), std::mem::take(&mut params)));
                 }
                 start = c.start_byte();
-                if let Some(g) = children.get(i + 1).filter(|g| g.kind() == "identifier") {
+                if let Some(g) = children.get(i + 1).filter(|g| g.kind_str() == "identifier") {
                     // (a group: what was grouped, as a collection of it)
                     let path = source.clone().unwrap_or_default();
                     params.push((text(*g, src), path, false));
@@ -6963,7 +6969,7 @@ fn csharp_operator_uses<'t>(
     // (an operand the reader can name: no literal, no call's result)
     let plain = |x: Node| {
         matches!(
-            x.kind(),
+            x.kind_str(),
             "identifier"
                 | "member_access_expression"
                 | "this_expression"
@@ -6974,17 +6980,15 @@ fn csharp_operator_uses<'t>(
     let checked = anc
         .iter()
         .rev()
-        .find(|a| matches!(a.kind(), "checked_expression" | "checked_statement"))
-        .is_some_and(|a| a.child(0).is_some_and(|c| c.kind() == "checked"));
+        .find(|a| matches!(a.kind_str(), "checked_expression" | "checked_statement"))
+        .is_some_and(|a| a.child(0).is_some_and(|c| c.kind_str() == "checked"));
     let mut out = Vec::new();
-    match n.kind() {
+    match n.kind_str() {
         "binary_expression" => {
-            let (Some(l), Some(r)) =
-                (n.child_by_field_name("left"), n.child_by_field_name("right"))
-            else {
+            let (Some(l), Some(r)) = (n.by_field("left"), n.by_field("right")) else {
                 return out;
             };
-            let op = n.child_by_field_name("operator").map(|o| text(o, src)).unwrap_or_default();
+            let op = n.by_field("operator").map(|o| text(o, src)).unwrap_or_default();
             if op == "&&" || op == "||" {
                 let (test, bit) = if op == "&&" { ("false", "&") } else { ("true", "|") };
                 out.push((vec![pathed(l), pathed(r)], format!("operator{bit}"), vec![l, r]));
@@ -7004,8 +7008,8 @@ fn csharp_operator_uses<'t>(
             if let Some((operand, op)) = csharp_operator(n, src) {
                 let mut args = vec![operand];
                 let mut asked = vec![pathed(operand)];
-                if n.kind() == "assignment_expression" {
-                    if let Some(r) = n.child_by_field_name("right") {
+                if n.kind_str() == "assignment_expression" {
+                    if let Some(r) = n.by_field("right") {
                         args.push(r);
                         asked.push(pathed(r));
                     }
@@ -7021,32 +7025,30 @@ fn csharp_operator_uses<'t>(
         }
         // `if (flag)`, `while (flag)`, `flag ? a : b`: `operator true`
         "if_statement" | "while_statement" | "do_statement" | "conditional_expression" => {
-            if let Some(c) = n.child_by_field_name("condition").filter(|c| plain(*c)) {
+            if let Some(c) = n.by_field("condition").filter(|c| plain(*c)) {
                 out.push((vec![pathed(c)], "operator true".into(), vec![c]));
             }
         }
         // `(Meters)feet`: a conversion operator of either type
         "cast_expression" => {
-            let (Some(t), Some(v)) =
-                (n.child_by_field_name("type"), n.child_by_field_name("value"))
-            else {
+            let (Some(t), Some(v)) = (n.by_field("type"), n.by_field("value")) else {
                 return out;
             };
-            if matches!(t.kind(), "identifier" | "predefined_type") && plain(v) {
+            if matches!(t.kind_str(), "identifier" | "predefined_type") && plain(v) {
                 let name = format!("operator {}", text(t, src));
-                let ty = (t.kind() == "identifier").then(|| vec![text(t, src)]);
+                let ty = (t.kind_str() == "identifier").then(|| vec![text(t, src)]);
                 out.push((vec![ty, pathed(v)], name, vec![v]));
             }
         }
         // `byte b = digit;`: an implicit conversion operator of the value's type
         "variable_declaration" => {
             let Some(t) = n
-                .child_by_field_name("type")
-                .filter(|t| matches!(t.kind(), "identifier" | "predefined_type"))
+                .by_field("type")
+                .filter(|t| matches!(t.kind_str(), "identifier" | "predefined_type"))
             else {
                 return out;
             };
-            for d in kids(n).into_iter().filter(|c| c.kind() == "variable_declarator") {
+            for d in kids(n).into_iter().filter(|c| c.kind_str() == "variable_declarator") {
                 let value = kids(d).into_iter().skip(1).find(|c| c.is_named() && !is_comment(c));
                 if let Some(v) = value.filter(|v| plain(*v)) {
                     out.push((vec![pathed(v)], format!("operator {}", text(t, src)), vec![v]));
@@ -7102,7 +7104,7 @@ fn go_instantiation(n: Node, object: Node, src: &[u8]) -> bool {
         && index.iter().all(|i| {
             let t = text(*i, src);
             matches!(
-                i.kind(),
+                i.kind_str(),
                 "pointer_type"
                     | "slice_type"
                     | "array_type"
@@ -7115,7 +7117,7 @@ fn go_instantiation(n: Node, object: Node, src: &[u8]) -> bool {
                     | "struct_type"
                     | "type_elem"
             ) || GO_PREDECLARED_TYPES.contains(&t.as_str())
-                || (i.kind() == "identifier" && capital(&t) && capital(&last))
+                || (i.kind_str() == "identifier" && capital(&t) && capital(&last))
         })
 }
 
@@ -7123,16 +7125,16 @@ fn go_instantiation(n: Node, object: Node, src: &[u8]) -> bool {
 /// (`m[k]`, `x.(T)`, `<-ch`).
 fn go_comma_ok(v: Node, src: &[u8]) -> bool {
     crate::parse::current() == Some(crate::lang::Lang::Go)
-        && (matches!(v.kind(), "index_expression" | "type_assertion_expression")
-            || (v.kind() == "unary_expression" && text(v, src).trim_start().starts_with("<-")))
+        && (matches!(v.kind_str(), "index_expression" | "type_assertion_expression")
+            || (v.kind_str() == "unary_expression" && text(v, src).trim_start().starts_with("<-")))
 }
 
 /// Go `<-ch`: the channel received from.
 fn go_received<'t>(v: Node<'t>, src: &[u8]) -> Option<Node<'t>> {
     (crate::parse::current() == Some(crate::lang::Lang::Go)
-        && v.kind() == "unary_expression"
+        && v.kind_str() == "unary_expression"
         && text(v, src).trim_start().starts_with("<-"))
-    .then(|| v.child_by_field_name("operand"))
+    .then(|| v.by_field("operand"))
     .flatten()
 }
 
@@ -7142,12 +7144,14 @@ fn return_targs(def: Node, src: &[u8]) -> Vec<Vec<String>> {
     for (i, child) in def.children(&mut cursor).enumerate() {
         let result = match def.field_name_for_child(i as u32) {
             Some("return_type") | Some("returns") => true,
-            Some("result") => child.kind() != "parameter_list",
-            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some("result") => child.kind_str() != "parameter_list",
+            Some("type") => {
+                !def.kind_str().contains("field") && !def.kind_str().contains("property")
+            }
             Some(_) => false,
             None => {
-                matches!(child.kind(), "user_type" | "nullable_type")
-                    && def.kind() == "function_declaration"
+                matches!(child.kind_str(), "user_type" | "nullable_type")
+                    && def.kind_str() == "function_declaration"
             }
         };
         if result {
@@ -7162,17 +7166,17 @@ fn return_targs(def: Node, src: &[u8]) -> Vec<Vec<String>> {
 fn map_value(t: Node, src: &[u8]) -> Option<Vec<String>> {
     let mut stack = vec![(t, 0)];
     while let Some((n, depth)) = stack.pop() {
-        match n.kind() {
-            "map_type" => return n.child_by_field_name("value").and_then(|v| first_type(v, src)),
+        match n.kind_str() {
+            "map_type" => return n.by_field("value").and_then(|v| first_type(v, src)),
             "dictionary_type" => {
-                let v = n.child_by_field_name("value").or_else(|| kids(n).get(1).copied())?;
+                let v = n.by_field("value").or_else(|| kids(n).get(1).copied())?;
                 return first_type(v, src);
             }
             _ => {}
         }
         let args = kids(n).into_iter().find(|c| {
             matches!(
-                c.kind(),
+                c.kind_str(),
                 "type_arguments"
                     | "type_argument_list"
                     | "template_argument_list"
@@ -7192,7 +7196,7 @@ fn map_value(t: Node, src: &[u8]) -> Option<Vec<String>> {
         }
         if depth < 3
             && matches!(
-                n.kind(),
+                n.kind_str(),
                 "type_annotation"
                     | "nullable_type"
                     | "optional_type"
@@ -7216,17 +7220,17 @@ fn map_value(t: Node, src: &[u8]) -> Option<Vec<String>> {
 fn written_elem(node: Node, src: &[u8]) -> Option<Vec<String>> {
     let mut places = vec![node];
     places.extend(
-        kids(node)
-            .into_iter()
-            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+        kids(node).into_iter().filter(|c| {
+            c.kind_str().ends_with("declaration") || c.kind_str().ends_with("declarator")
+        }),
     );
     places.into_iter().find_map(|n| {
-        n.child_by_field_name("type").and_then(|t| elem_type(t, src)).or_else(|| {
+        n.by_field("type").and_then(|t| elem_type(t, src)).or_else(|| {
             kids(n)
                 .into_iter()
                 .find(|c| {
                     matches!(
-                        c.kind(),
+                        c.kind_str(),
                         "user_type" | "type_annotation" | "nullable_type" | "array_type"
                     )
                 })
@@ -7239,10 +7243,10 @@ fn written_elem(node: Node, src: &[u8]) -> Option<Vec<String>> {
 fn map_key(t: Node, src: &[u8]) -> Option<Vec<String>> {
     let mut stack = vec![(t, 0)];
     while let Some((n, depth)) = stack.pop() {
-        match n.kind() {
-            "map_type" => return n.child_by_field_name("key").and_then(|k| first_type(k, src)),
+        match n.kind_str() {
+            "map_type" => return n.by_field("key").and_then(|k| first_type(k, src)),
             "dictionary_type" => {
-                let k = n.child_by_field_name("key").or_else(|| kids(n).first().copied())?;
+                let k = n.by_field("key").or_else(|| kids(n).first().copied())?;
                 return first_type(k, src);
             }
             _ => {}
@@ -7257,7 +7261,10 @@ fn map_key(t: Node, src: &[u8]) -> Option<Vec<String>> {
             };
         }
         if depth < 3
-            && matches!(n.kind(), "type_annotation" | "nullable_type" | "optional_type" | "type")
+            && matches!(
+                n.kind_str(),
+                "type_annotation" | "nullable_type" | "optional_type" | "type"
+            )
         {
             stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
         }
@@ -7269,17 +7276,17 @@ fn map_key(t: Node, src: &[u8]) -> Option<Vec<String>> {
 fn written_key(node: Node, src: &[u8]) -> Option<Vec<String>> {
     let mut places = vec![node];
     places.extend(
-        kids(node)
-            .into_iter()
-            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+        kids(node).into_iter().filter(|c| {
+            c.kind_str().ends_with("declaration") || c.kind_str().ends_with("declarator")
+        }),
     );
-    places.into_iter().find_map(|n| match n.child_by_field_name("type") {
+    places.into_iter().find_map(|n| match n.by_field("type") {
         Some(t) => map_key(t, src),
         None => kids(n)
             .into_iter()
             .find(|c| {
                 matches!(
-                    c.kind(),
+                    c.kind_str(),
                     "user_type" | "type_annotation" | "nullable_type" | "dictionary_type"
                 )
             })
@@ -7293,12 +7300,14 @@ fn return_key(def: Node, src: &[u8]) -> Option<Vec<String>> {
     for (i, child) in def.children(&mut cursor).enumerate() {
         let result = match def.field_name_for_child(i as u32) {
             Some("return_type") | Some("returns") => true,
-            Some("result") => child.kind() != "parameter_list",
-            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some("result") => child.kind_str() != "parameter_list",
+            Some("type") => {
+                !def.kind_str().contains("field") && !def.kind_str().contains("property")
+            }
             Some(_) => false,
             None => {
-                matches!(child.kind(), "user_type" | "nullable_type")
-                    && def.kind() == "function_declaration"
+                matches!(child.kind_str(), "user_type" | "nullable_type")
+                    && def.kind_str() == "function_declaration"
             }
         };
         if result {
@@ -7312,17 +7321,17 @@ fn return_key(def: Node, src: &[u8]) -> Option<Vec<String>> {
 fn written_keyed(node: Node, src: &[u8]) -> bool {
     let mut places = vec![node];
     places.extend(
-        kids(node)
-            .into_iter()
-            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+        kids(node).into_iter().filter(|c| {
+            c.kind_str().ends_with("declaration") || c.kind_str().ends_with("declarator")
+        }),
     );
-    places.into_iter().any(|n| match n.child_by_field_name("type") {
+    places.into_iter().any(|n| match n.by_field("type") {
         Some(t) => map_value(t, src).is_some(),
         None => kids(n)
             .into_iter()
             .find(|c| {
                 matches!(
-                    c.kind(),
+                    c.kind_str(),
                     "user_type" | "type_annotation" | "nullable_type" | "dictionary_type"
                 )
             })
@@ -7338,16 +7347,18 @@ fn return_keyed(def: Node, src: &[u8]) -> bool {
             Some("return_type") | Some("returns") => true,
             Some("result") => {
                 // Go `(map[string]*Foo, error)`: the first result
-                if child.kind() == "parameter_list" {
+                if child.kind_str() == "parameter_list" {
                     return kids(child).into_iter().next().is_some_and(|f| written_keyed(f, src));
                 }
                 true
             }
-            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some("type") => {
+                !def.kind_str().contains("field") && !def.kind_str().contains("property")
+            }
             Some(_) => false,
             None => {
-                matches!(child.kind(), "user_type" | "nullable_type")
-                    && def.kind() == "function_declaration"
+                matches!(child.kind_str(), "user_type" | "nullable_type")
+                    && def.kind_str() == "function_declaration"
             }
         };
         if result {
@@ -7363,15 +7374,15 @@ fn return_keyed(def: Node, src: &[u8]) -> bool {
 fn written_sealed(node: Node, src: &[u8]) -> bool {
     let mut places = vec![node];
     places.extend(
-        kids(node)
-            .into_iter()
-            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+        kids(node).into_iter().filter(|c| {
+            c.kind_str().ends_with("declaration") || c.kind_str().ends_with("declarator")
+        }),
     );
-    places.into_iter().any(|n| match n.child_by_field_name("type") {
+    places.into_iter().any(|n| match n.by_field("type") {
         Some(t) => sealed_type(t, src),
         None => kids(n)
             .into_iter()
-            .find(|c| matches!(c.kind(), "user_type" | "type_annotation" | "nullable_type"))
+            .find(|c| matches!(c.kind_str(), "user_type" | "type_annotation" | "nullable_type"))
             .is_some_and(|t| sealed_type(t, src)),
     })
 }
@@ -7385,12 +7396,14 @@ fn return_wraps(def: Node, src: &[u8]) -> Option<(Vec<String>, bool)> {
         let result = match def.field_name_for_child(i as u32) {
             Some("return_type") | Some("returns") => true,
             // (Go has no wrappers, and its results are a list)
-            Some("result") => child.kind() != "parameter_list",
-            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some("result") => child.kind_str() != "parameter_list",
+            Some("type") => {
+                !def.kind_str().contains("field") && !def.kind_str().contains("property")
+            }
             Some(_) => false,
             None => {
-                matches!(child.kind(), "user_type" | "nullable_type")
-                    && def.kind() == "function_declaration"
+                matches!(child.kind_str(), "user_type" | "nullable_type")
+                    && def.kind_str() == "function_declaration"
             }
         };
         if result {
@@ -7411,16 +7424,18 @@ fn return_elem(def: Node, src: &[u8]) -> Option<Vec<String>> {
             Some("return_type") | Some("returns") => true,
             Some("result") => {
                 // Go `([]Foo, error)`: the first result
-                if child.kind() == "parameter_list" {
+                if child.kind_str() == "parameter_list" {
                     return kids(child).into_iter().next().and_then(|f| written_elem(f, src));
                 }
                 true
             }
-            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some("type") => {
+                !def.kind_str().contains("field") && !def.kind_str().contains("property")
+            }
             Some(_) => false,
             None => {
-                matches!(child.kind(), "user_type" | "nullable_type")
-                    && def.kind() == "function_declaration"
+                matches!(child.kind_str(), "user_type" | "nullable_type")
+                    && def.kind_str() == "function_declaration"
             }
         };
         if result {
@@ -7434,7 +7449,7 @@ fn return_elem(def: Node, src: &[u8]) -> Option<Vec<String>> {
 fn indexed(decl: Node, src: &[u8]) -> Option<Vec<String>> {
     fn subscript(v: Node) -> bool {
         matches!(
-            v.kind(),
+            v.kind_str(),
             "subscript_expression"
                 | "index_expression"
                 | "element_access_expression"
@@ -7450,7 +7465,7 @@ fn indexed(decl: Node, src: &[u8]) -> Option<Vec<String>> {
     })?;
     let object = ["object", "operand", "value", "expression", "array"]
         .iter()
-        .find_map(|f| v.child_by_field_name(f))
+        .find_map(|f| v.by_field(f))
         .or_else(|| kids(v).into_iter().next())?;
     let mut path = path_of(object, src).filter(|p| p[0] != UNKNOWN)?;
     path.push(ELEMENT.into());
@@ -7614,7 +7629,7 @@ const FOLDING_METHODS: &[&str] = &["fold", "Aggregate", "inject", "reduce", "red
 /// `reduce(f, init)`: the path of the initial value, which the result and
 /// the accumulator are.
 fn fold_init(anc: &[Node], _lambda: Node, src: &[u8]) -> Option<Vec<String>> {
-    let call = anc.iter().rev().take(5).find(|a| is_call_kind(a.kind()))?;
+    let call = anc.iter().rev().take(5).find(|a| is_call_kind(a.kind_str()))?;
     fold_value(*call, src)
 }
 
@@ -7626,7 +7641,7 @@ fn fold_value(call: Node, src: &[u8]) -> Option<Vec<String>> {
         .into_iter()
         .filter(|c| !is_comment(c))
         .map(|a| {
-            if a.kind().contains("argument") {
+            if a.kind_str().contains("argument") {
                 kids(a).into_iter().last().unwrap_or(a)
             } else {
                 a
@@ -7634,9 +7649,9 @@ fn fold_value(call: Node, src: &[u8]) -> Option<Vec<String>> {
         })
         .collect();
     let init = match (method.as_str(), args.as_slice()) {
-        ("fold" | "Aggregate" | "inject", [init, ..]) if !is_closure(init.kind()) => *init,
+        ("fold" | "Aggregate" | "inject", [init, ..]) if !is_closure(init.kind_str()) => *init,
         // JS `xs.reduce((acc, x) => …, init)`
-        ("reduce", [f, init]) if is_closure(f.kind()) => *init,
+        ("reduce", [f, init]) if is_closure(f.kind_str()) => *init,
         _ => return None,
     };
     value_type(init, src).or_else(|| path_of(init, src)).filter(|p| p[0] != UNKNOWN)
@@ -7648,9 +7663,9 @@ const SELF_METHODS: &[&str] = &["let", "also", "takeIf", "takeUnless", "tap", "t
 /// The name of the one parameter a lambda that declares none has: Kotlin
 /// `it`, Swift `$0` (read as `0`).
 fn implicit_parameter(n: Node) -> Option<&'static str> {
-    if n.kind() != "lambda_literal"
-        || n.child_by_field_name("type").is_some()
-        || kids(n).iter().any(|c| c.kind() == "lambda_parameters")
+    if n.kind_str() != "lambda_literal"
+        || n.by_field("type").is_some()
+        || kids(n).iter().any(|c| c.kind_str() == "lambda_parameters")
     {
         return None;
     }
@@ -7664,12 +7679,12 @@ fn implicit_parameter(n: Node) -> Option<&'static str> {
 /// it (else the receiver itself, `x.let { … }`).
 fn iterated_on(anc: &[Node], n: Node, src: &[u8]) -> Option<(usize, Vec<String>, bool)> {
     let lambda_start = n.start_byte();
-    let call = anc.iter().rev().take(5).find(|a| is_call_kind(a.kind()))?;
+    let call = anc.iter().rev().take(5).find(|a| is_call_kind(a.kind_str()))?;
     let (_, path) = callee(*call, src)?;
     // given to the call, not the receiver the call is made on
     let receiver_end = ["function", "object", "receiver"]
         .iter()
-        .find_map(|f| call.child_by_field_name(f))
+        .find_map(|f| call.by_field(f))
         .or_else(|| kids(*call).into_iter().next())
         .map_or(0, |r| r.end_byte());
     if path.len() < 2 || path[0] == UNKNOWN || lambda_start < receiver_end {
@@ -7694,7 +7709,7 @@ fn iterated_on(anc: &[Node], n: Node, src: &[u8]) -> Option<(usize, Vec<String>,
 /// `xs.zip(ys)` (Kotlin, Rust, Swift) or Python `zip(xs, ys)`: the paths of
 /// the two collections zipped.
 fn zipped(n: Node, src: &[u8]) -> Option<(Vec<String>, Vec<String>)> {
-    if !is_call_kind(n.kind()) {
+    if !is_call_kind(n.kind_str()) {
         return None;
     }
     let (_, path) = callee(n, src)?;
@@ -7707,7 +7722,7 @@ fn zipped(n: Node, src: &[u8]) -> Option<(Vec<String>, Vec<String>)> {
         .into_iter()
         .filter(|c| !is_comment(c))
         .map(|a| {
-            if a.kind().contains("argument") {
+            if a.kind_str().contains("argument") {
                 kids(a).into_iter().last().unwrap_or(a)
             } else {
                 a
@@ -7725,23 +7740,21 @@ fn zipped(n: Node, src: &[u8]) -> Option<(Vec<String>, Vec<String>)> {
 /// Whether a lambda's one parameter is a pair taken apart: Kotlin `{ (k, v)
 /// -> … }`, JS `([k, v]) => …`, Rust `|(k, v)|`.
 fn destructures_pair(n: Node) -> bool {
-    let first = match n.kind() {
+    let first = match n.kind_str() {
         "lambda_literal" => kids(n)
             .into_iter()
-            .find(|c| c.kind() == "lambda_parameters")
+            .find(|c| c.kind_str() == "lambda_parameters")
             .and_then(|ps| kids(ps).into_iter().next()),
-        _ => ["parameters", "parameter"].iter().find_map(|f| n.child_by_field_name(f)).and_then(
-            |ps| {
-                if matches!(ps.kind(), "array_pattern" | "tuple_pattern") {
-                    Some(ps)
-                } else {
-                    kids(ps).into_iter().next()
-                }
-            },
-        ),
+        _ => ["parameters", "parameter"].iter().find_map(|f| n.by_field(f)).and_then(|ps| {
+            if matches!(ps.kind_str(), "array_pattern" | "tuple_pattern") {
+                Some(ps)
+            } else {
+                kids(ps).into_iter().next()
+            }
+        }),
     };
     first.is_some_and(|p| {
-        matches!(p.kind(), "multi_variable_declaration" | "array_pattern" | "tuple_pattern")
+        matches!(p.kind_str(), "multi_variable_declaration" | "array_pattern" | "tuple_pattern")
             && kids(p).len() == 2
     })
 }
@@ -7750,7 +7763,7 @@ fn destructures_pair(n: Node) -> bool {
 /// each is one name.
 fn pair_names(var: Node, src: &[u8]) -> Option<(String, String)> {
     if !matches!(
-        var.kind(),
+        var.kind_str(),
         "multi_variable_declaration"
             | "tuple_pattern"
             | "pattern_list"
@@ -7761,10 +7774,10 @@ fn pair_names(var: Node, src: &[u8]) -> Option<(String, String)> {
         return None;
     }
     let one = |c: Node| -> Option<String> {
-        match c.kind() {
+        match c.kind_str() {
             "identifier" | "simple_identifier" => bound_name(c, src),
             "variable_declaration" | "pattern" => match kids(c).as_slice() {
-                [x] if matches!(x.kind(), "identifier" | "simple_identifier") => {
+                [x] if matches!(x.kind_str(), "identifier" | "simple_identifier") => {
                     bound_name(*x, src)
                 }
                 _ => None,
@@ -7786,7 +7799,7 @@ fn loop_variable(n: Node, src: &[u8]) -> Vec<(String, Vec<String>)> {
 }
 
 fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
-    let k = n.kind();
+    let k = n.kind_str();
     let (var, iterable) = match k {
         // Go `for k, x := range xs`: the second name is the element (or a
         // map's value), the first the key; one name alone is the first.
@@ -7798,11 +7811,11 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
             if !text(n, src).contains(":=") {
                 return None;
             }
-            let left: Vec<Node> = kids(n.child_by_field_name("left")?)
+            let left: Vec<Node> = kids(n.by_field("left")?)
                 .into_iter()
-                .filter(|c| c.kind() == "identifier")
+                .filter(|c| c.kind_str() == "identifier")
                 .collect();
-            let of = path_of(n.child_by_field_name("right")?, src).filter(|p| p[0] != UNKNOWN)?;
+            let of = path_of(n.by_field("right")?, src).filter(|p| p[0] != UNKNOWN)?;
             let mut out = Vec::new();
             for (i, var) in left.iter().enumerate().take(2) {
                 let name = text(*var, src);
@@ -7824,20 +7837,23 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
         | "for_range_loop"
         | "for" => {
             // a type written for the variable types it already
-            if n.child_by_field_name("type").is_some_and(|t| first_type(t, src).is_some()) {
+            if n.by_field("type").is_some_and(|t| first_type(t, src).is_some()) {
                 return None;
             }
             let var = ["left", "name", "pattern", "item", "declarator"]
                 .iter()
-                .find_map(|f| n.child_by_field_name(f))
+                .find_map(|f| n.by_field(f))
                 .or_else(|| {
                     kids(n).into_iter().find(|c| {
-                        matches!(c.kind(), "variable_declaration" | "multi_variable_declaration")
+                        matches!(
+                            c.kind_str(),
+                            "variable_declaration" | "multi_variable_declaration"
+                        )
                     })
                 })?;
             let iterable = ["right", "value", "collection"]
                 .iter()
-                .find_map(|f| n.child_by_field_name(f))
+                .find_map(|f| n.by_field(f))
                 .or_else(|| {
                     // Kotlin: the expression after the variable
                     let ks = kids(n);
@@ -7846,7 +7862,7 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
                 })?;
             // JS `for (k in obj)` names keys, not elements
             let mut cursor = n.walk();
-            if k == "for_in_statement" && !n.children(&mut cursor).any(|c| c.kind() == "of") {
+            if k == "for_in_statement" && !n.children(&mut cursor).any(|c| c.kind_str() == "of") {
                 return None;
             }
             (var, iterable)
@@ -7883,21 +7899,21 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
         return Some(out.into_iter().filter(|(n, _)| n != "_").collect());
     }
     // one name, not a pattern of several
-    let name = match var.kind() {
+    let name = match var.kind_str() {
         "identifier" | "simple_identifier" | "variable_name" => bound_name(var, src)?,
         // C++ `auto& r`, `auto* r`
         "reference_declarator" | "pointer_declarator" => {
-            let inner = kids(var).into_iter().find(|c| c.kind() == "identifier")?;
+            let inner = kids(var).into_iter().find(|c| c.kind_str() == "identifier")?;
             bound_name(inner, src)?
         }
         "variable_declaration" | "pattern" | "value_binding_pattern" => {
             let ks = kids(var);
             let ids: Vec<&Node> = ks
                 .iter()
-                .filter(|c| matches!(c.kind(), "identifier" | "simple_identifier"))
+                .filter(|c| matches!(c.kind_str(), "identifier" | "simple_identifier"))
                 .collect();
             match ids.as_slice() {
-                [one] if ks.len() == 1 || var.kind() == "variable_declaration" => {
+                [one] if ks.len() == 1 || var.kind_str() == "variable_declaration" => {
                     bound_name(**one, src)?
                 }
                 _ => return None,
@@ -7918,16 +7934,16 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
 fn written_type(node: Node, src: &[u8]) -> Option<Vec<String>> {
     let mut places = vec![node];
     places.extend(
-        kids(node)
-            .into_iter()
-            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+        kids(node).into_iter().filter(|c| {
+            c.kind_str().ends_with("declaration") || c.kind_str().ends_with("declarator")
+        }),
     );
     places.into_iter().find_map(|n| {
-        let field = n.child_by_field_name("type");
+        let field = n.by_field("type");
         field.and_then(|t| first_type(t, src).or_else(|| predefined(t, src))).or_else(|| {
             kids(n)
                 .into_iter()
-                .find(|c| matches!(c.kind(), "user_type" | "type_annotation" | "nullable_type"))
+                .find(|c| matches!(c.kind_str(), "user_type" | "type_annotation" | "nullable_type"))
                 .and_then(|t| first_type(t, src))
         })
     })
@@ -7937,12 +7953,10 @@ fn written_type(node: Node, src: &[u8]) -> Option<Vec<String>> {
 /// `Def::written_head`).
 fn written_head(node: Node, src: &[u8]) -> Option<String> {
     let t = std::iter::once(node)
-        .chain(
-            kids(node)
-                .into_iter()
-                .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
-        )
-        .find_map(|n| n.child_by_field_name("type"))?;
+        .chain(kids(node).into_iter().filter(|c| {
+            c.kind_str().ends_with("declaration") || c.kind_str().ends_with("declarator")
+        }))
+        .find_map(|n| n.by_field("type"))?;
     // (as written: the readers of types drop a C++ namespace)
     let written = text(t, src);
     let head =
@@ -7953,8 +7967,8 @@ fn written_head(node: Node, src: &[u8]) -> Option<String> {
 /// A type of the language itself, as written (C# `string`, `string?`): no
 /// type of the project, but what an extension can be written for.
 fn predefined(t: Node, src: &[u8]) -> Option<Vec<String>> {
-    let t = if t.kind() == "nullable_type" { kids(t).into_iter().next()? } else { t };
-    (t.kind() == "predefined_type").then(|| vec![text(t, src)])
+    let t = if t.kind_str() == "nullable_type" { kids(t).into_iter().next()? } else { t };
+    (t.kind_str() == "predefined_type").then(|| vec![text(t, src)])
 }
 
 /// What constructs the value a declaration holds (`Settings()`).
@@ -7962,14 +7976,11 @@ fn predefined(t: Node, src: &[u8]) -> Option<Vec<String>> {
 /// `['Article']` of `const Article = mongoose.model('Article')`.
 fn value_call<'t>(node: Node<'t>) -> Option<(Node<'t>, Vec<Node<'t>>)> {
     let v = value_node(node)?;
-    if v.kind() != "call_expression" {
+    if v.kind_str() != "call_expression" {
         return None;
     }
-    let args = v.child_by_field_name("arguments")?;
-    Some((
-        v.child_by_field_name("function")?,
-        kids(args).into_iter().filter(|c| !is_comment(c)).collect(),
-    ))
+    let args = v.by_field("arguments")?;
+    Some((v.by_field("function")?, kids(args).into_iter().filter(|c| !is_comment(c)).collect()))
 }
 
 /// JS `var req = Object.create(http.IncomingMessage.prototype)`: the path of
@@ -7993,7 +8004,7 @@ fn model_named(node: Node, src: &[u8]) -> Option<String> {
 
 /// The text of a string literal argument, without its quotes.
 fn string_arg(n: Node, src: &[u8]) -> Option<String> {
-    if !matches!(n.kind(), "string" | "template_string") {
+    if !matches!(n.kind_str(), "string" | "template_string") {
         return None;
     }
     let t = text(n, src);
@@ -8007,23 +8018,23 @@ fn string_arg(n: Node, src: &[u8]) -> Option<String> {
 /// own `this` (it has none: the one around).
 fn this_attached(anc: &[Node], src: &[u8]) -> Option<Vec<String>> {
     for (i, a) in anc.iter().enumerate().rev() {
-        match a.kind() {
+        match a.kind_str() {
             "arrow_function" => continue,
             "function_expression" | "function" | "generator_function" => {
                 let parent = anc.get(i.checked_sub(1)?)?;
-                return match parent.kind() {
+                return match parent.kind_str() {
                     // `app[method] = function () {…}`
                     "assignment_expression" => {
-                        let left = parent.child_by_field_name("left")?;
-                        (left.kind() == "subscript_expression")
-                            .then(|| path_of(left.child_by_field_name("object")?, src))
+                        let left = parent.by_field("left")?;
+                        (left.kind_str() == "subscript_expression")
+                            .then(|| path_of(left.by_field("object")?, src))
                             .flatten()
                     }
                     // `UserSchema.path('name').validate(function () {…})`
                     "arguments" => {
                         let call = anc.get(i.checked_sub(2)?)?;
-                        (call.kind() == "call_expression")
-                            .then(|| path_of(call.child_by_field_name("function")?, src))
+                        (call.kind_str() == "call_expression")
+                            .then(|| path_of(call.by_field("function")?, src))
                             .flatten()
                     }
                     _ => None,
@@ -8042,11 +8053,11 @@ fn this_attached(anc: &[Node], src: &[u8]) -> Option<Vec<String>> {
 fn state_value_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
     let mut v = value_node(node)?;
     // `var app = module.exports = express()`: what the last one assigns
-    while v.kind() == "assignment_expression" {
-        v = v.child_by_field_name("right")?;
+    while v.kind_str() == "assignment_expression" {
+        v = v.by_field("right")?;
     }
     // Ruby `Store = Repo`, `Store = Shop::Repo`: another name for the class
-    if matches!(v.kind(), "constant" | "scope_resolution") {
+    if matches!(v.kind_str(), "constant" | "scope_resolution") {
         return path_of(v, src);
     }
     value_type(v, src)
@@ -8062,11 +8073,11 @@ fn written_arity(n: Node, name: &str, src: &[u8]) -> Option<u8> {
         if seen > 600 {
             return None;
         }
-        match x.kind() {
+        match x.kind_str() {
             "generic_name" => {
                 let ks = kids(x);
                 if ks.first().is_some_and(|c| text(*c, src) == name) {
-                    let args = ks.iter().find(|c| c.kind() == "type_argument_list")?;
+                    let args = ks.iter().find(|c| c.kind_str() == "type_argument_list")?;
                     return u8::try_from(kids(*args).len()).ok();
                 }
             }
@@ -8086,7 +8097,9 @@ fn params_field<'t>(n: Node<'t>) -> Option<Node<'t>> {
         return None;
     }
     loop {
-        if c.field_name() == Some("parameters") && !c.node().kind().starts_with("type_parameter") {
+        if c.field_name() == Some("parameters")
+            && !c.node().kind_str().starts_with("type_parameter")
+        {
             return Some(c.node());
         }
         if !c.goto_next_sibling() {
@@ -8194,15 +8207,15 @@ fn innermost_where(
 /// expression, or `=> expr` for the property itself. (`{ get; set; }` has
 /// none: what initializes it is the type's use.)
 fn computed_property(node: Node) -> bool {
-    if node.kind() != "property_declaration"
+    if node.kind_str() != "property_declaration"
         || crate::parse::current() != Some(crate::lang::Lang::CSharp)
     {
         return false;
     }
-    kids(node).into_iter().any(|c| match c.kind() {
+    kids(node).into_iter().any(|c| match c.kind_str() {
         "arrow_expression_clause" => true,
         "accessor_list" => kids(c).into_iter().any(|a| {
-            kids(a).into_iter().any(|b| matches!(b.kind(), "block" | "arrow_expression_clause"))
+            kids(a).into_iter().any(|b| matches!(b.kind_str(), "block" | "arrow_expression_clause"))
         }),
         _ => false,
     })
@@ -8345,7 +8358,7 @@ fn assign_local_defs(defs: &[Def], locals: &mut [Local]) {
 /// C, C++ `extern redisAllocFuncs hiredisAllocFns;`: a declaration of a
 /// variable defined elsewhere.
 fn is_extern(n: Node, src: &[u8]) -> bool {
-    kids(n).iter().any(|c| c.kind() == "storage_class_specifier" && text(*c, src) == "extern")
+    kids(n).iter().any(|c| c.kind_str() == "storage_class_specifier" && text(*c, src) == "extern")
 }
 
 fn add_extras(
@@ -8404,26 +8417,26 @@ fn add_extras(
         };
         // C, C++ `struct { … } ev;`: a field of an anonymous struct type
         let inline = node
-            .child_by_field_name("type")
-            .filter(|t| matches!(t.kind(), "struct_specifier" | "union_specifier"))
-            .filter(|t| t.child_by_field_name("name").is_none())
-            .and_then(|t| t.child_by_field_name("body"))
+            .by_field("type")
+            .filter(|t| matches!(t.kind_str(), "struct_specifier" | "union_specifier"))
+            .filter(|t| t.by_field("name").is_none())
+            .and_then(|t| t.by_field("body"))
             .map(|b| (b.start_byte(), b.end_byte()))
             .filter(|_| *state);
         let def_line = line(*node);
         // a callable written as a call with a block (RSpec `let(:conn) {
         // Client.new }`): what the block's last expression gives is its
         // result, and it is a name of the block it is written in
-        let block = kind.is_callable().then(|| node.child_by_field_name("block")).flatten();
+        let block = kind.is_callable().then(|| node.by_field("block")).flatten();
         let returns: Vec<Vec<String>> = block
-            .and_then(|b| b.child_by_field_name("body"))
+            .and_then(|b| b.by_field("body"))
             .and_then(|body| kids(body).into_iter().rfind(|c| !is_comment(c)))
             .and_then(|v| returned_path(v, src))
             .into_iter()
             .collect();
         let scope_lines = block.and_then(|_| {
             let around = node.parent()?.parent()?;
-            matches!(around.kind(), "do_block" | "block")
+            matches!(around.kind_str(), "do_block" | "block")
                 .then(|| (line(around), m.end_line(around)))
         });
         defs.push(Def {

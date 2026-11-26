@@ -4,6 +4,8 @@
 //! `using A = N.T;` names one, `using static N.T;` brings a type's members. A
 //! base list does not say which base is the class: the target decides.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use tree_sitter::Node;
 
 use super::LanguageModule;
@@ -16,8 +18,8 @@ pub struct CSharp;
 /// Whether a node is a C# 14 extension block, as the grammar reads it: a
 /// constructor named `extension` in a class of another name.
 pub(crate) fn extension_block(n: Node, src: &[u8]) -> bool {
-    n.kind() == "constructor_declaration"
-        && n.child_by_field_name("name").is_some_and(|x| text(x, src) == "extension")
+    n.kind_str() == "constructor_declaration"
+        && n.by_field("name").is_some_and(|x| text(x, src) == "extension")
 }
 
 impl LanguageModule for CSharp {
@@ -34,25 +36,28 @@ impl LanguageModule for CSharp {
         // the grammar reads the block as a constructor named `extension` and
         // its members as local functions; each is written for the block's
         // parameter (a `static` one is the type's, not an instance's)
-        let block = (node.kind() == "local_function_statement")
+        let block = (node.kind_str() == "local_function_statement")
             .then(|| node.parent().and_then(|b| b.parent()))
             .flatten()
             .filter(|c| extension_block(*c, src));
         let (params, this) = match block {
             Some(c) => {
-                if kids(node).iter().any(|m| m.kind() == "modifier" && text(*m, src) == "static") {
+                if kids(node)
+                    .iter()
+                    .any(|m| m.kind_str() == "modifier" && text(*m, src) == "static")
+                {
                     return None;
                 }
-                (c.child_by_field_name("parameters")?, true)
+                (c.by_field("parameters")?, true)
             }
-            None if node.kind() == "method_declaration" => {
-                (node.child_by_field_name("parameters")?, false)
+            None if node.kind_str() == "method_declaration" => {
+                (node.by_field("parameters")?, false)
             }
             None => return None,
         };
-        let first = kids(params).into_iter().find(|p| p.kind() == "parameter")?;
+        let first = kids(params).into_iter().find(|p| p.kind_str() == "parameter")?;
         let this = this || all_kids(first).iter().any(|c| text(*c, src) == "this");
-        let ty = first.child_by_field_name("type").filter(|_| this)?;
+        let ty = first.by_field("type").filter(|_| this)?;
         let t = text(ty, src);
         let bare = t.split('<').next().unwrap_or("").trim_end_matches(['?', ']', '[']);
         let last = bare.rsplit('.').next().unwrap_or("").trim();
@@ -62,39 +67,43 @@ impl LanguageModule for CSharp {
     /// `static` fields (shared by the whole program) and `const` / `static
     /// readonly` ones (constants).
     fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
-        if n.kind() != "field_declaration" {
+        if n.kind_str() != "field_declaration" {
             return Vec::new();
         }
-        let mods: Vec<String> =
-            kids(n).into_iter().filter(|c| c.kind() == "modifier").map(|c| text(c, src)).collect();
+        let mods: Vec<String> = kids(n)
+            .into_iter()
+            .filter(|c| c.kind_str() == "modifier")
+            .map(|c| text(c, src))
+            .collect();
         let has = |w: &str| mods.iter().any(|m| m == w);
         let kind = if has("const") || (has("static") && has("readonly")) {
             DefKind::Constant
         } else {
             DefKind::Property
         };
-        let Some(decl) = kids(n).into_iter().find(|c| c.kind() == "variable_declaration") else {
+        let Some(decl) = kids(n).into_iter().find(|c| c.kind_str() == "variable_declaration")
+        else {
             return Vec::new();
         };
         kids(decl)
             .into_iter()
-            .filter(|c| c.kind() == "variable_declarator")
-            .filter_map(|d| d.child_by_field_name("name"))
+            .filter(|c| c.kind_str() == "variable_declarator")
+            .filter_map(|d| d.by_field("name"))
             .map(|name| (n, name, kind))
             .collect()
     }
 
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
-        if n.kind() != "using_directive" {
+        if n.kind_str() != "using_directive" {
             return None;
         }
-        let alias = n.child_by_field_name("name").map(|a| text(a, src));
+        let alias = n.by_field("name").map(|a| text(a, src));
         let target = kids(n)
             .into_iter()
-            .filter(|c| matches!(c.kind(), "qualified_name" | "identifier" | "generic_name"))
-            .find(|c| n.child_by_field_name("name").is_none_or(|a| a.id() != c.id()))?;
+            .filter(|c| matches!(c.kind_str(), "qualified_name" | "identifier" | "generic_name"))
+            .find(|c| n.by_field("name").is_none_or(|a| a.id() != c.id()))?;
         let module = text(target, src);
-        let is_static = all_kids(n).iter().any(|c| c.kind() == "static");
+        let is_static = all_kids(n).iter().any(|c| c.kind_str() == "static");
         let mut f = match alias {
             Some(a) => {
                 let mut f = import(n, ImportForm::Module, module);
@@ -105,26 +114,26 @@ impl LanguageModule for CSharp {
         };
         f.is_static = is_static;
         // `global using N;`: every file of the project sees it
-        f.public = all_kids(n).iter().any(|c| c.kind() == "global");
+        f.public = all_kids(n).iter().any(|c| c.kind_str() == "global");
         Some(vec![f])
     }
 
     fn package_of(&self, n: Node, src: &[u8]) -> Option<String> {
-        (n.kind() == "file_scoped_namespace_declaration")
-            .then(|| n.child_by_field_name("name").map(|c| text(c, src)))
+        (n.kind_str() == "file_scoped_namespace_declaration")
+            .then(|| n.by_field("name").map(|c| text(c, src)))
             .flatten()
     }
 
     fn extra_def<'t>(&self, n: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
-        (n.kind() == "property_declaration")
-            .then(|| n.child_by_field_name("name").map(|x| (x, DefKind::Property)))
+        (n.kind_str() == "property_declaration")
+            .then(|| n.by_field("name").map(|x| (x, DefKind::Property)))
             .flatten()
     }
 
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
         kids(n)
             .into_iter()
-            .filter(|c| c.kind() == "base_list")
+            .filter(|c| c.kind_str() == "base_list")
             .flat_map(kids)
             .filter_map(|c| path_of(c, src))
             .map(|p| (RefKind::Base, p))

@@ -12,6 +12,8 @@
 //! in a file using Guzzle, Laravel `Http::get(url)`, and in tests
 //! `$this->getJson('/api/x')`, `$this->get('/x')`, `$this->json('POST', '/x')`.
 
+use crate::parse::Fields;
+use crate::parse::Kinds;
 use tree_sitter::Node;
 
 use super::{
@@ -35,8 +37,9 @@ const REST: &[(&str, &str, &str)] = &[
 
 fn lit(n: Option<Node>, src: &[u8]) -> Option<String> {
     let n = n?;
-    let plain = n.kind() == "string"
-        || (n.kind() == "encapsed_string" && kids(n).iter().all(|c| c.kind() == "string_content"));
+    let plain = n.kind_str() == "string"
+        || (n.kind_str() == "encapsed_string"
+            && kids(n).iter().all(|c| c.kind_str() == "string_content"));
     plain.then(|| string_value(n, src))
 }
 
@@ -55,8 +58,8 @@ fn first_lit(n: Node, src: &[u8]) -> Option<String> {
 /// Positional and named arguments.
 fn args<'t>(a: Option<Node<'t>>, src: &[u8]) -> (Vec<Node<'t>>, Vec<(String, Node<'t>)>) {
     let (mut pos, mut named) = (Vec::new(), Vec::new());
-    for arg in a.map(kids).unwrap_or_default().into_iter().filter(|c| c.kind() == "argument") {
-        let key = arg.child_by_field_name("name");
+    for arg in a.map(kids).unwrap_or_default().into_iter().filter(|c| c.kind_str() == "argument") {
+        let key = arg.by_field("name");
         let Some(v) = kids(arg).into_iter().find(|c| Some(*c) != key) else { continue };
         match key {
             Some(k) => named.push((text(k, src), v)),
@@ -69,7 +72,7 @@ fn args<'t>(a: Option<Node<'t>>, src: &[u8]) -> (Vec<Node<'t>>, Vec<(String, Nod
 /// `['GET', 'POST']` / `'GET'` → its strings.
 fn strings(n: Option<Node>, src: &[u8]) -> Vec<String> {
     let Some(n) = n else { return Vec::new() };
-    if n.kind() == "array_creation_expression" {
+    if n.kind_str() == "array_creation_expression" {
         return kids(n).into_iter().filter_map(|e| first_lit(e, src)).collect();
     }
     lit(Some(n), src).into_iter().collect()
@@ -77,7 +80,7 @@ fn strings(n: Option<Node>, src: &[u8]) -> Vec<String> {
 
 /// The value under `'key'` in an array literal.
 fn array_get<'t>(n: Option<Node<'t>>, key: &str, src: &[u8]) -> Option<Node<'t>> {
-    let n = n.filter(|n| n.kind() == "array_creation_expression")?;
+    let n = n.filter(|n| n.kind_str() == "array_creation_expression")?;
     kids(n).into_iter().find_map(|e| {
         let ks = kids(e);
         (ks.len() == 2 && lit(Some(ks[0]), src).as_deref() == Some(key)).then_some(ks[1])
@@ -95,7 +98,7 @@ fn class_name(n: Node, src: &[u8]) -> Option<(Vec<String>, String)> {
 /// `[C::class, 'm']`, `'C@m'`, `C::class` (invokable) → the method.
 fn handler(n: Option<Node>, action: Option<&str>, src: &[u8]) -> Handler {
     let Some(n) = n else { return Handler::Inline };
-    match n.kind() {
+    match n.kind_str() {
         "array_creation_expression" => {
             let parts: Vec<Node> =
                 kids(n).into_iter().filter_map(|e| kids(e).first().copied()).collect();
@@ -179,34 +182,26 @@ impl Reader<'_> {
     fn chain<'t>(&self, mut n: Node<'t>) -> Option<Vec<Link<'t>>> {
         let src = self.src;
         let mut links = Vec::new();
-        while n.kind() == "member_call_expression" {
-            let name = n.child_by_field_name("name")?;
-            links.push(Link {
-                name: text(name, src),
-                args: n.child_by_field_name("arguments"),
-                at: name,
-            });
-            n = n.child_by_field_name("object")?;
+        while n.kind_str() == "member_call_expression" {
+            let name = n.by_field("name")?;
+            links.push(Link { name: text(name, src), args: n.by_field("arguments"), at: name });
+            n = n.by_field("object")?;
         }
-        if n.kind() != "scoped_call_expression" {
+        if n.kind_str() != "scoped_call_expression" {
             return None;
         }
-        let scope = text(n.child_by_field_name("scope")?, src);
+        let scope = text(n.by_field("scope")?, src);
         if scope.trim_start_matches('\\').rsplit('\\').next() != Some("Route") {
             return None;
         }
-        let name = n.child_by_field_name("name")?;
-        links.push(Link {
-            name: text(name, src),
-            args: n.child_by_field_name("arguments"),
-            at: name,
-        });
+        let name = n.by_field("name")?;
+        links.push(Link { name: text(name, src), args: n.by_field("arguments"), at: name });
         links.reverse();
         Some(links)
     }
 
     fn laravel(&mut self, n: Node, prefix: &str) {
-        if matches!(n.kind(), "member_call_expression" | "scoped_call_expression") {
+        if matches!(n.kind_str(), "member_call_expression" | "scoped_call_expression") {
             if let Some(links) = self.chain(n) {
                 self.laravel_chain(&links, prefix);
                 return;
@@ -243,13 +238,13 @@ impl Reader<'_> {
                         }
                     }
                     for a in &pos {
-                        if a.kind() == "array_creation_expression" {
+                        if a.kind_str() == "array_creation_expression" {
                             continue;
                         }
                         // a route file: its routes take the prefix
                         if let Some(file) = route_file(*a, src).filter(|_| {
                             !matches!(
-                                a.kind(),
+                                a.kind_str(),
                                 "anonymous_function"
                                     | "arrow_function"
                                     | "anonymous_function_creation_expression"
@@ -315,13 +310,12 @@ impl Reader<'_> {
         let mut stack = vec![root];
         while let Some(n) = stack.pop() {
             stack.extend(kids(n));
-            if n.kind() != "member_call_expression"
-                || n.child_by_field_name("name").map(|x| text(x, src)).as_deref()
-                    != Some("withRouting")
+            if n.kind_str() != "member_call_expression"
+                || n.by_field("name").map(|x| text(x, src)).as_deref() != Some("withRouting")
             {
                 continue;
             }
-            let (_, named) = args(n.child_by_field_name("arguments"), src);
+            let (_, named) = args(n.by_field("arguments"), src);
             let Some(api) = named.iter().find(|(k, _)| k == "api").map(|(_, v)| *v) else {
                 continue;
             };
@@ -344,12 +338,12 @@ impl Reader<'_> {
         let src = self.src;
         let route_attrs = |decl: Node| -> Vec<(String, Vec<String>)> {
             let mut out = Vec::new();
-            for al in kids(decl).into_iter().filter(|c| c.kind() == "attribute_list") {
-                for g in kids(al).into_iter().filter(|c| c.kind() == "attribute_group") {
-                    for a in kids(g).into_iter().filter(|c| c.kind() == "attribute") {
+            for al in kids(decl).into_iter().filter(|c| c.kind_str() == "attribute_list") {
+                for g in kids(al).into_iter().filter(|c| c.kind_str() == "attribute_group") {
+                    for a in kids(g).into_iter().filter(|c| c.kind_str() == "attribute") {
                         let Some(name) = kids(a)
                             .into_iter()
-                            .find(|c| matches!(c.kind(), "name" | "qualified_name"))
+                            .find(|c| matches!(c.kind_str(), "name" | "qualified_name"))
                         else {
                             continue;
                         };
@@ -357,8 +351,8 @@ impl Reader<'_> {
                             continue;
                         }
                         let list = a
-                            .child_by_field_name("parameters")
-                            .or_else(|| kids(a).into_iter().find(|c| c.kind() == "arguments"));
+                            .by_field("parameters")
+                            .or_else(|| kids(a).into_iter().find(|c| c.kind_str() == "arguments"));
                         let (pos, named) = args(list, src);
                         let path = match named.iter().find(|(k, _)| k == "path") {
                             Some((_, v)) => lit(Some(*v), src),
@@ -379,13 +373,13 @@ impl Reader<'_> {
         let mut stack = vec![root];
         while let Some(cls) = stack.pop() {
             stack.extend(kids(cls));
-            if cls.kind() != "class_declaration" {
+            if cls.kind_str() != "class_declaration" {
                 continue;
             }
             let prefix = route_attrs(cls).into_iter().next().map(|(p, _)| p).unwrap_or_default();
-            let Some(body) = cls.child_by_field_name("body") else { continue };
-            for m in kids(body).into_iter().filter(|c| c.kind() == "method_declaration") {
-                let at = m.child_by_field_name("name").unwrap_or(m);
+            let Some(body) = cls.by_field("body") else { continue };
+            for m in kids(body).into_iter().filter(|c| c.kind_str() == "method_declaration") {
+                let at = m.by_field("name").unwrap_or(m);
                 let h = self.home(m.start_byte()).map_or(Handler::Inline, Handler::Def);
                 for (path, methods) in route_attrs(m) {
                     for meth in methods {
@@ -402,19 +396,15 @@ impl Reader<'_> {
         let mut stack = vec![root];
         while let Some(n) = stack.pop() {
             stack.extend(kids(n));
-            let (name, recv) = match n.kind() {
-                "member_call_expression" => {
-                    (n.child_by_field_name("name"), n.child_by_field_name("object"))
-                }
-                "scoped_call_expression" => {
-                    (n.child_by_field_name("name"), n.child_by_field_name("scope"))
-                }
+            let (name, recv) = match n.kind_str() {
+                "member_call_expression" => (n.by_field("name"), n.by_field("object")),
+                "scoped_call_expression" => (n.by_field("name"), n.by_field("scope")),
                 _ => continue,
             };
             let (Some(name), Some(recv)) = (name, recv) else { continue };
             let name = text(name, src);
             let recv_text = text(recv, src);
-            let (pos, _) = args(n.child_by_field_name("arguments"), src);
+            let (pos, _) = args(n.by_field("arguments"), src);
             let through = recv_text == "Http"
                 || recv_text.starts_with("Http::")
                 || (guzzle && recv_text.to_lowercase().contains("client"))
