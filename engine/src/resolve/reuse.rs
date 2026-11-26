@@ -63,8 +63,10 @@ pub struct Stored {
     pub key: u64,
     /// Per file (`None`: not resolved, a file of no family).
     pub files: Vec<Option<StoredFile>>,
-    /// Per file: its print (`Project::file_print`).
+    /// Per file: its print (`Project::file_print`), and the print of its
+    /// declarations (`Project::decl_print`).
     pub prints: Vec<u64>,
+    pub decl: Vec<u64>,
     /// The prints of the keys some file asked.
     pub keys: HashMap<u64, u64>,
 }
@@ -103,13 +105,24 @@ pub fn store(path: &Path, stored: &Stored) -> Result<(), String> {
 }
 
 /// Which files' resolution can be taken from `prev`: every file whose own
-/// print, the prints of the files it read and the prints of the keys it
-/// asked are the same now.
-pub fn reusable(prev: &Stored, prints: &[u64], keys: &HashMap<u64, u64>) -> Vec<bool> {
-    if prev.prints.len() != prints.len() {
+/// print, the prints of what it read of other files (all of a file, or its
+/// declarations) and the prints of the keys it asked are the same now.
+pub fn reusable(
+    prev: &Stored,
+    prints: &[u64],
+    decl: &[u64],
+    keys: &HashMap<u64, u64>,
+) -> Vec<bool> {
+    if prev.prints.len() != prints.len() || prev.decl.len() != decl.len() {
         return vec![false; prints.len()];
     }
     let changed: Vec<bool> = prev.prints.iter().zip(prints).map(|(a, b)| a != b).collect();
+    let changed_decl: Vec<bool> = prev.decl.iter().zip(decl).map(|(a, b)| a != b).collect();
+    let read_changed = |code: u32| {
+        let (g, what) = crate::resolve::trace::part::of(code);
+        let by = if what == crate::resolve::trace::part::DECL { &changed_decl } else { &changed };
+        by.get(g).copied().unwrap_or(true)
+    };
     let changed_keys: HashSet<u64> = prev
         .keys
         .iter()
@@ -124,7 +137,7 @@ pub fn reusable(prev: &Stored, prints: &[u64], keys: &HashMap<u64, u64>) -> Vec<
             let Some(s) = stored else { return false };
             !changed[f]
                 && !(s.all && anything)
-                && s.files.iter().all(|&g| !changed.get(g as usize).copied().unwrap_or(true))
+                && s.files.iter().all(|&code| !read_changed(code))
                 && s.keys.iter().all(|k| !changed_keys.contains(k))
         })
         .collect()

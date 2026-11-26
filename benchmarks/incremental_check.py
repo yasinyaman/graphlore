@@ -7,8 +7,9 @@
 Each repository is copied to a temporary directory and built once. Then, edit
 after edit (seeded, so a failure can be repeated), one source file the engine
 reads is changed: a line deleted, a line doubled, or a line of another file of
-its language put in (whether the result still parses does not matter: the
-update must agree with a full build whatever the source is). After each edit
+its language put in, or a comment line put in (whether the result still
+parses does not matter: the update must agree with a full build whatever the
+source is; `--kinds` picks among them). After each edit
 an update (`--incremental`) is compared, byte for byte, with a full build of
 the same tree from the same previous graph (communities start from it in both).
 The edits accumulate. A difference stops that repository, prints the edges
@@ -45,12 +46,20 @@ def source_files(graph: Path) -> list[str]:
     return sorted({n["source_file"] for n in g["nodes"] if n.get("kind") == "file" and n.get("language")})
 
 
-def edit(root: Path, rel: str, others: list[str], rng: random.Random) -> str:
+KINDS = ["delete", "double", "copy", "comment"]
+HASH_COMMENT = {".py", ".rb", ".sh", ".pl", ".r", ".yaml", ".yml", ".toml"}
+
+
+def edit(root: Path, rel: str, others: list[str], rng: random.Random, kinds: list[str]) -> str:
     path = root / rel
     lines = path.read_text(encoding="utf-8", errors="replace").split("\n")
-    kind = rng.choice(["delete", "double", "copy"])
+    kind = rng.choice(kinds)
     at = rng.randrange(len(lines)) if lines else 0
-    if kind == "delete" and len(lines) > 1:
+    if kind == "comment":
+        mark = "#" if Path(rel).suffix.lower() in HASH_COMMENT else "//"
+        indent = lines[at][: len(lines[at]) - len(lines[at].lstrip())] if lines else ""
+        lines.insert(at, f"{indent}{mark} graphlore edit {at}")
+    elif kind == "delete" and len(lines) > 1:
         del lines[at]
     elif kind == "double" and lines:
         lines.insert(at, lines[at])
@@ -85,7 +94,7 @@ def moved(before: bytes, after: Path) -> int:
     return sum(1 for n in json.loads(after.read_text())["nodes"] if n["id"] in a and a[n["id"]] != n.get("community"))
 
 
-def check(repo: Path, edits: int, seed: int, keep: bool) -> dict:
+def check(repo: Path, edits: int, seed: int, keep: bool, kinds: list[str]) -> dict:
     work = Path(tempfile.mkdtemp(prefix=f"incr-{repo.name}-"))
     root = work / repo.name
     shutil.copytree(repo, root, symlinks=True, ignore=shutil.ignore_patterns("graphify-out", "graphlore-out", "graphlore-native"))
@@ -99,7 +108,7 @@ def check(repo: Path, edits: int, seed: int, keep: bool) -> dict:
     for i in range(edits):
         if not files:
             break
-        what = edit(root, rng.choice(files), files, rng)
+        what = edit(root, rng.choice(files), files, rng, kinds)
         previous = (out / "graph.json").read_bytes()
         report = build(root, out, incremental=True)
         if full.exists():
@@ -135,6 +144,7 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--keep", action="store_true", help="keep each copy (a failing one is always kept)")
     ap.add_argument("--json", help="write the rows here")
+    ap.add_argument("--kinds", default=",".join(KINDS), help="the edits to make, of " + ", ".join(KINDS))
     args = ap.parse_args()
     rows = []
     failed = 0
@@ -143,7 +153,7 @@ def main() -> int:
         if not repo.is_dir():
             continue
         try:
-            row = check(repo, args.edits, args.seed, args.keep)
+            row = check(repo, args.edits, args.seed, args.keep, args.kinds.split(","))
         except RuntimeError as e:
             row = {"repo": repo.name, "same": False, "error": str(e)[-400:]}
         rows.append(row)

@@ -21,7 +21,8 @@ use std::rc::Rc;
 /// the depth of the work times what it read.
 #[derive(Default, Clone, Debug)]
 pub struct Frame {
-    /// The files whose facts (or per-file tables) were read, by index.
+    /// The files whose facts (or per-file tables) were read, as `part::code`
+    /// of the file's index and the part of it read.
     pub files: Box<[u32]>,
     /// The keys asked of project-wide indexes (`key_hash`).
     pub keys: Box<[u64]>,
@@ -40,6 +41,23 @@ impl Frame {
             && !self.all
             && self.used.is_empty()
             && self.parts.is_empty()
+    }
+}
+
+/// What of a file a read took: everything (`FULL`), or its declarations
+/// only (`DECL`: no function body's content, positions by their order; see
+/// `Project::decl_print`). A read is recorded as `code(file, part)`.
+pub mod part {
+    pub const FULL: u32 = 0;
+    pub const DECL: u32 = 1;
+
+    pub fn code(file: usize, part: u32) -> u32 {
+        ((file as u32) << 1) | part
+    }
+
+    /// The file and the part of a recorded read.
+    pub fn of(code: u32) -> (usize, u32) {
+        ((code >> 1) as usize, code & 1)
     }
 }
 
@@ -171,6 +189,11 @@ pub struct Trace {
     /// marks at which the kept frames now open began (`valid`).
     epoch: std::cell::Cell<u32>,
     kept_starts: RefCell<Vec<u32>>,
+    /// A file whose readers are counted by the site that read it, and the
+    /// file being resolved (a measurement: `GRAPHLORE_TRACE_FILE`).
+    pub watch: std::cell::Cell<u32>,
+    pub current: std::cell::Cell<u32>,
+    pub watch_sites: RefCell<HashMap<(&'static str, u32), HashSet<u32>>>,
 }
 
 /// The mark of a cache entry valid everywhere: a cycle's placeholder.
@@ -188,14 +211,33 @@ fn enabled() -> bool {
 pub static PROFILE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 impl Trace {
+    /// A read of everything of file `i`.
     #[track_caller]
     pub fn file(&self, i: usize) {
+        self.read(i, part::FULL);
+    }
+
+    /// A read of file `i`'s declarations only.
+    #[track_caller]
+    pub fn file_decl(&self, i: usize) {
+        self.read(i, part::DECL);
+    }
+
+    #[track_caller]
+    fn read(&self, i: usize, what: u32) {
         if PROFILE.load(std::sync::atomic::Ordering::Relaxed) {
             let at = std::panic::Location::caller();
             *self.sites.borrow_mut().entry((at.file(), at.line())).or_default() += 1;
+            if self.watch.get() == i as u32 && self.current.get() != i as u32 {
+                self.watch_sites
+                    .borrow_mut()
+                    .entry((at.file(), at.line() * 2 + what))
+                    .or_default()
+                    .insert(self.current.get());
+            }
         }
         if let Some(top) = self.stack.borrow_mut().last_mut() {
-            top.file(i as u32);
+            top.file(part::code(i, what));
         }
     }
 
@@ -407,15 +449,24 @@ pub fn key_hash<Q: KeyText + ?Sized>(index: &str, key: &Q) -> u64 {
     h.0
 }
 
-/// A per-file table whose reads by index are recorded.
+/// A per-file table whose reads by index are recorded, as a read of
+/// everything of the file or, for a table made of its declarations only
+/// (`new_decl`), of those.
 pub struct Traced<S> {
     inner: S,
     trace: Rc<Trace>,
+    part: u32,
 }
 
 impl<S> Traced<S> {
     pub fn new(inner: S, trace: Rc<Trace>) -> Self {
-        Traced { inner, trace }
+        Traced { inner, trace, part: part::FULL }
+    }
+
+    /// A table that holds nothing of a function body's content (and no
+    /// position but in the order `Project::decl_print` keeps).
+    pub fn new_decl(inner: S, trace: Rc<Trace>) -> Self {
+        Traced { inner, trace, part: part::DECL }
     }
 
     /// The table without recording: for building the indexes, and for the
@@ -426,6 +477,12 @@ impl<S> Traced<S> {
 
     pub fn raw_mut(&mut self) -> &mut S {
         &mut self.inner
+    }
+
+    /// Record a read of file `i`'s declarations only.
+    #[track_caller]
+    pub fn note_decl(&self, i: usize) {
+        self.trace.file_decl(i);
     }
 }
 
@@ -440,7 +497,7 @@ impl<T, S: Deref<Target = [T]>> Traced<S> {
 
     #[track_caller]
     pub fn get(&self, i: usize) -> Option<&T> {
-        self.trace.file(i);
+        self.trace.read(i, self.part);
         self.inner.get(i)
     }
 
@@ -456,7 +513,7 @@ impl<T, S: Deref<Target = [T]>> Index<usize> for Traced<S> {
     type Output = T;
     #[track_caller]
     fn index(&self, i: usize) -> &T {
-        self.trace.file(i);
+        self.trace.read(i, self.part);
         &self.inner[i]
     }
 }
@@ -633,6 +690,17 @@ impl<K: Eq + Hash + FileOf, V> FileKeyed<K, V> {
     #[track_caller]
     pub fn get(&self, k: &K) -> Option<&V> {
         self.trace.file(k.file_of());
+        self.inner.get(k)
+    }
+
+    /// A lookup that reads only the file's declarations (`decl`) or all of it.
+    #[track_caller]
+    pub fn get_as(&self, k: &K, decl: bool) -> Option<&V> {
+        if decl {
+            self.trace.file_decl(k.file_of());
+        } else {
+            self.trace.file(k.file_of());
+        }
         self.inner.get(k)
     }
 

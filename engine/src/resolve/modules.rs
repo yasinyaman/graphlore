@@ -373,7 +373,7 @@ fn py_resolve(p: &Project, f: usize, module: &str) -> ModRes {
     let level = module.chars().take_while(|c| *c == '.').count();
     let dotted: Vec<String> =
         module[level..].split('.').filter(|s| !s.is_empty()).map(String::from).collect();
-    let importer = p.files[f].path.as_str();
+    let importer = p.files.decl(f).path().as_str();
     let m = &p.modsys;
     if level > 0 {
         let mut base: Vec<String> =
@@ -452,7 +452,7 @@ fn py_resolve(p: &Project, f: usize, module: &str) -> ModRes {
 }
 
 fn py_file_parts(p: &Project, f: usize) -> Vec<String> {
-    let path = &p.files[f].path;
+    let path = &p.files.decl(f).path();
     let stem = path.rsplit_once('.').map(|x| x.0).unwrap_or(path);
     let mut parts: Vec<String> = stem.split('/').map(String::from).collect();
     if parts.last().is_some_and(|x| x == "__init__") {
@@ -466,7 +466,7 @@ pub fn submodule(p: &Project, files: &[usize], name: &str) -> Option<Target> {
     let &f = files.first()?;
     match p.family[f]? {
         Family::Python => {
-            let path = &p.files[f].path;
+            let path = &p.files.decl(f).path();
             if !path.ends_with("__init__.py") && !path.ends_with("__init__.pyi") {
                 return None;
             }
@@ -557,7 +557,7 @@ fn join(dir: &str, rel: &str) -> String {
 }
 
 fn js_resolve(p: &Project, f: usize, spec: &str) -> ModRes {
-    let importer = p.files[f].path.as_str();
+    let importer = p.files.decl(f).path().as_str();
     if spec.starts_with('.') {
         return match js_file(p, &join(dir_of(importer), spec)) {
             Some(i) => ModRes::Target(Target::Module(vec![i])),
@@ -655,7 +655,7 @@ fn go_resolve(p: &Project, f: usize, path: &str) -> ModRes {
             .into_iter()
             .flatten()
             .copied()
-            .filter(|&i| !p.files[i].path.ends_with("_test.go"))
+            .filter(|&i| !p.files.decl(i).path().ends_with("_test.go"))
             .collect();
         return if files.is_empty() {
             ModRes::Missing
@@ -793,9 +793,9 @@ fn by_suffix(p: &Project, f: usize, rel: &str, fam: Family) -> Option<usize> {
         0 => None,
         1 => Some(cands[0]),
         _ => {
-            let here: Vec<&str> = p.files[f].path.split('/').collect();
+            let here: Vec<&str> = p.files.decl(f).path().split('/').collect();
             let score = |i: &usize| {
-                p.files[*i].path.split('/').zip(&here).take_while(|(a, b)| a == *b).count()
+                p.files.decl(*i).path().split('/').zip(&here).take_while(|(a, b)| a == *b).count()
             };
             let best = cands.iter().map(score).max()?;
             let top: Vec<usize> = cands.iter().copied().filter(|i| score(i) == best).collect();
@@ -810,7 +810,7 @@ fn file_target(i: Option<usize>) -> ModRes {
 
 /// What an import's module names, per language.
 pub fn resolve_import(p: &Project, fam: Family, f: usize, imp: &ImportFact) -> ModRes {
-    let importer = p.files[f].path.as_str();
+    let importer = p.files.decl(f).path().as_str();
     match fam {
         Family::Python => py_resolve(p, f, &imp.module),
         Family::Ecma => js_resolve(p, f, &imp.module),
@@ -936,7 +936,7 @@ pub fn bindings(
                 let name = imp.alias.clone().unwrap_or_else(|| match t {
                     Target::Module(fs) => fs
                         .first()
-                        .and_then(|&i| p.files[i].package.clone())
+                        .and_then(|&i| p.files.decl(i).package().clone())
                         .unwrap_or_else(|| go_last(&imp.module)),
                     _ => go_last(&imp.module),
                 });
@@ -1040,15 +1040,15 @@ pub fn scope_lookup(
 ) -> Option<Target> {
     match fam {
         Family::Go => {
-            let pkg = p.files[f].package.clone().unwrap_or_default();
-            let dir = dir_of(&p.files[f].path).to_string();
+            let pkg = p.files.decl(f).package().clone().unwrap_or_default();
+            let dir = dir_of(p.files.decl(f).path()).to_string();
             let files: Vec<usize> =
                 p.go_pkg_files(&(dir, pkg)).iter().copied().filter(|&g| g != f).collect();
             p.top_in(&files, name).map(Target::Def)
         }
         Family::Jvm | Family::CSharp | Family::Php => {
             let mut spaces: Vec<String> = Vec::new();
-            let defs = &p.files[f].defs;
+            let defs = &p.files.decl(f).defs();
             let mut cur = d;
             while let Some(x) = cur {
                 if defs[x].kind == crate::facts::DefKind::Namespace {
@@ -1067,7 +1067,7 @@ pub fn scope_lookup(
                 }
                 cur = defs[x].parent;
             }
-            if let Some(pkg) = &p.files[f].package {
+            if let Some(pkg) = &p.files.decl(f).package() {
                 let pkg = pkg.replace('\\', ".");
                 let mut parts: Vec<&str> = pkg.split('.').collect();
                 while !parts.is_empty() {
@@ -1081,7 +1081,7 @@ pub fn scope_lookup(
             spaces.push(String::new());
             // (PHP: from a namespace, only a function or a constant falls back
             // to the global one, never a class: spec 18-namespaces.md)
-            let namespaced_php = fam == Family::Php && p.files[f].package.is_some();
+            let namespaced_php = fam == Family::Php && p.files.decl(f).package().is_some();
             for ns in spaces {
                 let key = if ns.is_empty() { name.to_string() } else { format!("{ns}.{name}") };
                 let found = p
@@ -1102,7 +1102,7 @@ pub fn scope_lookup(
         }
         Family::Ruby => {
             // lexical nesting, then the top level
-            let defs = &p.files[f].defs;
+            let defs = &p.files.decl(f).defs();
             let mut prefixes = Vec::new();
             let mut cur = d;
             while let Some(x) = cur {

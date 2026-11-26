@@ -27,6 +27,7 @@ use crate::graph::ids::slug;
 use crate::lang::Lang;
 use crate::resources::ResourceKind;
 
+mod decl;
 mod http;
 mod modules;
 pub mod reuse;
@@ -1337,6 +1338,56 @@ type KeptMemo<K, V> = RefCell<HashMap<K, (V, Rc<trace::Frame>)>>;
 /// Per file: the lexical children of each definition by bare name.
 type Children = Vec<HashMap<usize, HashMap<String, Vec<usize>>>>;
 
+/// What of a file's facts a read of its declarations sees
+/// (`trace::part::DECL`): no function body's content. Every field it hands
+/// out is in `decl.rs`'s print.
+#[derive(Clone, Copy)]
+pub struct DeclView<'a>(&'a FileFacts);
+
+impl<'a> DeclView<'a> {
+    pub fn defs(&self) -> &'a [Def] {
+        &self.0.defs
+    }
+    pub fn path(&self) -> &'a String {
+        &self.0.path
+    }
+    pub fn lang(&self) -> Option<Lang> {
+        self.0.lang
+    }
+    pub fn package(&self) -> &'a Option<String> {
+        &self.0.package
+    }
+    pub fn imports(&self) -> &'a [crate::facts::ImportFact] {
+        &self.0.imports
+    }
+    pub fn exports(&self) -> &'a [(String, String)] {
+        &self.0.exports
+    }
+    pub fn ns_aliases(&self) -> &'a [(String, Vec<String>)] {
+        &self.0.ns_aliases
+    }
+    pub fn shared_examples(&self) -> &'a [(String, u32, u32)] {
+        &self.0.shared_examples
+    }
+    pub fn inline_namespaces(&self) -> &'a [usize] {
+        &self.0.inline_namespaces
+    }
+    /// The references of its declarations, in order (`decl::is_decl_ref`).
+    pub fn decl_refs(&self) -> impl Iterator<Item = &'a RefFact> {
+        self.0.refs.iter().filter(|r| decl::is_decl_ref(r))
+    }
+}
+
+impl<'a> Traced<&'a [FileFacts]> {
+    /// File `i`'s declarations, recorded as a read of those only.
+    #[track_caller]
+    pub fn decl(&self, i: usize) -> DeclView<'a> {
+        self.note_decl(i);
+        let files: &'a [FileFacts] = self.raw();
+        DeclView(&files[i])
+    }
+}
+
 pub struct Project<'a> {
     pub root: PathBuf,
     pub files: Traced<&'a [FileFacts]>,
@@ -1569,10 +1620,10 @@ impl<'a> Project<'a> {
                 })
                 .collect(),
             repos: repos.to_vec(),
-            hubs: Traced::new(&asm.hubs, tr()),
-            def_ids: Traced::new(&asm.def_ids, tr()),
-            top: Traced::new(Vec::new(), tr()),
-            children: Traced::new(Vec::new(), tr()),
+            hubs: Traced::new_decl(&asm.hubs, tr()),
+            def_ids: Traced::new_decl(&asm.def_ids, tr()),
+            top: Traced::new_decl(Vec::new(), tr()),
+            children: Traced::new_decl(Vec::new(), tr()),
             by_name: Named::new("by_name", tr()),
             extensions: Named::new("extensions", tr()),
             by_qual: Named::new("by_qual", tr()),
@@ -1581,7 +1632,7 @@ impl<'a> Project<'a> {
             pkg_files: Named::new("pkg_files", tr()),
             owner_methods: Named::new("owner_methods", tr()),
             modsys: modules::ModuleSystems::default(),
-            scopes: Traced::new(Vec::new(), tr()),
+            scopes: Traced::new_decl(Vec::new(), tr()),
             exts: RefCell::new(Vec::new()),
             ext_index: RefCell::new(HashMap::new()),
             bases_memo: RefCell::new(HashMap::new()),
@@ -1731,7 +1782,7 @@ impl<'a> Project<'a> {
     fn rust_public(&self, g: usize) -> Vec<usize> {
         let mut out = Vec::new();
         let s = &self.scopes[g];
-        for (i, imp) in self.files[g].imports.iter().enumerate() {
+        for (i, imp) in self.files.decl(g).imports().iter().enumerate() {
             if !imp.public {
                 continue;
             }
@@ -1760,14 +1811,14 @@ impl<'a> Project<'a> {
     fn passes_on(&self, g: usize) -> Vec<usize> {
         let mut out = Vec::new();
         let s = &self.scopes[g];
-        for (i, imp) in self.files[g].imports.iter().enumerate() {
+        for (i, imp) in self.files.decl(g).imports().iter().enumerate() {
             if imp.form == ImportForm::ReExport {
                 if let Some(ModRes::Target(Target::Module(fs))) = s.modules.get(i) {
                     out.extend(fs.iter().copied());
                 }
             }
         }
-        for (local, _) in &self.files[g].exports {
+        for (local, _) in self.files.decl(g).exports() {
             if let Some((b, _)) = s.bindings.get(local) {
                 match self.eval(b, 2) {
                     Some(Target::Module(fs)) => out.extend(fs),
@@ -1937,6 +1988,24 @@ impl<'a> Project<'a> {
     fn file_print(&self, f: usize, content: u64) -> u64 {
         let mut h = trace::Fnv::new();
         h.write(&content.to_le_bytes());
+        self.scope_print(&mut h, f, &|b| b);
+        h.0
+    }
+
+    /// What a read of file `f`'s declarations depends on (`trace::part::DECL`):
+    /// its declarations with their positions as ranks (`decl.rs`), its scope
+    /// (a block `use`'s range by the same ranks), its node ids and its hub.
+    fn decl_print(&self, f: usize, content: u64) -> u64 {
+        let (facts, ranks) = decl::print(&self.files.raw()[f], content);
+        let mut h = trace::Fnv::new();
+        h.write(&facts.to_le_bytes());
+        self.scope_print(&mut h, f, &|b| ranks.byte(b));
+        h.0
+    }
+
+    /// The scope of file `f`, its node ids and its hub, with the bytes of a
+    /// block `use` as `at` gives them.
+    fn scope_print(&self, h: &mut trace::Fnv, f: usize, at: &dyn Fn(usize) -> usize) {
         let target = |t: &Target| match t {
             Target::Ext(e, rest) => {
                 let ext = &self.exts.borrow()[*e];
@@ -1956,7 +2025,7 @@ impl<'a> Project<'a> {
             h.sep();
         }
         for (lo, hi, n, b, i) in &scope.scoped {
-            h.write(format!("s{lo}-{hi}:{n}={}#{i}", bind(b)).as_bytes());
+            h.write(format!("s{}-{}:{n}={}#{i}", at(*lo), at(*hi), bind(b)).as_bytes());
             h.sep();
         }
         for (t, i) in &scope.stars {
@@ -1977,7 +2046,6 @@ impl<'a> Project<'a> {
         h.write(format!("{imported:?}").as_bytes());
         h.write(format!("{:?}", self.def_ids.raw()[f]).as_bytes());
         h.write(self.hubs.raw()[f].as_bytes());
-        h.0
     }
 
     /// No reference being resolved: the per-reference state of the walk as
@@ -2075,7 +2143,7 @@ impl<'a> Project<'a> {
         }
         shadows.retain(|_, v| v.len() > 1);
         for (key, v) in shadows.iter_mut() {
-            v.sort_by_key(|&li| (self.files[key.0].locals[li].byte, li));
+            v.sort_by_key(|&li| (self.local_at(key.0, li).byte, li));
             // (the one the index names is the first declared)
             locals.insert(key.clone(), v[0]);
         }
@@ -2131,8 +2199,8 @@ impl<'a> Project<'a> {
             // (the reader writes the `Self` type as the word for the object)
             if (one == "Self" || one == "self")
                 && self.family[f] == Some(Family::Rust)
-                && self.files[f].defs[x].kind.is_class_like()
-                && self.files[f].defs[x].owner.is_none()
+                && self.files.decl(f).defs()[x].kind.is_class_like()
+                && self.files.decl(f).defs()[x].owner.is_none()
             {
                 return Some(((f, x), Confidence::Extracted));
             }
@@ -2219,7 +2287,7 @@ impl<'a> Project<'a> {
     /// (C#, Java), so that a count of them says which callable is meant.
     fn writes_type_arguments(&self, c: DefRef) -> bool {
         use crate::lang::Lang;
-        matches!(self.files[c.0].lang, Some(Lang::CSharp | Lang::Java))
+        matches!(self.files.decl(c.0).lang(), Some(Lang::CSharp | Lang::Java))
     }
 
     /// Whether two callables take the same parameters as written: they
@@ -2240,7 +2308,7 @@ impl<'a> Project<'a> {
     /// engine keeps as a scope only (`LanguageModule::scope_only`).
     fn in_extension_block(&self, c: DefRef) -> bool {
         self.def(c).parent.is_some_and(|p| {
-            let block = &self.files[c.0].defs[p];
+            let block = &self.files.decl(c.0).defs()[p];
             block.block && block.name == "extension"
         })
     }
@@ -2321,7 +2389,7 @@ impl<'a> Project<'a> {
             let literal = !matches!(a.kind, crate::facts::Arg::Path(_));
             let ty = if literal
                 && (matches!(self.family[c.0], Some(Family::CSharp | Family::C))
-                    || self.files[c.0].lang == Some(crate::lang::Lang::Java))
+                    || self.files.decl(c.0).lang() == Some(crate::lang::Lang::Java))
                 && param.ty.is_empty()
                 && !w.is_empty()
                 && w.chars().all(char::is_alphanumeric)
@@ -2354,7 +2422,7 @@ impl<'a> Project<'a> {
                         t.chars().filter(|ch| !ch.is_whitespace()).collect::<String>()
                     };
                     let theirs = norm(param.written.trim_end_matches('?'));
-                    let given = self.files[f].defs[di]
+                    let given = self.files.decl(f).defs()[di]
                         .plist
                         .iter()
                         .find(|x| x.name == *name)
@@ -2399,7 +2467,7 @@ impl<'a> Project<'a> {
         // which phase 1 of overload resolution takes first (JLS 15.12.2.2);
         // of the primitives an integer literal widens to, the narrowest is
         // the most specific (15.12.2.5: int <: long <: float <: double)
-        let java = self.files[c.0].lang == Some(crate::lang::Lang::Java);
+        let java = self.files.decl(c.0).lang() == Some(crate::lang::Lang::Java);
         let unboxed = java
             && matches!(
                 name.as_str(),
@@ -2633,15 +2701,17 @@ impl<'a> Project<'a> {
     fn has_prototype_members(&self, c: DefRef) -> bool {
         let name = self.def(c).name.as_str();
         self.def(c).object.is_none()
-            && self.files[c.0]
-                .defs
+            && self
+                .files
+                .decl(c.0)
+                .defs()
                 .iter()
                 .any(|x| x.kind.is_callable() && x.object.as_deref() == Some(name))
     }
 
     /// Whether a Python method is a `@property` (or `@cached_property`).
     fn is_property(&self, c: DefRef) -> bool {
-        self.files[c.0].refs.iter().any(|r| {
+        self.files.decl(c.0).decl_refs().any(|r| {
             r.from_def == Some(c.1)
                 && r.kind == RefKind::Decorator
                 && r.path
@@ -2652,7 +2722,7 @@ impl<'a> Project<'a> {
 
     /// Whether a definition carries `@Deprecated` / `[Obsolete]` / `#[deprecated]`.
     fn deprecated(&self, c: DefRef) -> bool {
-        self.files[c.0].refs.iter().any(|r| {
+        self.files.decl(c.0).decl_refs().any(|r| {
             r.from_def == Some(c.1)
                 && r.kind == RefKind::Decorator
                 && r.path
@@ -2684,7 +2754,7 @@ impl<'a> Project<'a> {
         // (`extension Session { func request(_ endpoint: Endpoint) }`)
         // (never for a function declared in a function: its overloads are
         // its own scope's)
-        let local = d.parent.is_some_and(|p| self.files[m.0].defs[p].kind.is_callable());
+        let local = d.parent.is_some_and(|p| self.files.decl(m.0).defs()[p].kind.is_callable());
         if self.family[m.0] == Some(Family::Swift) && !local {
             if let Some(c) = self.class_of(m.0, Some(m.1)) {
                 for x in self.members(c, &d.name) {
@@ -2976,7 +3046,7 @@ impl<'a> Project<'a> {
             };
             return self.is_type_like(t).then_some((t, true));
         }
-        let declared = self.files[r.0].refs.iter().find(|x| {
+        let declared = self.files.decl(r.0).decl_refs().find(|x| {
             x.from_def == Some(r.1) && x.kind == RefKind::Type && x.context == "return_type"
         });
         let Some(rt) = declared else {
@@ -3022,10 +3092,10 @@ impl<'a> Project<'a> {
         {
             return None;
         }
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
                 let mut li = self.local_in_force(f, x, name, li);
                 // a redeclaration's own value names the declaration before
                 // it (`let agent = agent.clone();`)
@@ -3058,7 +3128,7 @@ impl<'a> Project<'a> {
 
     /// The declaration of the name before local `li` in the definition.
     fn declared_before(&self, f: usize, x: usize, name: &str, li: usize) -> Option<usize> {
-        let all = self.shadows.get(&(f, x, name.to_string()))?;
+        let all = self.shadow_list(&(f, x, name.to_string()))?;
         let at = all.iter().position(|&i| i == li)?;
         at.checked_sub(1).map(|i| all[i])
     }
@@ -3089,7 +3159,7 @@ impl<'a> Project<'a> {
         // a local's type is the same whatever use asks for it: its
         // value's path is what is called there (`x = f()` -> `f`),
         // a written type is not
-        let value = !self.files[f].locals[li].declared;
+        let value = !self.local_at(f, li).declared;
         // (`if let Some(r) = opt` beside the parameter `opt`: the
         // value is that parameter, which nothing calls)
         let held = value && self.holds_declared_local(f, x, li);
@@ -3114,7 +3184,7 @@ impl<'a> Project<'a> {
         if self.shadows.is_empty() {
             return li;
         }
-        let Some(all) = self.shadows.get(&(f, x, name.to_string())) else { return li };
+        let Some(all) = self.shadow_list(&(f, x, name.to_string())) else { return li };
         let Some((_, at)) = (*self.site.borrow()).filter(|(sf, _)| *sf == f) else {
             return li;
         };
@@ -3138,13 +3208,13 @@ impl<'a> Project<'a> {
     /// Ruby: whether every local `name` of the definitions around is first
     /// assigned after `byte` (a use there is no use of the local).
     fn ruby_local_starts_after(&self, f: usize, d: Option<usize>, name: &str, byte: usize) -> bool {
-        if self.files[f].lang != Some(crate::lang::Lang::Ruby) {
+        if self.files.decl(f).lang() != Some(crate::lang::Lang::Ruby) {
             return false;
         }
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
                 return self.first_declared(f, x, name, li) > byte;
             }
             cur = defs[x].parent;
@@ -3153,16 +3223,16 @@ impl<'a> Project<'a> {
     }
 
     fn first_declared(&self, f: usize, x: usize, name: &str, li: usize) -> usize {
-        match self.shadows.get(&(f, x, name.to_string())) {
-            Some(all) => self.files[f].locals[all[0]].byte,
-            None => self.files[f].locals[li].byte,
+        match self.shadow_list(&(f, x, name.to_string())) {
+            Some(all) => self.local_at(f, all[0]).byte,
+            None => self.local_at(f, li).byte,
         }
     }
 
     /// Whether local `li` is what a binding opens out of another local that
     /// is declared with its type (`[opt, "[?]"]`, `opt: Option<Repo>`).
     fn holds_declared_local(&self, f: usize, x: usize, li: usize) -> bool {
-        let l = &self.files[f].locals[li];
+        let l = &self.local_at(f, li);
         // (or is that local under another name: the `it` of `r.let { … }`)
         let head = match l.path.as_slice() {
             [head] => head,
@@ -3172,11 +3242,11 @@ impl<'a> Project<'a> {
         if *head == l.name {
             return false;
         }
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = Some(x);
         while let Some(y) = cur {
-            if let Some(&other) = self.locals.get(&(f, y, head.clone())) {
-                return other != li && self.files[f].locals[other].declared;
+            if let Some(&other) = self.local_index(&(f, y, head.clone())) {
+                return other != li && self.local_at(f, other).declared;
             }
             cur = defs[y].parent;
         }
@@ -3191,7 +3261,7 @@ impl<'a> Project<'a> {
         li: usize,
         name: &str,
     ) -> Option<(DefRef, Confidence)> {
-        let l = &self.files[f].locals[li];
+        let l = &self.local_at(f, li);
         if l.path.is_empty() {
             // pytest hands a test the result of the fixture its parameter
             // names (`def test_x(runner):` beside `@pytest.fixture def runner()`)
@@ -3229,27 +3299,29 @@ impl<'a> Project<'a> {
     /// of the nearest `conftest.py` in its directory or one above. A fixture
     /// is a top-level function under `@pytest.fixture` / `@fixture`.
     fn fixture_type(&self, f: usize, x: usize, name: &str) -> Option<DefRef> {
-        if self.family[f] != Some(Family::Python) || !self.files[f].defs[x].kind.is_callable() {
+        if self.family[f] != Some(Family::Python)
+            || !self.files.decl(f).defs()[x].kind.is_callable()
+        {
             return None;
         }
         let is_fixture = |c: DefRef| {
             let d = self.def(c);
             d.kind.is_callable()
                 && d.parent.is_none()
-                && self.files[c.0].refs.iter().any(|r| {
+                && self.files.decl(c.0).decl_refs().any(|r| {
                     r.from_def == Some(c.1)
                         && r.kind == RefKind::Decorator
                         && r.path.last().is_some_and(|n| n == "fixture")
                 })
         };
         let dir = |p: &str| p.rfind('/').map(|i| p[..=i].to_string()).unwrap_or_default();
-        let here = dir(&self.files[f].path);
+        let here = dir(self.files.decl(f).path());
         let mut best: Option<(usize, DefRef)> = None;
         for &c in self.by_name.get(name).into_iter().flatten() {
             if self.family[c.0] != Some(Family::Python) || !is_fixture(c) {
                 continue;
             }
-            let path = &self.files[c.0].path;
+            let path = &self.files.decl(c.0).path();
             // the file's own fixture wins over any conftest's
             let rank = if c.0 == f {
                 usize::MAX
@@ -3279,7 +3351,7 @@ impl<'a> Project<'a> {
         *self.recv.borrow_mut() = before;
         match callee {
             Some((Target::Def(c), _)) if self.def(c).kind.is_callable() => {
-                let ret = self.files[c.0].refs.iter().find(|x| {
+                let ret = self.files.decl(c.0).decl_refs().find(|x| {
                     x.from_def == Some(c.1) && x.kind == RefKind::Type && x.context == "return_type"
                 })?;
                 // it returns its own type parameter, not something of it
@@ -3360,11 +3432,11 @@ impl<'a> Project<'a> {
             }
         }
         if let [name] = path {
-            let defs = &self.files[f].defs;
+            let defs = &self.files.decl(f).defs();
             let mut cur = d;
             while let Some(x) = cur {
-                if let Some(&li) = self.locals.get(&(f, x, name.clone())) {
-                    let l = &self.files[f].locals[li];
+                if let Some(&li) = self.local_index(&(f, x, name.clone())) {
+                    let l = &self.local_at(f, li);
                     // a parameter's is on the definition's parameter list
                     let param = defs[x].plist.iter().find(|p| p.name == *name);
                     let elem = l.elem.clone().or_else(|| param.and_then(|p| p.elem.clone()));
@@ -3502,7 +3574,7 @@ impl<'a> Project<'a> {
         if !def.kind.is_callable() {
             return None;
         }
-        let ret = self.files[c.0].refs.iter().find(|x| {
+        let ret = self.files.decl(c.0).decl_refs().find(|x| {
             x.from_def == Some(c.1) && x.kind == RefKind::Type && x.context == "return_type"
         })?;
         let [t] = ret.path.as_slice() else { return None };
@@ -3527,7 +3599,7 @@ impl<'a> Project<'a> {
     /// Whether callable `c` declares that it returns a type parameter its
     /// type binds to itself (`fun tag(x: Any): T` in `Builder<T : Builder<T>>`).
     fn returns_self_param(&self, c: DefRef) -> bool {
-        let ret = self.files[c.0].refs.iter().find(|x| {
+        let ret = self.files.decl(c.0).decl_refs().find(|x| {
             x.from_def == Some(c.1) && x.kind == RefKind::Type && x.context == "return_type"
         });
         let Some(ret) = ret.filter(|r| r.path.len() == 1) else { return false };
@@ -3648,11 +3720,11 @@ impl<'a> Project<'a> {
     /// A parameter or local whose type is not known: it shadows every outer
     /// name, so nothing is resolved through it.
     fn is_untyped_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                return self.files[f].locals[li].path.is_empty();
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                return self.local_at(f, li).path.is_empty();
             }
             cur = defs[x].parent;
         }
@@ -3662,7 +3734,7 @@ impl<'a> Project<'a> {
     /// `this.name` inside a function assigned to an object: another function
     /// of the same file assigned to that object.
     fn object_member(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         let obj = loop {
             let x = cur?;
@@ -3708,13 +3780,13 @@ impl<'a> Project<'a> {
                 .chain(self.by_qual.get(&key).into_iter().flatten().copied())
                 .collect();
             for b in blocks {
-                let inline = &self.files[b.0].inline_namespaces;
+                let inline = &self.files.decl(b.0).inline_namespaces();
                 if inline.is_empty() {
                     continue;
                 }
                 for kids in self.children[b.0].get(&b.1).into_iter().flat_map(|m| m.values()) {
                     for &k in kids {
-                        let d = &self.files[b.0].defs[k];
+                        let d = &self.files.decl(b.0).defs()[k];
                         if d.kind == DefKind::Namespace && inline.contains(&d.start_byte) {
                             let inner = self.children[b.0].get(&k).and_then(|m| m.get(name));
                             out.extend(inner.into_iter().flatten().map(|&x| (b.0, x)));
@@ -3833,7 +3905,7 @@ impl<'a> Project<'a> {
     /// JS `this.lookup()` in an ES5 constructor `function View() {…}`: the
     /// function assigned to `View.prototype.lookup` (`Def::object` `View`).
     fn constructor_member(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
             if defs[x].kind.is_callable() && defs[x].object.is_none() {
@@ -3863,7 +3935,7 @@ impl<'a> Project<'a> {
         let of = (*self.cur.borrow())
             .filter(|(cf, _)| *cf == f)
             .and_then(|(cf, ri)| self.files[cf].refs[ri].this_of.clone())?;
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let named = |object: &str| -> Vec<DefRef> {
             defs.iter()
                 .enumerate()
@@ -3995,11 +4067,11 @@ impl<'a> Project<'a> {
 
     /// The path a local's declaration gives it (its type as written).
     fn local_path(&self, f: usize, d: Option<usize>, name: &str) -> Option<&Vec<String>> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                return Some(&self.files[f].locals[li].path);
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                return Some(&self.local_at(f, li).path);
             }
             cur = defs[x].parent;
         }
@@ -4009,11 +4081,11 @@ impl<'a> Project<'a> {
     /// The first name of the type a local's declaration writes (C, C++:
     /// `std` of `std::promise<void> release;`).
     fn local_written_head(&self, f: usize, d: Option<usize>, name: &str) -> Option<&str> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                return self.files[f].locals[li].written_head.as_deref();
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                return self.local_at(f, li).written_head.as_deref();
             }
             cur = defs[x].parent;
         }
@@ -4021,11 +4093,11 @@ impl<'a> Project<'a> {
     }
 
     fn is_external_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                let l = &self.files[f].locals[li];
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                let l = &self.local_at(f, li);
                 let head = l.path.first().map(String::as_str).unwrap_or("");
                 if head.is_empty() || matches!(head, "self" | "super" | "()") {
                     return false;
@@ -4041,11 +4113,11 @@ impl<'a> Project<'a> {
     /// project (`$p = new \ReflectionProperty(…)`, `let a: SocketAddr`): a
     /// library's type the file imports by no name the engine reads.
     fn is_outside_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                let l = &self.files[f].locals[li];
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                let l = &self.local_at(f, li);
                 // (PHP `new \\ReflectionProperty(…)`: the global namespace's
                 // `\\` is no part of the name)
                 let start = usize::from(l.path.first().is_some_and(|h| h == "\\"));
@@ -4075,24 +4147,24 @@ impl<'a> Project<'a> {
         let held: Vec<String>;
         let mut recv = recv;
         if let [name] = recv {
-            let defs = &self.files[f].defs;
+            let defs = &self.files.decl(f).defs();
             let mut cur = d;
             let mut local = None;
             while let Some(x) = cur {
-                if let Some(&li) = self.locals.get(&(f, x, name.clone())) {
+                if let Some(&li) = self.local_index(&(f, x, name.clone())) {
                     local = Some(self.local_in_force(f, x, name, li));
                     break;
                 }
                 cur = defs[x].parent;
             }
             match local {
-                Some(li) if !self.files[f].locals[li].declared => {
-                    held = self.files[f].locals[li].path.clone();
+                Some(li) if !self.local_at(f, li).declared => {
+                    held = self.local_at(f, li).path.clone();
                     recv = &held;
                 }
                 // (`var buf bytes.Buffer`: declared with a library's type)
                 Some(li) => {
-                    let head = self.files[f].locals[li].path.first();
+                    let head = self.local_at(f, li).path.first();
                     // (written through an import, or a name the project has
                     // nothing of: `bytes.Buffer`, `Buffer`)
                     return head.is_some_and(|h| {
@@ -4144,11 +4216,11 @@ impl<'a> Project<'a> {
     /// name (`let agent = agent();`: the call is the function's; a longer
     /// initializer is `own_initializer`'s).
     fn local_keeps_outer(&self, f: usize, d: Option<usize>, name: &str, called: bool) -> bool {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                let l = &self.files[f].locals[li];
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                let l = &self.local_at(f, li);
                 // (a use written before the local is declared is no use of
                 // it: `stream(…)` above `val stream = response.body()`)
                 // (where a declaration is what makes a local: an assignment
@@ -4175,7 +4247,8 @@ impl<'a> Project<'a> {
                 // (`baseUrl(…)` beside `String baseUrl`: only where methods
                 // and variables are names of two kinds; anywhere else the
                 // call is of the local, whatever its type says)
-                let two_kinds = matches!(self.files[f].lang, Some(Lang::Java | Lang::Kotlin));
+                let two_kinds =
+                    matches!(self.files.decl(f).lang(), Some(Lang::Java | Lang::Kotlin));
                 return l.assigned
                     || before
                     || (called
@@ -4195,7 +4268,7 @@ impl<'a> Project<'a> {
         d: Option<usize>,
         name: &str,
     ) -> Option<(usize, Option<Vec<String>>)> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         let mut last = None;
         while let Some(x) = cur {
@@ -4232,11 +4305,11 @@ impl<'a> Project<'a> {
     /// see itself, so there the head is the outer name.
     fn own_initializer(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
         let Some(name) = path.first() else { return false };
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.clone())) {
-                let l = &self.files[f].locals[li];
+            if let Some(&li) = self.local_index(&(f, x, name.clone())) {
+                let l = &self.local_at(f, li);
                 // the whole value, or a part of its chain (`tls::Config::builder()`
                 // in `let tls = tls::Config::builder().build()`)
                 return l.path.len() > 1
@@ -4262,11 +4335,11 @@ impl<'a> Project<'a> {
 
     /// Whether the name is a local or parameter declared with its type.
     fn declared_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                let l = &self.files[f].locals[self.local_in_force(f, x, name, li)];
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                let l = self.local_at(f, self.local_in_force(f, x, name, li));
                 return l.declared && !l.assigned;
             }
             cur = defs[x].parent;
@@ -4276,11 +4349,11 @@ impl<'a> Project<'a> {
 
     /// A "local" recorded from a plain assignment that declares nothing.
     fn local_is_hint(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                return self.files[f].locals[li].assigned;
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                return self.local_at(f, li).assigned;
             }
             cur = defs[x].parent;
         }
@@ -4289,15 +4362,15 @@ impl<'a> Project<'a> {
 
     /// Whether a name is a parameter or local of the enclosing definitions.
     fn is_local_name(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         // (one declared in a block is a local inside the block: `{ let count
         // = 5 } return count` names the outer `count`)
         let at = (*self.site.borrow()).filter(|(sf, _)| *sf == f).map(|(_, at)| at);
         while let Some(x) = cur {
             let key = (f, x, name.to_string());
-            if let Some(&li) = self.locals.get(&key) {
-                let all = self.shadows.get(&key);
+            if let Some(&li) = self.local_index(&key) {
+                let all = self.shadow_list(&key);
                 let mut each = all.into_iter().flatten().copied().chain(std::iter::once(li));
                 let locals = &self.files[f].locals;
                 if at.is_none_or(|at| each.any(|i| locals[i].until == 0 || at < locals[i].until)) {
@@ -4317,8 +4390,10 @@ impl<'a> Project<'a> {
         // TypeScript: the interfaces of one name in one scope are one
         // interface (declaration merging)
         if self.family[c.0] == Some(Family::Ecma) && def.kind == DefKind::Interface {
-            return self.files[c.0]
-                .defs
+            return self
+                .files
+                .decl(c.0)
+                .defs()
                 .iter()
                 .enumerate()
                 .filter(|(i, d)| {
@@ -4385,9 +4460,9 @@ impl<'a> Project<'a> {
     /// method that assigns it (`self.stream = stream`, `stream: A | B`).
     fn field_alts(&self, c: DefRef, name: &str) -> Vec<DefRef> {
         let Some((fi, li)) = self.field_of(c, name) else { return Vec::new() };
-        let l = &self.files[fi].locals[li];
+        let l = &self.local_at(fi, li);
         let (Some(m), [param]) = (l.from_def, l.path.as_slice()) else { return Vec::new() };
-        let Some(p) = self.files[fi].defs[m].plist.iter().find(|p| p.name == *param) else {
+        let Some(p) = self.files.decl(fi).defs()[m].plist.iter().find(|p| p.name == *param) else {
             return Vec::new();
         };
         p.alts
@@ -4400,7 +4475,7 @@ impl<'a> Project<'a> {
     /// The type of a field of a type (through its bases).
     fn field_type(&self, c: DefRef, name: &str, depth: usize) -> Option<(DefRef, Confidence)> {
         if let Some((fi, li)) = self.field_of(c, name) {
-            let l = &self.files[fi].locals[li];
+            let l = &self.local_at(fi, li);
             let t = self.type_of_path(fi, l.from_def, &l.path, l.declared)?;
             let conf = if l.declared { Confidence::Extracted } else { Confidence::Inferred };
             return Some((t, conf));
@@ -4418,16 +4493,49 @@ impl<'a> Project<'a> {
         if !matches!(fam, Family::Jvm | Family::CSharp | Family::Php) {
             return None;
         }
-        let d = &self.files[fi].defs[di];
+        let d = &self.files.decl(fi).defs()[di];
         let qual = d.qualname.replace('\\', ".").replace("::", ".");
-        match &self.files[fi].package {
+        match &self.files.decl(fi).package() {
             Some(p) => Some(format!("{}.{}", p.replace('\\', "."), qual)),
             None => Some(qual),
         }
     }
 
+    /// Whether the locals of definition `x` of file `f` are declarations
+    /// (a class's, a namespace's: in `decl.rs`'s print) and not a function
+    /// body's content.
+    fn decl_scope(&self, f: usize, x: usize) -> bool {
+        self.files.raw()[f].defs.get(x).is_some_and(decl::holds_declarations)
+    }
+
+    /// Local `li` of file `f`: a read of the file's declarations when the
+    /// local is one of a declaration scope, else of the whole file.
+    #[track_caller]
+    fn local_at(&self, f: usize, li: usize) -> &crate::facts::Local {
+        let l = &self.files.raw()[f].locals[li];
+        if l.from_def.is_some_and(|x| self.decl_scope(f, x)) {
+            self.files.note_decl(f);
+        } else {
+            self.trace.file(f);
+        }
+        l
+    }
+
+    /// The local of a name in definition `k.1` of file `k.0` (`locals`).
+    #[track_caller]
+    fn local_index(&self, k: &(usize, usize, String)) -> Option<&usize> {
+        self.locals.get_as(k, self.decl_scope(k.0, k.1))
+    }
+
+    /// The locals of one name in one definition, where there are several.
+    #[track_caller]
+    fn shadow_list(&self, k: &(usize, usize, String)) -> Option<&Vec<usize>> {
+        self.shadows.get_as(k, self.decl_scope(k.0, k.1))
+    }
+
+    #[track_caller]
     pub fn def(&self, r: DefRef) -> &Def {
-        &self.files[r.0].defs[r.1]
+        &self.files.decl(r.0).defs()[r.1]
     }
 
     fn node_id(&self, r: DefRef) -> Option<&str> {
@@ -4449,7 +4557,7 @@ impl<'a> Project<'a> {
         let mut s = Scope::default();
         let Some(fam) = self.family[f] else { return s };
         let _asking = Asking(&self.asking, self.asking.replace(Some(f)));
-        for (i, imp) in self.files[f].imports.iter().enumerate() {
+        for (i, imp) in self.files.decl(f).imports().iter().enumerate() {
             let res = modules::resolve_import(self, fam, f, imp);
             let target = match &res {
                 ModRes::Target(t) => Some(t.clone()),
@@ -4612,7 +4720,9 @@ impl<'a> Project<'a> {
     /// package directory, same Rust crate, or anywhere for C++ and Swift.
     fn owner_scope_matches(&self, c: DefRef, m: DefRef) -> bool {
         match self.family[c.0] {
-            Some(Family::Go) => dir_of(&self.files[c.0].path) == dir_of(&self.files[m.0].path),
+            Some(Family::Go) => {
+                dir_of(self.files.decl(c.0).path()) == dir_of(self.files.decl(m.0).path())
+            }
             Some(Family::Rust) => {
                 if self.modsys.crate_of(c.0) != self.modsys.crate_of(m.0) {
                     return false;
@@ -4651,7 +4761,7 @@ impl<'a> Project<'a> {
         let others: Vec<usize> = named
             .iter()
             .copied()
-            .filter(|&i| i != c.1 && self.files[c.0].defs[i].kind.is_class_like())
+            .filter(|&i| i != c.1 && self.files.decl(c.0).defs()[i].kind.is_class_like())
             .collect();
         match others.as_slice() {
             [one] => Some((c.0, *one)),
@@ -4661,7 +4771,7 @@ impl<'a> Project<'a> {
 
     fn bases(&self, c: DefRef) -> Vec<DefRef> {
         if let Some((b, frame)) = self.bases_memo.borrow().get(&c) {
-            self.trace.file(c.0);
+            self.files.note_decl(c.0);
             self.trace.absorb(frame);
             return b.clone();
         }
@@ -4713,11 +4823,11 @@ impl<'a> Project<'a> {
     /// The last names of the bases a type writes that the project does not
     /// define.
     fn outside_bases(&self, c: DefRef) -> Vec<&str> {
-        let f = &self.files[c.0];
         let cname = &self.def(c).name;
         let outer = self.def(c).parent;
-        f.refs
-            .iter()
+        self.files
+            .decl(c.0)
+            .decl_refs()
             .filter(|r| {
                 let mine =
                     r.from_def == Some(c.1) || r.from_owner.as_ref().is_some_and(|o| o == cname);
@@ -4746,9 +4856,8 @@ impl<'a> Project<'a> {
     /// The bases one declaration of a type writes.
     fn written_bases(&self, c: DefRef) -> Vec<DefRef> {
         let mut out: Vec<(DefRef, RefKind)> = Vec::new();
-        let f = &self.files[c.0];
         let cname = &self.def(c).name;
-        for r in &f.refs {
+        for r in self.files.decl(c.0).decl_refs() {
             let mine = r.from_def == Some(c.1) || r.from_owner.as_ref().is_some_and(|o| o == cname);
             if !mine
                 || !matches!(
@@ -4787,7 +4896,7 @@ impl<'a> Project<'a> {
         // its modules from the last included, then the superclass
         // (`include_modules_at`); a PHP trait's methods come before the
         // parent class's (spec 16-traits.md)
-        match self.files[c.0].lang {
+        match self.files.decl(c.0).lang() {
             Some(crate::lang::Lang::Ruby) => {
                 let (mixed, rest): (Vec<_>, Vec<_>) =
                     out.into_iter().partition(|(_, k)| *k == RefKind::MixesIn);
@@ -4884,7 +4993,7 @@ impl<'a> Project<'a> {
             return None;
         }
         let owner = self.def(c).name.as_str();
-        let found = self.files[c.0].defs.iter().enumerate().filter(|(_, d)| {
+        let found = self.files.decl(c.0).defs().iter().enumerate().filter(|(_, d)| {
             d.name == name && d.kind.is_callable() && d.object.as_deref() == Some(owner)
         });
         self.best(found.map(|(i, _)| (c.0, i)))
@@ -4895,15 +5004,17 @@ impl<'a> Project<'a> {
     /// (`it_behaves_like 'x'`): the innermost one around that line, when
     /// every place that includes them gives the same.
     fn shared_example_let(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
-        if self.family[f] != Some(Family::Ruby) || self.files[f].shared_examples.is_empty() {
+        if self.family[f] != Some(Family::Ruby) || self.files.decl(f).shared_examples().is_empty() {
             return None;
         }
         let line = (*self.cur.borrow())
             .filter(|(cf, _)| *cf == f)
             .map(|(cf, ri)| self.files[cf].refs[ri].line)
-            .or_else(|| d.map(|x| self.files[f].defs[x].def_line))?;
-        let shared = self.files[f]
-            .shared_examples
+            .or_else(|| d.map(|x| self.files.decl(f).defs()[x].def_line))?;
+        let shared = self
+            .files
+            .decl(f)
+            .shared_examples()
             .iter()
             .filter(|(_, a, b)| *a <= line && line <= *b)
             .min_by_key(|(_, a, b)| b - a)?;
@@ -5227,7 +5338,7 @@ impl<'a> Project<'a> {
     /// The type a definition belongs to: its class, or the type it is
     /// declared for (receiver, impl, extension, `A::m`).
     fn class_of(&self, f: usize, d: Option<usize>) -> Option<DefRef> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
             let def = &defs[x];
@@ -5252,8 +5363,10 @@ impl<'a> Project<'a> {
 
     /// A type by bare name: in the file, then in its family's scope.
     fn type_named(&self, f: usize, name: &str) -> Option<DefRef> {
-        let local: Vec<DefRef> = self.files[f]
-            .defs
+        let local: Vec<DefRef> = self
+            .files
+            .decl(f)
+            .defs()
             .iter()
             .enumerate()
             .filter(|(_, d)| d.kind.is_class_like() && d.name == name && !d.anonymous)
@@ -5304,7 +5417,7 @@ impl<'a> Project<'a> {
 
     fn resolve_name_any(&self, f: usize, d: Option<usize>, name: &str) -> Option<Target> {
         let fam = self.family[f]?;
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         // Rust: a `use` in a block around the use shadows the module's names
         // (r[names.resolution.expansion.imports.shadowing]); the innermost
         // (with no site, the use is somewhere in `d`: a block of `d` is in
@@ -5420,7 +5533,7 @@ impl<'a> Project<'a> {
         // Scala: a wildcard import beats a member of the package another
         // compilation unit defines (Typer's `BindingPrec`: WildImport above
         // PackageClause); Java has it the other way round
-        if self.files[f].lang == Some(crate::lang::Lang::Scala) {
+        if self.files.decl(f).lang() == Some(crate::lang::Lang::Scala) {
             for (star, imp) in &scope.stars {
                 if matches!(star, Target::Ext(..)) {
                     continue;
@@ -5453,7 +5566,7 @@ impl<'a> Project<'a> {
         // a spec: the methods of the modules `RSpec.configure` includes in
         // every example (`config.include Faraday::IntegrationHelpers`). A
         // name it calls that nothing else answers to can only be theirs
-        if fam == Family::Ruby && crate::community::is_test_path(&self.files[f].path) {
+        if fam == Family::Ruby && crate::community::is_test_path(self.files.decl(f).path()) {
             if let Some(m) = self.spec_helper_member(name) {
                 return Some(Target::Def(m));
             }
@@ -5514,7 +5627,7 @@ impl<'a> Project<'a> {
                 if *self.ref_kind.borrow() == Some(RefKind::New)
                     && self.def(m).kind.is_callable()
                     && self.def(m).kind != DefKind::Constructor
-                    && self.files[f].lang.is_some_and(|l| {
+                    && self.files.decl(f).lang().is_some_and(|l| {
                         matches!(
                             l,
                             Lang::CSharp
@@ -5813,7 +5926,7 @@ impl<'a> Project<'a> {
             {
                 // (a type's parameter bound by the type itself is the type it
                 // is used on, which `Binds` and `self_params` know)
-                let own = &self.files[f].defs[x];
+                let own = &self.files.decl(f).defs()[x];
                 let bound = bound.filter(|_| !own.self_params.iter().any(|p| p == head))?;
                 let before = self.types_only.replace(true);
                 let named = self.resolve_path_inner(
@@ -5934,12 +6047,12 @@ impl<'a> Project<'a> {
                 .filter(|r| {
                     // (`namespace { … }` is a block of the global namespace)
                     let global_block = |p: usize| {
-                        let d = &self.files[r.0].defs[p];
+                        let d = &self.files.decl(r.0).defs()[p];
                         d.kind == DefKind::Namespace && d.name.trim().is_empty()
                     };
                     self.family[r.0] == Some(Family::Php)
                         && match self.def(*r).parent {
-                            None => self.files[r.0].package.is_none(),
+                            None => self.files.decl(r.0).package().is_none(),
                             Some(p) => global_block(p),
                         }
                 })
@@ -5967,9 +6080,9 @@ impl<'a> Project<'a> {
         // C++ `namespace u = util; u::twice()`: the namespace the alias names
         // (TS `import Internal = My.Internal;`, also named alone: `new C()`)
         if (fam == Family::Ecma || (fam == Family::C && !rest.is_empty()))
-            && !self.files[f].ns_aliases.is_empty()
+            && !self.files.decl(f).ns_aliases().is_empty()
         {
-            let named = self.files[f].ns_aliases.iter().find(|(a, _)| a == head);
+            let named = self.files.decl(f).ns_aliases().iter().find(|(a, _)| a == head);
             if let Some((_, of)) = named.filter(|_| !self.is_local_name(f, d, head)) {
                 let mut whole = of.clone();
                 whole.extend(rest.iter().cloned());
@@ -6021,7 +6134,7 @@ impl<'a> Project<'a> {
         // Java's `self`, C#'s `super`): a name like any other when the scope
         // has one. (`this` reaches here as `self` too, so the word is the
         // receiver unless something is named that.)
-        let lang = self.files[f].lang;
+        let lang = self.files.decl(f).lang();
         let has_word = match head.as_str() {
             "self" => matches!(
                 lang,
@@ -6083,7 +6196,7 @@ impl<'a> Project<'a> {
             "super" if fam == Family::Rust => {
                 // inside an inline `mod inner { … }` the parent is the module
                 // the block is written in: the one around it, else the file's
-                let defs = &self.files[f].defs;
+                let defs = &self.files.decl(f).defs();
                 let inline = |from: Option<usize>| {
                     let mut cur = from;
                     while let Some(x) = cur {
@@ -6122,7 +6235,7 @@ impl<'a> Project<'a> {
                 // Ruby `super` / `super(x)`: the method of the same name
                 // further up
                 if rest.is_empty() && fam == Family::Ruby {
-                    let defs = &self.files[f].defs;
+                    let defs = &self.files.decl(f).defs();
                     let mut cur = d;
                     while let Some(x) = cur {
                         if defs[x].kind.is_callable() && !defs[x].block {
@@ -6340,7 +6453,7 @@ impl<'a> Project<'a> {
                     }
                     // `res.get()` where the file assigns functions to `res`
                     if rest.len() == 1 {
-                        let defs = &self.files[f].defs;
+                        let defs = &self.files.decl(f).defs();
                         let cands: Vec<DefRef> = defs
                             .iter()
                             .enumerate()
@@ -6467,8 +6580,10 @@ impl<'a> Project<'a> {
                         // function written in the object the constant holds
                         if bound.is_none() && fam == Family::Ecma {
                             let name = &self.def(p).name;
-                            let own: Vec<DefRef> = self.files[p.0]
-                                .defs
+                            let own: Vec<DefRef> = self
+                                .files
+                                .decl(p.0)
+                                .defs()
                                 .iter()
                                 .enumerate()
                                 .filter(|(_, x)| {
@@ -6545,7 +6660,7 @@ impl<'a> Project<'a> {
             // called `self`, which is no word of Java's
             if seg == "self"
                 && i == 0
-                && self.files[f].lang == Some(crate::lang::Lang::Java)
+                && self.files.decl(f).lang() == Some(crate::lang::Lang::Java)
                 && matches!(t, Target::Def(c)
                     if self.def(c).kind.is_class_like() && self.def(c).name == *head)
             {
@@ -6884,7 +6999,7 @@ impl<'a> Project<'a> {
             // functions that give the receiver back
             if matches!(seg.as_str(), "apply" | "also")
                 && i + 1 < rest.len()
-                && self.files[f].lang == Some(crate::lang::Lang::Kotlin)
+                && self.files.decl(f).lang() == Some(crate::lang::Lang::Kotlin)
             {
                 if let Target::Def(c) = t {
                     if self.def(c).kind.is_class_like() && self.class_member(c, seg, 4).is_none() {
@@ -7322,16 +7437,16 @@ impl<'a> Project<'a> {
         name: &str,
         ty: DefRef,
     ) -> Option<Binds> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         let (x, li) = loop {
             let x = cur?;
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
                 break (x, li);
             }
             cur = defs[x].parent;
         };
-        let l = &self.files[f].locals[li];
+        let l = &self.local_at(f, li);
         if l.declared || l.path.is_empty() || l.path.last().is_some_and(|s| s.starts_with('[')) {
             return None;
         }
@@ -7501,7 +7616,7 @@ impl<'a> Project<'a> {
     fn bound_field(&self, b: Option<&Binds>, c: DefRef, name: &str) -> Option<(DefRef, bool)> {
         let b = b.filter(|b| b.owner == c)?;
         let &(fi, li) = self.fields.get(&c)?.get(name)?;
-        let l = &self.files[fi].locals[li];
+        let l = &self.local_at(fi, li);
         match l.path.as_slice() {
             [x] if l.declared => self.bound_param(b, x),
             _ => None,
@@ -7510,9 +7625,9 @@ impl<'a> Project<'a> {
 
     /// The type a callable declares it returns, as written.
     fn return_path(&self, c: DefRef) -> Option<&Vec<String>> {
-        self.files[c.0]
-            .refs
-            .iter()
+        self.files
+            .decl(c.0)
+            .decl_refs()
             .find(|x| {
                 x.from_def == Some(c.1) && x.kind == RefKind::Type && x.context == "return_type"
             })
@@ -7522,11 +7637,11 @@ impl<'a> Project<'a> {
     /// The type arguments a local or parameter is declared with, and the
     /// definition it is a local of.
     fn local_targs(&self, f: usize, d: Option<usize>, name: &str) -> Option<LocalTargs<'_>> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                let l = &self.files[f].locals[li];
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                let l = &self.local_at(f, li);
                 return (!l.targs.is_empty()).then_some((&l.targs[..], &l.targ_elems[..], x));
             }
             cur = defs[x].parent;
@@ -7546,16 +7661,16 @@ impl<'a> Project<'a> {
             "Item4" => 3,
             _ => return None,
         };
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         let (x, li) = loop {
             let x = cur?;
-            if let Some(&li) = self.locals.get(&(f, x, head.clone())) {
+            if let Some(&li) = self.local_index(&(f, x, head.clone())) {
                 break (x, li);
             }
             cur = defs[x].parent;
         };
-        let l = &self.files[f].locals[li];
+        let l = &self.local_at(f, li);
         if l.declared || l.path.is_empty() || l.path.iter().any(|s| s.starts_with("[#")) {
             return None;
         }
@@ -7727,7 +7842,7 @@ impl<'a> Project<'a> {
                 (t, None, Confidence::Extracted)
             }
             Implicit::Return => {
-                let defs = &self.files[f].defs;
+                let defs = &self.files.decl(f).defs();
                 let mut cur = d;
                 loop {
                     let x = cur?;
@@ -7835,7 +7950,7 @@ impl<'a> Project<'a> {
         };
         let visible = c.0 == f
             || self.scopes[f].imported.contains(&c.0)
-            || dir_of(&self.files[c.0].path) == dir_of(&self.files[f].path);
+            || dir_of(self.files.decl(c.0).path()) == dir_of(self.files.decl(f).path());
         let cd = self.def(c);
         // a row that is most likely a library's name the project happens to
         // have one definition of, and why: not what the engine is missing
@@ -7869,7 +7984,7 @@ impl<'a> Project<'a> {
             && (self.local_written_head(f, d, bare_head) == Some("std")
                 || (reason == "field or variable: its type names nothing" && std_field()));
         let test = |i: usize, def: &Def| {
-            def.is_test || crate::community::is_test_path(&self.files[i].path)
+            def.is_test || crate::community::is_test_path(self.files.decl(i).path())
         };
         let self_field_assigned = self.files[f].refs.iter().any(|x| {
             x.kind == RefKind::Write
@@ -7955,7 +8070,9 @@ impl<'a> Project<'a> {
             || self.builtin(f, name)
         {
             Some("a name the language's own types answer to")
-        } else if c.0 != f && test(c.0, cd) && !crate::community::is_test_path(&self.files[f].path)
+        } else if c.0 != f
+            && test(c.0, cd)
+            && !crate::community::is_test_path(self.files.decl(f).path())
         {
             Some("the one definition is test code, the call is not")
         } else if matches!(head, "self" | "super")
@@ -7983,7 +8100,7 @@ impl<'a> Project<'a> {
         {
             // (`done(err)`: what the caller was handed, a callback)
             Some("the name is a local or parameter of the caller")
-        } else if vendored_path(&self.files[c.0].path) {
+        } else if vendored_path(self.files.decl(c.0).path()) {
             Some("the one definition is in vendored or minified code")
         } else if fam == Family::Ecma && head == "self" && r.path.len() == 2 && self_field_assigned
         {
@@ -8012,16 +8129,16 @@ impl<'a> Project<'a> {
             None
         };
         Some(json!({
-            "file": self.files[f].path,
+            "file": self.files.decl(f).path(),
             "line": r.line,
-            "language": self.files[f].lang.map(|l| l.name()),
+            "language": self.files.decl(f).lang().map(|l| l.name()),
             "path": r.path.join("."),
             "name": name,
-            "in_definition": d.is_some_and(|x| !self.files[f].defs[x].block),
+            "in_definition": d.is_some_and(|x| !self.files.decl(f).defs()[x].block),
             "markers": marker,
             "reason": reason,
             "candidate": {
-                "file": self.files[c.0].path,
+                "file": self.files.decl(c.0).path(),
                 "qualname": cd.qualname,
                 "extension": cd.receiver.is_some() || self.extended_type(c).is_some(),
                 "member": cd.parent.is_some(),
@@ -8060,12 +8177,12 @@ impl<'a> Project<'a> {
             return self.def(*p).sealed;
         }
         match self.fields.get(&c).and_then(|m| m.get(name)) {
-            Some(&(fi, li)) => self.files[fi].locals[li].sealed,
+            Some(&(fi, li)) => self.local_at(fi, li).sealed,
             None => self.bases(c).into_iter().any(|b| {
                 self.fields
                     .get(&b)
                     .and_then(|m| m.get(name))
-                    .is_some_and(|&(fi, li)| self.files[fi].locals[li].sealed)
+                    .is_some_and(|&(fi, li)| self.local_at(fi, li).sealed)
             }),
         }
     }
@@ -8074,11 +8191,11 @@ impl<'a> Project<'a> {
     /// or assigned a call of a function that returns one and not opened
     /// there (`let r = load();`, not `let r = load()?;`).
     fn local_sealed(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                let l = &self.files[f].locals[li];
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                let l = &self.local_at(f, li);
                 if l.declared || l.sealed {
                     return l.sealed;
                 }
@@ -8130,11 +8247,11 @@ impl<'a> Project<'a> {
 
     /// The type of the keys of the map a local or parameter is declared as.
     fn local_key(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                let l = &self.files[f].locals[li];
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                let l = &self.local_at(f, li);
                 let key = l.key.clone().or_else(|| {
                     defs[x].plist.iter().find(|p| p.name == *name).and_then(|p| p.key.clone())
                 })?;
@@ -8150,16 +8267,16 @@ impl<'a> Project<'a> {
     /// The function a local holds when it is a part of a callable's tuple
     /// that names one (`const [text, copy] = useCopy()`).
     fn local_function(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         let (x, li) = loop {
             let x = cur?;
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
                 break (x, li);
             }
             cur = defs[x].parent;
         };
-        let l = &self.files[f].locals[li];
+        let l = &self.local_at(f, li);
         // (`const [text, copy] = useCopy()`, `const { show } = useToast()`)
         let part = l.path.last().is_some_and(|s| crate::refs::tuple_index(s).is_some());
         let member = l.path.len() >= 3 && l.path[l.path.len() - 2] == "()";
@@ -8183,11 +8300,11 @@ impl<'a> Project<'a> {
 
     /// Whether a local or parameter is declared as a map.
     fn local_keyed(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                return self.files[f].locals[li].keyed
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                return self.local_at(f, li).keyed
                     || defs[x].plist.iter().any(|p| p.name == *name && p.keyed);
             }
             cur = defs[x].parent;
@@ -8226,7 +8343,7 @@ impl<'a> Project<'a> {
         let fam = self.family[f]?;
         let joined = |p: &[String]| p.join(".");
         let mut prefixes: Vec<String> = Vec::new();
-        if let Some(pkg) = &self.files[f].package {
+        if let Some(pkg) = &self.files.decl(f).package() {
             let pkg = pkg.replace('\\', ".");
             prefixes.push(format!("{pkg}."));
             // C#: a name is looked up in every namespace around the file's
@@ -8241,7 +8358,7 @@ impl<'a> Project<'a> {
             }
         }
         // the namespaces / modules lexically around the use (C#, C++, Ruby)
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
             if matches!(defs[x].kind, DefKind::Namespace | DefKind::Module)
@@ -8299,8 +8416,8 @@ impl<'a> Project<'a> {
                         !(fam == Family::Php
                             && k == 1
                             && pre.is_empty()
-                            && self.files[f].package.is_some()
-                            && self.files[r.0].package.is_none()
+                            && self.files.decl(f).package().is_some()
+                            && self.files.decl(r.0).package().is_none()
                             && self.def(*r).kind.is_class_like())
                     })
                     // Ruby: a method at another file's top level is there
@@ -8364,15 +8481,15 @@ impl<'a> Project<'a> {
         if via.len() == 1 {
             return Some((via[0], true));
         }
-        let here = dir_of(&self.files[f].path);
+        let here = dir_of(self.files.decl(f).path());
         let same: Vec<DefRef> =
-            c.iter().copied().filter(|r| dir_of(&self.files[r.0].path) == here).collect();
+            c.iter().copied().filter(|r| dir_of(self.files.decl(r.0).path()) == here).collect();
         if same.len() == 1 {
             return Some((same[0], false));
         }
         let common = |r: &DefRef| {
-            let a = self.files[f].path.split('/').collect::<Vec<_>>();
-            let b = self.files[r.0].path.split('/').collect::<Vec<_>>();
+            let a = self.files.decl(f).path().split('/').collect::<Vec<_>>();
+            let b = self.files.decl(r.0).path().split('/').collect::<Vec<_>>();
             a.iter().zip(&b).take_while(|(x, y)| x == y).count()
         };
         let best = c.iter().map(common).max()?;
@@ -8381,13 +8498,13 @@ impl<'a> Project<'a> {
     }
 
     fn builtin(&self, f: usize, name: &str) -> bool {
-        self.files[f].lang.is_some_and(|l| l.module().builtins().contains(&name))
+        self.files.decl(f).lang().is_some_and(|l| l.module().builtins().contains(&name))
     }
 
     /// Whether an import of file `f` binds `name`, resolved or not.
     fn imports_name(&self, f: usize, name: &str) -> bool {
         self.scopes[f].bindings.contains_key(name)
-            || self.files[f].imports.iter().any(|imp| {
+            || self.files.decl(f).imports().iter().any(|imp| {
                 imp.alias.as_deref() == Some(name)
                     || imp.names.iter().any(|(n, a)| a.as_deref().unwrap_or(n) == name)
                     || imp.module.rsplit("::").next() == Some(name)
@@ -8397,7 +8514,7 @@ impl<'a> Project<'a> {
     /// The directory of the Cargo package file `f` belongs to: the deepest
     /// one above it that a manifest names (empty: none, or the root's).
     fn crate_of(&self, f: usize) -> &str {
-        let path = self.files[f].path.as_str();
+        let path = self.files.decl(f).path().as_str();
         self.modsys
             .rs_crates_in
             .values()
@@ -8426,15 +8543,15 @@ impl<'a> Project<'a> {
         if !matches!(self.family[f], Some(Family::Jvm | Family::Php)) {
             return true;
         }
-        let theirs = &self.files[r.0].package;
+        let theirs = &self.files.decl(r.0).package();
         let nested = self.def(r).parent.is_some_and(|p| self.def((r.0, p)).kind.is_class_like());
         // (PHP: only a function or a constant falls back from a namespace to
         // the global one; a class name does not, spec 18-namespaces.md)
         let global_ok = theirs.is_none()
             && !(self.family[f] == Some(Family::Php)
-                && self.files[f].package.is_some()
+                && self.files.decl(f).package().is_some()
                 && self.def(r).kind.is_class_like());
-        (global_ok || *theirs == self.files[f].package) && !(nested && r.0 != f)
+        (global_ok || *theirs == self.files.decl(f).package()) && !(nested && r.0 != f)
     }
 
     /// A bare name defined nowhere in reach: a project-wide unique function or
@@ -8498,7 +8615,7 @@ impl<'a> Project<'a> {
     /// `setTags` of a type (or a base) annotated `@Data`, `@Value`, `@Getter`
     /// or `@Setter`, or whose field of that name is.
     fn lombok_field(&self, c: DefRef, name: &str) -> Option<DefRef> {
-        if self.files[c.0].lang != Some(crate::lang::Lang::Java) {
+        if self.files.decl(c.0).lang() != Some(crate::lang::Lang::Java) {
             return None;
         }
         let (prop, setter) = if let Some(p) = name.strip_prefix("get") {
@@ -8512,7 +8629,7 @@ impl<'a> Project<'a> {
         let first = chars.next().filter(|c| c.is_uppercase())?;
         let field: String = first.to_lowercase().chain(chars).collect();
         let marked = |d: DefRef, words: &[&str]| {
-            self.files[d.0].refs.iter().any(|r| {
+            self.files.decl(d.0).decl_refs().any(|r| {
                 r.from_def == Some(d.1)
                     && r.kind == RefKind::Decorator
                     && r.path.last().is_some_and(|n| words.contains(&n.as_str()))
@@ -8788,11 +8905,12 @@ impl<'a> Project<'a> {
     /// The namespaces a C# file declares: the one written for the whole file
     /// (`namespace N;`), else each block at its top (`namespace N { … }`).
     fn csharp_namespaces(&self, f: usize) -> Vec<String> {
-        if let Some(p) = &self.files[f].package {
+        if let Some(p) = &self.files.decl(f).package() {
             return vec![p.clone()];
         }
-        self.files[f]
-            .defs
+        self.files
+            .decl(f)
+            .defs()
             .iter()
             .filter(|d| d.kind == DefKind::Namespace && d.parent.is_none())
             .map(|d| d.qualname.replace("::", "."))
@@ -8827,7 +8945,7 @@ impl<'a> Project<'a> {
         name: &str,
         called: bool,
     ) -> Option<DefRef> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         let mut cands: Vec<usize> = Vec::new();
         while let Some(x) = cur {
@@ -8867,13 +8985,13 @@ impl<'a> Project<'a> {
     /// namespace block around it, else the file's.
     fn cs_namespace_of(&self, f: usize, mut i: usize) -> Option<String> {
         loop {
-            let d = &self.files[f].defs[i];
+            let d = &self.files.decl(f).defs()[i];
             if d.kind == DefKind::Namespace {
                 return Some(d.qualname.replace("::", "."));
             }
             match d.parent {
                 Some(p) => i = p,
-                None => return self.files[f].package.clone(),
+                None => return self.files.decl(f).package().clone(),
             }
         }
     }
@@ -8900,7 +9018,7 @@ impl<'a> Project<'a> {
         if self.family[f] != Some(Family::Rust) || r.0 != f {
             return true;
         }
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let module_of = |mut i: usize| -> Option<usize> {
             while let Some(p) = defs[i].parent {
                 if matches!(defs[p].kind, DefKind::Module | DefKind::Namespace) {
@@ -8937,14 +9055,14 @@ impl<'a> Project<'a> {
                 if r.0 == f && x == p {
                     return true;
                 }
-                cur = self.files[f].defs[x].parent;
+                cur = self.files.decl(f).defs()[x].parent;
             }
             false
         };
-        let pkg_of = |g: usize| self.files[g].package.clone().unwrap_or_default();
+        let pkg_of = |g: usize| self.files.decl(g).package().clone().unwrap_or_default();
         let named = |r: &DefRef| {
             let name = &self.def(*r).name;
-            self.files[f].imports.iter().any(|imp| {
+            self.files.decl(f).imports().iter().any(|imp| {
                 imp.form == ImportForm::From
                     && imp.module == pkg_of(r.0)
                     && imp.names.iter().any(|(n, _)| n == name)
@@ -8999,11 +9117,11 @@ impl<'a> Project<'a> {
         let fam = self.family[f];
         // Java has no extensions: a Kotlin one is a static method there,
         // never `latch.await()`
-        if self.files[f].lang == Some(crate::lang::Lang::Java) {
+        if self.files.decl(f).lang() == Some(crate::lang::Lang::Java) {
             return None;
         }
-        let here = dir_of(&self.files[f].path);
-        let pkg = self.files[f].package.as_deref();
+        let here = dir_of(self.files.decl(f).path());
+        let pkg = self.files.decl(f).package().as_deref();
         let spaces =
             if fam == Some(Family::CSharp) { self.csharp_namespaces(f) } else { Vec::new() };
         // Rust: a method of an `impl Trait for` a type the project does not
@@ -9022,8 +9140,8 @@ impl<'a> Project<'a> {
             .filter(|r| {
                 r.0 == f
                     || self.scopes[f].imported.contains(&r.0)
-                    || dir_of(&self.files[r.0].path) == here
-                    || (pkg.is_some() && self.files[r.0].package.as_deref() == pkg)
+                    || dir_of(self.files.decl(r.0).path()) == here
+                    || (pkg.is_some() && self.files.decl(r.0).package().as_deref() == pkg)
                     // C#: a namespace sees what the ones around it declare
                     // (`RestSharp.Tests` sees `RestSharp`'s extensions),
                     // written as a block or for the whole file
@@ -9052,7 +9170,9 @@ impl<'a> Project<'a> {
             // (an imported one ranks below every enclosing one: §12.8.10.3)
             let exact = if fam == Some(Family::CSharp) && exact.len() > 1 {
                 self.closest_extensions(f, exact)
-            } else if self.files[f].lang == Some(crate::lang::Lang::Kotlin) && exact.len() > 1 {
+            } else if self.files.decl(f).lang() == Some(crate::lang::Lang::Kotlin)
+                && exact.len() > 1
+            {
                 self.kotlin_extension_order(f, exact)
             } else {
                 exact
@@ -9105,7 +9225,7 @@ impl<'a> Project<'a> {
                 if seen.iter().all(|r| {
                     self.def(*r).receiver == self.def(*first).receiver
                         && self.def(*r).plist.len() == self.def(*first).plist.len()
-                        && self.files[r.0].package == self.files[first.0].package
+                        && self.files.decl(r.0).package() == self.files.decl(first.0).package()
                         && r.0 != first.0
                         || r == first
                 }) =>
@@ -9149,11 +9269,11 @@ impl<'a> Project<'a> {
 
     /// The type a local is declared with, bare (`string`, `KmProperty`).
     fn local_written_type(&self, f: usize, d: Option<usize>, name: &str) -> Option<String> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                let l = &self.files[f].locals[li];
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                let l = &self.local_at(f, li);
                 return l.path.last().filter(|_| l.declared).cloned();
             }
             cur = defs[x].parent;
@@ -9164,11 +9284,11 @@ impl<'a> Project<'a> {
     /// The one name a local's value is built from (`var m = new Message()`),
     /// where no type is written: a hint for an extension written for it.
     fn local_built_type(&self, f: usize, d: Option<usize>, name: &str) -> Option<String> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
-            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                return match self.files[f].locals[li].path.as_slice() {
+            if let Some(&li) = self.local_index(&(f, x, name.to_string())) {
+                return match self.local_at(f, li).path.as_slice() {
                     [one] => Some(one.clone()),
                     _ => None,
                 };
@@ -9181,7 +9301,7 @@ impl<'a> Project<'a> {
     /// `self.name()` in a method whose type the project does not define: the
     /// method of that name written for the same type in this file.
     fn owner_sibling(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         let owner = loop {
             let x = cur?;
@@ -9256,7 +9376,7 @@ impl<'a> Project<'a> {
         let evident = open_world
             || c.0 == f
             || self.scopes[f].imported.contains(&c.0)
-            || dir_of(&self.files[c.0].path) == dir_of(&self.files[f].path);
+            || dir_of(self.files.decl(c.0).path()) == dir_of(self.files.decl(f).path());
         if evident {
             self.guessed.set(true);
         }
@@ -9268,7 +9388,7 @@ impl<'a> Project<'a> {
     /// Whether the callable around `d` is a constructor (`__init__`, `init`,
     /// `constructor`, a Java / C# / C++ constructor, Ruby `initialize`).
     fn constructs(&self, f: usize, d: Option<usize>) -> bool {
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = d;
         while let Some(x) = cur {
             if defs[x].kind.is_callable() {
@@ -9375,7 +9495,7 @@ impl<'a> Project<'a> {
             }
             return self.hubs[f].clone();
         }
-        let defs = &self.files[f].defs;
+        let defs = &self.files.decl(f).defs();
         let mut cur = r.from_def;
         // a field's type, or what its initializer calls, is its type's use
         // (a Swift computed property's body is its own)
@@ -9426,7 +9546,7 @@ impl<'a> Project<'a> {
         }
         // what builds an object is called on the class that is named, never
         // through its base: each language's constructor by its own name
-        let builds = match self.files[m.0].lang {
+        let builds = match self.files.decl(m.0).lang() {
             Some(Lang::Python) => matches!(x.name.as_str(), "__init__" | "__new__"),
             Some(Lang::Ruby) => x.name == "initialize",
             Some(Lang::Php) => x.name == "__construct",
@@ -9446,7 +9566,7 @@ impl<'a> Project<'a> {
     /// either type has several such methods of the name (`contested`).
     fn same_signature(&self, m: DefRef, base: DefRef, contested: bool) -> bool {
         let (x, y) = (&self.def(m).plist, &self.def(base).plist);
-        if self.files[m.0].lang == Some(Lang::Swift)
+        if self.files.decl(m.0).lang() == Some(Lang::Swift)
             && !(x.len() == y.len() && x.iter().zip(y).all(|(p, q)| p.name == q.name))
         {
             return false;
@@ -9820,9 +9940,15 @@ pub fn resolve(
                 .collect(),
             None => Vec::new(),
         };
+        let decl_prints: Vec<u64> = match incremental.key {
+            Some(_) => (0..files.len())
+                .map(|f| p.decl_print(f, incremental.content.get(f).copied().unwrap_or(0)))
+                .collect(),
+            None => Vec::new(),
+        };
         let key_prints = if incremental.key.is_some() { p.key_prints() } else { HashMap::new() };
         let reuse_ok: Vec<bool> = match incremental.previous {
-            Some(prev) if !diagnose => reuse::reusable(prev, &prints, &key_prints),
+            Some(prev) if !diagnose => reuse::reusable(prev, &prints, &decl_prints, &key_prints),
             _ => vec![false; files.len()],
         };
         rss("prints");
@@ -9850,7 +9976,17 @@ pub fn resolve(
         let mut per_file: Vec<FileOut> = (0..files.len()).map(|_| FileOut::default()).collect();
         let order = resolve_order(files.len());
         let stats_on = std::env::var("GRAPHLORE_TRACE_STATS").is_ok_and(|v| v == "1");
-        trace::PROFILE.store(stats_on, std::sync::atomic::Ordering::Relaxed);
+        // the readers of one file, by the site that read it (a measurement)
+        let watch = std::env::var("GRAPHLORE_TRACE_FILE")
+            .ok()
+            .and_then(|w| files.iter().position(|x| x.path == w));
+        p.trace.watch.set(watch.map_or(u32::MAX, |w| w as u32));
+        trace::PROFILE.store(stats_on || watch.is_some(), std::sync::atomic::Ordering::Relaxed);
+        // resolve every file, and say which of those the last build's
+        // resolution would have been taken for came out otherwise (a check)
+        let verify = std::env::var("GRAPHLORE_REUSE_VERIFY").is_ok_and(|v| v == "1");
+        let mut verified = 0usize;
+        let mut differed: Vec<String> = Vec::new();
         trace::ENABLED.store(
             !std::env::var("GRAPHLORE_TRACE").is_ok_and(|v| v == "0"),
             std::sync::atomic::Ordering::Relaxed,
@@ -9863,7 +9999,8 @@ pub fn resolve(
             let facts = &files[f];
             let out = &mut per_file[f];
             let Some(fam) = p.family[f] else { continue };
-            if reuse_ok[f] {
+            p.trace.current.set(f as u32);
+            if reuse_ok[f] && !verify {
                 if let Some(Some(stored)) = incremental.previous.map(|s| &s.files[f]) {
                     *out = FileOut::from_stored(stored);
                     // (the import uses it noted, which the imports' edges read)
@@ -10243,7 +10380,8 @@ pub fn resolve(
                                 }
                                 // Scala `r.size`: a method that takes nothing
                                 // is called by naming it
-                                let scala = p.files[f].lang == Some(crate::lang::Lang::Scala);
+                                let scala =
+                                    p.files.decl(f).lang() == Some(crate::lang::Lang::Scala);
                                 if scala && p.def(t).params.is_none_or(|n| n == 0) {
                                     "calls"
                                 } else {
@@ -10477,6 +10615,111 @@ pub fn resolve(
                 });
             }
             out.frame = p.trace.close_file();
+            if verify && reuse_ok[f] {
+                if let Some(Some(stored)) = incremental.previous.map(|s| &s.files[f]) {
+                    verified += 1;
+                    let now = out.to_stored();
+                    let same = now.edges.len() == stored.edges.len()
+                        && now.edges.iter().zip(&stored.edges).all(|(a, b)| {
+                            (&a.source, &a.target, a.relation, a.inferred, a.file, a.line)
+                                == (&b.source, &b.target, b.relation, b.inferred, b.file, b.line)
+                                && (a.context, a.runs) == (b.context, b.runs)
+                        })
+                        && now.orm == stored.orm
+                        && now.ext == stored.ext
+                        && now.unresolved == stored.unresolved;
+                    if !same {
+                        let gone: Vec<String> = stored
+                            .edges
+                            .iter()
+                            .filter(|b| {
+                                !now.edges.iter().any(|a| {
+                                    a.source == b.source
+                                        && a.target == b.target
+                                        && a.relation == b.relation
+                                })
+                            })
+                            .take(3)
+                            .map(|b| format!("-{} {} {}", b.source, b.relation, b.target))
+                            .chain(
+                                now.edges
+                                    .iter()
+                                    .filter(|a| {
+                                        !stored.edges.iter().any(|b| {
+                                            a.source == b.source
+                                                && a.target == b.target
+                                                && a.relation == b.relation
+                                        })
+                                    })
+                                    .take(3)
+                                    .map(|a| format!("+{} {} {}", a.source, a.relation, a.target)),
+                            )
+                            .collect();
+                        differed.push(format!("{} {gone:?}", facts.path));
+                    }
+                }
+            }
+        }
+        if verify {
+            eprintln!(
+                "reuse verify: {} of {verified} files whose resolution would be reused came out otherwise",
+                differed.len()
+            );
+            for d in differed.iter().take(50) {
+                eprintln!("reuse verify: {d}");
+            }
+        }
+        if let Some(w) = watch {
+            let mut readers: Vec<u32> = (0..files.len())
+                .filter(|&g| {
+                    g != w && per_file[g].frame.files.iter().any(|&c| trace::part::of(c).0 == w)
+                })
+                .map(|g| g as u32)
+                .collect();
+            readers.sort_unstable();
+            let sites = p.trace.watch_sites.borrow();
+            let mut rows: Vec<(&(&str, u32), usize)> =
+                sites.iter().map(|(k, v)| (k, v.len())).collect();
+            rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+            let full = (0..files.len())
+                .filter(|&g| {
+                    g != w
+                        && per_file[g]
+                            .frame
+                            .files
+                            .contains(&trace::part::code(w, trace::part::FULL))
+                })
+                .count();
+            eprintln!(
+                "trace file: {} files read {} ({full} more than its declarations)",
+                readers.len(),
+                files[w].path
+            );
+            for (site, n) in rows.iter().take(40) {
+                let what = if site.1 % 2 == 1 { "decl" } else { "full" };
+                eprintln!("trace file: {n:>6} readers at {}:{} ({what})", site.0, site.1 / 2);
+            }
+            // readers by the set of sites they read through
+            let mut by_reader: HashMap<u32, Vec<u32>> = HashMap::new();
+            for (k, v) in sites.iter() {
+                for &r in v {
+                    by_reader.entry(r).or_default().push(k.1);
+                }
+            }
+            let mut sets: HashMap<Vec<u32>, usize> = HashMap::new();
+            for (_, mut v) in by_reader {
+                v.sort_unstable();
+                *sets.entry(v).or_default() += 1;
+            }
+            let mut sets: Vec<(Vec<u32>, usize)> = sets.into_iter().collect();
+            sets.sort_by_key(|x| std::cmp::Reverse(x.1));
+            for (lines, n) in sets.iter().take(15) {
+                let lines: Vec<String> = lines
+                    .iter()
+                    .map(|l| format!("{}{}", l / 2, if l % 2 == 1 { "d" } else { "" }))
+                    .collect();
+                eprintln!("trace file: {n:>6} readers through lines {lines:?}");
+            }
         }
         rss("main loop");
         // the passes after the main loop start from no file's cached work
@@ -10521,7 +10764,13 @@ pub fn resolve(
                 .into_iter()
                 .map(|k| (k, key_prints.get(&k).copied().unwrap_or(reuse::ABSENT)))
                 .collect();
-            stored = Some(reuse::Stored { key, files: files_out, prints: prints.clone(), keys });
+            stored = Some(reuse::Stored {
+                key,
+                files: files_out,
+                prints: prints.clone(),
+                decl: decl_prints.clone(),
+                keys,
+            });
             rss("cache made");
         }
         let mut orm_uses: Vec<(String, String, usize, u32, bool)> = Vec::new();
