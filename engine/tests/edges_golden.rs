@@ -4012,3 +4012,18 @@ fn ruby_a_bare_name_as_a_hash_value_is_a_call() {
         assert!(got.contains(&(".to_hash()".to_string(), to.to_string())), "{to}: {got:?}");
     }
 }
+
+// A literal of many elements reads in time linear in its size: each element
+// asked its ancestors for a declared value, and the ancestor (the literal)
+// answered by reading every child, so `golang.org/x/text`'s 400 KB tables
+// took 200 s. The limit is far above the linear time (0.2 s in a release
+// build) and far below the quadratic one.
+#[test]
+fn a_large_literal_reads_in_linear_time() {
+    let body: Vec<String> = (0..20_000).map(|i| format!("0x{:02X}", i % 256)).collect();
+    let src = format!("package p\n\nvar table = [...]byte{{\n{},\n}}\n", body.join(",\n"));
+    let started = std::time::Instant::now();
+    let facts = graphlore_engine::file_facts(src.as_bytes(), "p/table.go");
+    assert!(facts.defs.iter().any(|d| d.name == "table"));
+    assert!(started.elapsed().as_secs() < 20, "took {:?}", started.elapsed());
+}

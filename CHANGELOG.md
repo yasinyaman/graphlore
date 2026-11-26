@@ -9,8 +9,19 @@ All notable changes to this project are documented here. The format is based on
 ### Added
 - **Scale, measured on kubernetes** (`docs/benchmark.md`, "Scale: kubernetes";
   `benchmarks/scale.py`): 4.2 million lines of Go, 508,099 nodes and 2.44
-  million edges; a full build in 736 s and 11.3 GB, an update in 140–145 s,
-  the graph read in 16 s, and the node tools at a p50 of 2–818 ms.
+  million edges; a full build in 236 s and 11.4 GB, an update in 120–123 s,
+  the graph read in 13 s, and the node tools at a p50 of 2–598 ms.
+
+### Fixed
+- **Native engine: a literal of many elements reads in linear time.** Each
+  element asked its ancestors for a declared value and the literal answered
+  by reading all of its children, so a 400 KB Go table took 200 s
+  (`golang.org/x/text`'s `tables15.0.0.go`: 211 s → 1.4 s). Kubernetes builds
+  in 236 s instead of 736 s; a golden holds the linear time.
+- **Native engine: the same graph.json on every build.** A C# `using` of a
+  namespace listed the files it reached in a set's order, which changed from
+  run to run; they are in file order now (all 45 audit repositories build to
+  the same bytes twice).
 
 ### Changed
 - **The node tools keep their indexes per graph** instead of rebuilding them on

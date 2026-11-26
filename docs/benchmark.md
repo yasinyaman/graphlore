@@ -106,33 +106,43 @@ codebase and query.</sub>
 
 ## Scale: kubernetes
 
-One large repository, measured on 2026-11-25 on a 4-core, 15 GB machine with
+One large repository, measured on 2026-11-26 on a 4-core, 15 GB machine with
 engine 0.5.80 (`benchmarks/scale.py`): kubernetes at `3596eb6`, 18,946 files
 read (13,980 Go files outside `vendor/`, 4.2 million lines), giving 508,099
 nodes and 2.44 million edges (a 1.1 GB `graph.json`).
 
 | Build | seconds | peak memory | of which |
 |---|--:|--:|---|
-| full | 736 | 11.3 GB | parse 619 s, resolve 72 s, communities 24 s |
-| update, nothing changed | 140 | 11.0 GB | resolve 78 s, communities 24 s |
-| update, one file changed | 145 | 11.1 GB | resolve 80 s, communities 25 s |
+| full | 236 | 11.4 GB | parse 125 s, resolve 65 s, communities 22 s |
+| update, nothing changed | 120 | – | resolve 65 s, communities 21 s |
+| update, one file changed | 123 | – | resolve 67 s, communities 21 s |
 
-An update parses only what changed, but resolution and communities run over
-the whole project (so that an update writes the graph a full build would),
-which is two minutes here. Reading the graph takes 16 s and 7.2 GB in the
-server. Query latency, over 39 definitions sampled with a fixed seed after one
-call that fills the per-graph caches:
+(The peak memory is the full build's; `getrusage` gives the largest of the
+child processes, so the updates report no lower number of their own.)
+
+The full build took 736 s before this measurement, 619 s of it parsing:
+a literal of many elements was read in quadratic time (each element asked its
+ancestors for a declared value, and the literal answered by reading every
+child), so `vendor/golang.org/x/text/unicode/norm/tables15.0.0.go` (395 KB)
+alone took 211 s and gnostic's `OpenAPIv3.pb.go` 120 s; they take 1.4 s and
+0.5 s now. An update parses only what changed, but resolution and
+communities run over the whole project (so that an update writes the graph a
+full build would), which is two minutes here. 4,394 of the files read are
+`vendor/`: the analysis scope leaves them out of the analysis, the build reads
+them. Reading the graph takes 13 s and 7.2 GB in the server. Query latency,
+over 39 definitions sampled with a fixed seed after one call that fills the
+per-graph caches:
 
 | Tool | first call | p50 | p95 |
 |---|--:|--:|--:|
-| `graphlore_neighbors` | 16.6 s | 2 ms | 130 ms |
-| `graphlore_subgraph` | 0.01 s | 5 ms | 21 ms |
-| `graphlore_node_details` | 2.1 s | 4 ms | 39 ms |
-| `graphlore_impact` | 12.7 s | 250 ms | 293 ms |
-| `graphlore_tests_for` | 6.0 s | 818 ms | 1,002 ms |
+| `graphlore_neighbors` | 11.5 s | 2 ms | 107 ms |
+| `graphlore_subgraph` | 0.00 s | 3 ms | 24 ms |
+| `graphlore_node_details` | 2.0 s | 4 ms | 24 ms |
+| `graphlore_impact` | 10.9 s | 237 ms | 279 ms |
+| `graphlore_tests_for` | 4.8 s | 598 ms | 734 ms |
 
 and the tools that read the whole graph, a second time: `graphlore_god_nodes`
-1.9 s, `graphlore_overview` 2.4 s, `graphlore_cycles` 8.4 s. Before this
+1.4 s, `graphlore_overview` 1.9 s, `graphlore_cycles` 7.1 s. Before this
 measurement every call of the node tools asked every node of the graph whether
 it is test code, and `node_details` and `tests_for` indexed every edge again:
 `neighbors` took 1.7 s at p50, `subgraph` 1.6 s, `node_details` 2.1 s and
@@ -140,10 +150,10 @@ it is test code, and `node_details` and `tests_for` indexed every edge again:
 already was.
 
 What this says: a graph of this size is served, the node tools answer in well
-under a second, and the cost is on the build side — the parse, the memory a
-build holds, and an update that resolves the whole project again. `graph.json`
-itself is not the bottleneck (16 s to read once per server); a change of
-storage is not called for by these numbers.
+under a second, and what costs is the build: the memory it holds and an update
+that resolves the whole project again. `graph.json` itself is not the
+bottleneck (13 s to read once per server); a change of storage is not called
+for by these numbers.
 
 ```bash
 python benchmarks/scale.py /path/to/kubernetes --out /tmp/scale-out --touch pkg/kubelet/kubelet.go --json /tmp/scale.json

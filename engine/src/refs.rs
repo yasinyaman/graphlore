@@ -3354,6 +3354,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let mut stamped = 0usize;
     let mut until = 0usize;
     let mut declared: Option<(usize, usize)> = None;
+    let mut value_nodes: HashMap<usize, Option<(usize, usize)>> = HashMap::new();
     while let Some((n, depth)) = stack.pop() {
         for l in locals[stamped..].iter_mut().filter(|l| !l.field && l.until == 0) {
             l.until = until;
@@ -3367,10 +3368,17 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // (the declaration the node is, or is the name of)
         // (never a definition's own node: a parameter's default value is
         // no value its function is declared with)
+        // (each node's answer is kept: the ancestors are asked again for each
+        // of their children, and a literal of 20,000 elements made it
+        // quadratic: `value_node` reads every child of the node it is given)
         declared = std::iter::once(&n)
             .chain(anc.iter().rev().take(2))
             .filter(|a| !by_node.contains_key(&a.id()))
-            .find_map(|a| value_node(*a).map(|v| (v.start_byte(), a.end_byte())));
+            .find_map(|a| {
+                *value_nodes
+                    .entry(a.id())
+                    .or_insert_with(|| value_node(*a).map(|v| (v.start_byte(), a.end_byte())))
+            });
         // (JS `var` is the function's, whatever block it is written in)
         let hoisted = ecma
             && (n.kind() == "variable_declaration"

@@ -1270,7 +1270,10 @@ pub fn import_edges(
                     }
                 }
             } else if !used.is_empty() {
-                out.push((Target::Module(used.iter().copied().collect()), rel, context));
+                // (in file order: a set's own order differs from run to run)
+                let mut files: Vec<usize> = used.iter().copied().collect();
+                files.sort_unstable();
+                out.push((Target::Module(files), rel, context));
             }
         }
         Target::Def(d) => {
