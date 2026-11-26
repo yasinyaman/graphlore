@@ -2,4 +2,5 @@
 
 pub mod assemble;
 pub mod ids;
+pub mod links;
 pub mod write;

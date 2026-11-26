@@ -36,8 +36,10 @@ All notable changes to this project are documented here. The format is based on
 ### Changed
 - **Native engine: less memory per build, the same graph.json.** The resolved
   edges stay in their compact form until the files' facts are let go (the
-  facts cache is written right after resolution), and the previous graph is
-  read from the file as a stream instead of whole.
+  facts cache is written right after resolution), they are kept typed through
+  coupling, communities and the write (`graph::links`: a JSON object per edge
+  cost about ten times the edge), and the previous graph is read from the file
+  as a stream instead of whole.
 - **The node tools keep their indexes per graph** instead of rebuilding them on
   every call: the test nodes (`_test_node_ids`, for the production-first order
   of `graphlore_neighbors`, `graphlore_subgraph` and `graphlore_impact`), the

@@ -227,9 +227,9 @@ fn info(n: &Value, test_file: &mut HashMap<String, bool>) -> NodeInfo {
 }
 
 /// Detect communities and write them on `nodes`.
-pub fn detect(
+pub fn detect<L: crate::graph::links::LinkSource + ?Sized>(
     nodes: &mut [Value],
-    links: &[Value],
+    links: &L,
     prev: &Previous,
     saved: Option<&BTreeMap<String, String>>,
 ) -> Outcome {
@@ -249,21 +249,20 @@ pub fn detect(
     // raw edges (degree, cohesion, externals) and weighted ones (partition)
     let mut raw: Vec<(usize, usize)> = Vec::new();
     let mut weighted: Vec<(usize, usize, f64)> = Vec::new();
-    for e in links {
-        let end = |k: &str| e.get(k).and_then(Value::as_str).and_then(|s| index.get(s).copied());
-        let (Some(a), Some(b)) = (end("source"), end("target")) else { continue };
+    for e in links.links() {
+        let end = |id: &str| index.get(id).copied();
+        let (Some(a), Some(b)) = (end(e.source()), end(e.target())) else { continue };
         if a == b {
             continue;
         }
-        let rel = e.get("relation").and_then(Value::as_str).unwrap_or("");
+        let rel = e.relation();
         // a pair sharing state is derived from the edges already counted, and
         // a method written for a base's method repeats what the type's
         // `inherits` / `implements` edge weighs
         // (a document naming code describes it: it is no part of it)
         let derived = rel == crate::coupling::RELATION
             || rel == crate::docs::link::RELATION
-            || (rel == "dispatches_to"
-                && e.get("context").and_then(Value::as_str) == Some("override"));
+            || (rel == "dispatches_to" && e.context() == Some("override"));
         if derived {
             continue;
         }
@@ -272,7 +271,7 @@ pub fn detect(
             continue;
         }
         let mut w = relation_weight(rel, infos[b].is_file);
-        if e.get("confidence").and_then(Value::as_str) == Some("INFERRED") {
+        if e.confidence() == "INFERRED" {
             w *= INFERRED;
         }
         w *= structure_factor(&infos[a], &infos[b]);

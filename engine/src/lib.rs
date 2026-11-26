@@ -236,6 +236,12 @@ fn reread_shadowed(reads: &mut [Read], files: &[walk::Candidate], timeout: Optio
 
 /// Build the graph and its report. Writes `opts.out` when it is set.
 pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> {
+    build_inner(opts, true)
+}
+
+/// The build; the graph is handed back as a `Value` only when `want_graph`
+/// (`build` writes it and keeps its edges typed to the end).
+fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildReport), String> {
     let started = Instant::now();
     let root = opts
         .root
@@ -390,11 +396,14 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
         drop(facts);
         drop(stamps);
     }
-    // the resolved edges become link objects only now, the facts let go
-    assembled.links.extend(edges.into_values());
-    assembled.links.extend(documented);
-    let (coupled, coupling) = coupling::detect(&mut assembled.nodes, &assembled.links);
-    assembled.links.extend(coupled);
+    // the resolver's edges stay typed to the end (`graph::links`)
+    let mut links = graph::links::Links {
+        head: std::mem::take(&mut assembled.links),
+        resolved: edges,
+        tail: documented,
+    };
+    let (coupled, coupling) = coupling::detect(&mut assembled.nodes, &links);
+    links.tail.extend(coupled);
     report.coupling = coupling;
     lap("coupling", &mut phases);
     let previous = opts.out.as_deref().and_then(community::Previous::read);
@@ -403,14 +412,14 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     let saved = labels_path.as_deref().and_then(read_labels);
     let communities = community::detect(
         &mut assembled.nodes,
-        &assembled.links,
+        &links,
         &previous.unwrap_or_default(),
         saved.as_ref(),
     );
     report.communities = communities.report.clone();
     lap("communities", &mut phases);
     report.nodes = assembled.nodes.len();
-    report.edges = assembled.links.len();
+    report.edges = links.len();
     for n in &assembled.nodes {
         if matches!(n["kind"].as_str(), Some("variable" | "property" | "constant")) {
             report.state.state_nodes += 1;
@@ -428,11 +437,11 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
             *report.state.resources.entry(kind).or_default() += 1;
         }
     }
-    for e in &assembled.links {
-        match e["relation"].as_str() {
-            Some("reads") => report.state.reads += 1,
-            Some("writes") => report.state.writes += 1,
-            Some("http_calls") => report.http.http_calls_edges += 1,
+    for e in graph::links::LinkSource::links(&links) {
+        match e.relation() {
+            "reads" => report.state.reads += 1,
+            "writes" => report.state.writes += 1,
+            "http_calls" => report.http.http_calls_edges += 1,
             _ => {}
         }
     }
@@ -470,7 +479,8 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
         }),
     );
     top.insert("nodes".into(), Value::Array(assembled.nodes));
-    top.insert("links".into(), Value::Array(assembled.links));
+    // (a place for the links, which `GraphOut` writes from `links`)
+    top.insert("links".into(), Value::Null);
     top.insert("hyperedges".into(), json!([]));
     if let Some(commit) = opts.commit.as_ref().filter(|c| !c.is_empty()) {
         top.insert("built_at_commit".into(), json!(commit));
@@ -487,9 +497,8 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
             g.insert("repos".into(), Value::Object(repos));
         }
     }
-    let graph = Value::Object(top);
     if let Some(out) = &opts.out {
-        graph::write::write_atomic(out, &graph)?;
+        graph::write::write_atomic(out, &graph::links::GraphOut { top: &top, links: &links })?;
         lap("write", &mut phases);
         if let (Some(path), Some(labels)) = (&labels_path, &communities.labels) {
             write_labels(path, labels)?;
@@ -498,6 +507,12 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     report.phases_ms = phases.into_iter().collect();
     report.memory_mb = memory;
     report.elapsed_ms = started.elapsed().as_millis();
+    let graph = if want_graph {
+        top.insert("links".into(), Value::Array(links.into_values()));
+        Value::Object(top)
+    } else {
+        Value::Null
+    };
     Ok((graph, report))
 }
 
@@ -543,7 +558,7 @@ fn write_labels(
 
 /// Build and write the graph; the report says what was read and left out.
 pub fn build(opts: &BuildOptions) -> Result<BuildReport, String> {
-    build_graph(opts).map(|(_, r)| r)
+    build_inner(opts, false).map(|(_, r)| r)
 }
 
 /// Detect the communities of the graph.json at `path` again and rewrite it, as

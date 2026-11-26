@@ -7,9 +7,9 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
 
-use serde_json::Value;
+use serde::Serialize;
 
-pub fn write_atomic(out: &Path, graph: &Value) -> Result<(), String> {
+pub fn write_atomic<T: Serialize + ?Sized>(out: &Path, graph: &T) -> Result<(), String> {
     let dir = out.parent().ok_or_else(|| format!("no parent directory for {}", out.display()))?;
     fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let name = out.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();

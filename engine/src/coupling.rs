@@ -30,6 +30,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::community::is_test_path;
+use crate::graph::links::LinkSource;
 
 /// The relation of the edge a hidden pair gets.
 pub const RELATION: &str = "couples_with";
@@ -108,18 +109,21 @@ fn hops_to(adj: &[Vec<u32>], from: usize, wanted: &BTreeSet<usize>) -> HashMap<u
 
 /// Pair up the definitions that share state. Writes `coupling` on the state
 /// nodes and returns the edges of the hidden pairs.
-pub fn detect(nodes: &mut [Value], links: &[Value]) -> (Vec<Value>, CouplingReport) {
+pub fn detect<L: LinkSource + ?Sized>(
+    nodes: &mut [Value],
+    links: &L,
+) -> (Vec<Value>, CouplingReport) {
     let mut report = CouplingReport::default();
     let index: HashMap<String, usize> =
         nodes.iter().enumerate().map(|(i, n)| (text(n, "id").to_string(), i)).collect();
-    let end = |e: &Value, key: &str| index.get(text(e, key)).copied();
+    let end = |id: &str| index.get(id).copied();
 
     let mut readers: BTreeMap<usize, BTreeMap<usize, Touch>> = BTreeMap::new();
     let mut writers: BTreeMap<usize, BTreeMap<usize, Touch>> = BTreeMap::new();
     let mut adj: Vec<Vec<u32>> = vec![Vec::new(); nodes.len()];
-    for e in links {
-        let rel = text(e, "relation");
-        let (Some(s), Some(t)) = (end(e, "source"), end(e, "target")) else { continue };
+    for e in links.links() {
+        let rel = e.relation();
+        let (Some(s), Some(t)) = (end(e.source()), end(e.target())) else { continue };
         if s == t {
             continue;
         }
@@ -127,9 +131,9 @@ pub fn detect(nodes: &mut [Value], links: &[Value]) -> (Vec<Value>, CouplingRepo
             adj[s].push(t as u32);
         } else if rel == "reads" || rel == "writes" {
             let touch = Touch {
-                inferred: text(e, "confidence") == "INFERRED",
-                file: e.get("source_file").cloned().unwrap_or(Value::Null),
-                location: e.get("source_location").cloned().unwrap_or(Value::Null),
+                inferred: e.confidence() == "INFERRED",
+                file: e.source_file(),
+                location: e.source_location(),
             };
             let side = if rel == "writes" { &mut writers } else { &mut readers };
             side.entry(t).or_default().entry(s).or_insert(touch);
