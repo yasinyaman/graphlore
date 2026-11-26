@@ -119,6 +119,9 @@ pub struct Incremental {
     pub resolve_reused: usize,
     pub resolve_cache_written: bool,
     pub resolve_cache_kept: bool,
+    /// The previous graph's communities came from the copy in `cache/`, not
+    /// from reading graph.json.
+    pub previous_cached: bool,
 }
 
 pub fn sample(mut v: Vec<String>) -> (Vec<String>, usize) {

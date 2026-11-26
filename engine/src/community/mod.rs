@@ -152,7 +152,94 @@ struct PrevCommunities {
     input: Option<String>,
 }
 
+/// The previous communities as the build that wrote graph.json left them, in
+/// `cache/`, with the size and modification time of that graph.json: reading
+/// them takes milliseconds, the graph.json they came from seconds.
+#[derive(Serialize, Deserialize)]
+struct Sidecar {
+    size: u64,
+    mtime_ns: u64,
+    community: Vec<(String, i64)>,
+    signatures: Vec<(i64, String)>,
+    input: Option<String>,
+}
+
+const SIDECAR: &str = "graphlore-communities.bin";
+
+fn sidecar_path(graph: &std::path::Path) -> Option<std::path::PathBuf> {
+    graph.parent().map(|d| d.join(crate::cache::CACHE_DIR).join(SIDECAR))
+}
+
+fn stamp(graph: &std::path::Path) -> Option<(u64, u64)> {
+    let meta = std::fs::metadata(graph).ok()?;
+    Some((meta.len(), crate::cache::mtime_ns(&meta)))
+}
+
 impl Previous {
+    /// The communities of the graph.json at `path`: from the copy its build
+    /// left in `cache/` when that graph.json is still the one it wrote (its
+    /// size and modification time), else read from graph.json itself (a
+    /// graph another build or `cluster` wrote, or one copied in).
+    /// With whether they came from the copy in `cache/`.
+    pub fn load(path: &std::path::Path) -> Option<(Self, bool)> {
+        match Self::from_sidecar(path) {
+            Some(p) => Some((p, true)),
+            None => Self::read(path).map(|p| (p, false)),
+        }
+    }
+
+    fn from_sidecar(path: &std::path::Path) -> Option<Self> {
+        let (size, mtime_ns) = stamp(path)?;
+        let file = std::fs::File::open(sidecar_path(path)?).ok()?;
+        let len = file.metadata().ok()?.len();
+        use bincode::Options;
+        let side: Sidecar = bincode::DefaultOptions::new()
+            .with_fixint_encoding()
+            .with_limit(len)
+            .deserialize_from(std::io::BufReader::new(file))
+            .ok()?;
+        if side.size != size || side.mtime_ns != mtime_ns || mtime_ns == 0 {
+            return None;
+        }
+        Some(Previous {
+            community: side.community.into_iter().collect(),
+            signatures: side.signatures.into_iter().collect(),
+            input: side.input,
+        })
+    }
+
+    /// Keep the communities of the graph just written at `path` beside it
+    /// (`load`). A copy that cannot be written costs the next build seconds.
+    pub fn store(path: &std::path::Path, nodes: &[Value], header: &Value) {
+        let Some((size, mtime_ns)) = stamp(path) else { return };
+        let Some(out) = sidecar_path(path) else { return };
+        let community = nodes
+            .iter()
+            .filter_map(|n| {
+                Some((n.get("id")?.as_str()?.to_string(), n.get("community")?.as_i64()?))
+            })
+            .collect();
+        let signatures = header
+            .get("signatures")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter_map(|(k, v)| Some((k.parse().ok()?, v.as_str()?.to_string())))
+            .collect();
+        let input = header.get("input").and_then(Value::as_str).map(str::to_string);
+        let side = Sidecar { size, mtime_ns, community, signatures, input };
+        use bincode::Options;
+        let Ok(bytes) = bincode::DefaultOptions::new().with_fixint_encoding().serialize(&side)
+        else {
+            return;
+        };
+        let _ = std::fs::create_dir_all(out.parent().unwrap_or(std::path::Path::new(".")));
+        let tmp = out.with_extension(format!("tmp-{}", std::process::id()));
+        if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, &out).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+
     /// The communities of the graph.json at `path`, reading only the fields
     /// they need (a graph of 250 MB takes a fraction of a full parse).
     pub fn read(path: &std::path::Path) -> Option<Self> {

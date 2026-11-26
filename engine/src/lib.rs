@@ -527,7 +527,10 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
     links.tail.extend(coupled);
     report.coupling = coupling;
     lap("coupling", &mut phases);
-    let previous = opts.out.as_deref().and_then(community::Previous::read);
+    let previous = opts.out.as_deref().and_then(community::Previous::load).map(|(p, cached)| {
+        report.incremental.previous_cached = cached;
+        p
+    });
     lap("previous", &mut phases);
     let labels_path = opts.out.as_deref().and_then(|o| o.parent()).map(|d| d.join(LABELS_FILE));
     let saved = labels_path.as_deref().and_then(read_labels);
@@ -620,6 +623,10 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
     }
     if let Some(out) = &opts.out {
         graph::write::write_atomic(out, &graph::links::GraphOut { top: &top, links: &links })?;
+        // (the communities just written, for the next build's `Previous`)
+        let nodes = top.get("nodes").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+        let header = top.get("graph").and_then(|g| g.get("communities")).unwrap_or(&Value::Null);
+        community::Previous::store(out, nodes, header);
         lap("write", &mut phases);
         if let (Some(path), Some(labels)) = (&labels_path, &communities.labels) {
             write_labels(path, labels)?;

@@ -115,8 +115,8 @@ nodes and 1.87 million edges.
 | Build | seconds | peak memory | of which |
 |---|--:|--:|---|
 | full | 127 | 5.6 GB | parse 52 s, resolve 50 s, communities 11 s |
-| update, nothing changed | 25 | 4.7 GB | resolve 7 s (0 of 13,989 files resolved again), communities 3 s (kept) |
-| update, a function added to a file no other reads | 35 | 5.2 GB | resolve 6 s (1 file), communities 11 s |
+| update, nothing changed | 24 | 4.7 GB | resolve 7 s (0 of 13,989 files resolved again), communities 3 s (kept) |
+| update, a function added to a file no other reads | 34 | 5.2 GB | resolve 8 s (1 file), communities 11 s |
 | update, a line added to `pkg/kubelet/kubelet.go` | 74 | 5.4 GB | resolve 41 s (876 files), communities 14 s |
 
 (Peak memory from the engine's report, `memory_mb`, which reads

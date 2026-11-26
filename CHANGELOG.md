@@ -17,8 +17,8 @@ All notable changes to this project are documented here. The format is based on
   build writes, byte for byte (`tests/incremental.rs`;
   `benchmarks/incremental_check.py` makes seeded edits to whole repositories
   and compares each update with a full build; all 45 audit repositories
-  agree). On kubernetes an update with nothing changed takes 25 s instead of
-  67 s, one after a function added to a file no other reads 35 s; one after a
+  agree). On kubernetes an update with nothing changed takes 24 s instead of
+  67 s, one after a function added to a file no other reads 34 s; one after a
   line added to `kubelet.go`, which 876 files read, 74 s. The full build pays
   for the recording: 127 s and 5.6 GB instead of 118 s and 5.0 GB. The report's `incremental` says how many files'
   resolution was reused (`resolve_reused`), `phases_ms` splits resolution
@@ -99,7 +99,11 @@ All notable changes to this project are documented here. The format is based on
   and the dedup after resolution copy no strings. The report's `phases_ms`
   has `cache_load`, `reread`, `resolve_cache_load`, `facts_hash` and
   `resolve_cache_store`, and `communities` its own `phases_ms`,
-  `settle_passes` and `settle_end`.
+  `settle_passes` and `settle_end`. The previous graph's communities are
+  kept beside it in `cache/graphlore-communities.bin` with the size and
+  modification time of the graph.json they came from, and read from there
+  while that graph.json is the one this engine wrote
+  (`incremental.previous_cached`; 2.4 s on kubernetes, now milliseconds).
 - **Native engine: less memory per build, the same graph.json.** The resolved
   edges stay in their compact form until the files' facts are let go (the
   facts cache is written right after resolution), they are kept typed through

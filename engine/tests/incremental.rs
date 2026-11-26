@@ -251,3 +251,22 @@ fn an_unchanged_graph_keeps_its_communities() {
     assert_ne!(report.communities.settle_end, "kept");
     fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn the_previous_communities_come_from_the_cache_only_for_the_graph_it_wrote() {
+    let root = project("sidecar");
+    age(&root);
+    build_graph(&opts(&root, false)).unwrap();
+    let (a, report) = build_graph(&opts(&root, true)).unwrap();
+    assert!(report.incremental.previous_cached);
+    // a graph.json written by someone else (copied over, or by `cluster`):
+    // read from the file itself, and the same graph comes out
+    let graph_path = root.join("graphify-out/graph.json");
+    let text = fs::read(&graph_path).unwrap();
+    fs::remove_file(&graph_path).unwrap();
+    fs::write(&graph_path, text).unwrap();
+    let (b, report) = build_graph(&opts(&root, true)).unwrap();
+    assert!(!report.incremental.previous_cached);
+    assert_eq!(content(a), content(b));
+    fs::remove_dir_all(&root).unwrap();
+}
