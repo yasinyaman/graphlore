@@ -9281,6 +9281,18 @@ struct EdgeOut {
     runs: Option<Runs>,
 }
 
+/// What `resolve` gives the build.
+pub struct Resolution {
+    /// The external, resource and route nodes.
+    pub nodes: Vec<Value>,
+    pub links: crate::graph::links::Resolved,
+    pub stats: BTreeMap<String, ResolveStats>,
+    /// The calls left without an edge (`BuildOptions::unresolved`).
+    pub unresolved: Vec<Value>,
+    /// Milliseconds of `resolve.index`, `resolve.main`, `resolve.post`.
+    pub phases: Vec<(&'static str, u128)>,
+}
+
 /// Every edge the files' facts prove, plus the external nodes they point at.
 pub fn resolve(
     root: &Path,
@@ -9289,13 +9301,7 @@ pub fn resolve(
     manifests: Vec<(String, PathBuf)>,
     repos: &[String],
     diagnose: bool,
-) -> (
-    Vec<Value>,
-    crate::graph::links::Resolved,
-    BTreeMap<String, ResolveStats>,
-    Vec<Value>,
-    Vec<(&'static str, u128)>,
-) {
+) -> Resolution {
     // milliseconds of its own phases: the indexes, the main loop, the rest
     let started = std::time::Instant::now();
     let mut timings: Vec<(&'static str, u128)> = Vec::new();
@@ -10266,7 +10272,7 @@ pub fn resolve(
     for i in (1..timings.len()).rev() {
         timings[i].1 -= timings[i - 1].1;
     }
-    (nodes, links, stats, left, timings)
+    Resolution { nodes, links, stats, unresolved: left, phases: timings }
 }
 
 /// ORM methods that read rows of a model's table, and that write them.

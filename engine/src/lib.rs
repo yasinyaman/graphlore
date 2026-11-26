@@ -367,7 +367,13 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
                 .or_default() += 1;
         }
     }
-    let (ext_nodes, edges, resolution, unresolved, resolve_phases) = resolve::resolve(
+    let resolve::Resolution {
+        nodes: ext_nodes,
+        links: edges,
+        stats: resolution,
+        unresolved,
+        phases: resolve_phases,
+    } = resolve::resolve(
         &root,
         &facts,
         &mut assembled,
