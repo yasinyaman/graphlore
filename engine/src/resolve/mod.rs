@@ -9289,7 +9289,16 @@ pub fn resolve(
     manifests: Vec<(String, PathBuf)>,
     repos: &[String],
     diagnose: bool,
-) -> (Vec<Value>, crate::graph::links::Resolved, BTreeMap<String, ResolveStats>, Vec<Value>) {
+) -> (
+    Vec<Value>,
+    crate::graph::links::Resolved,
+    BTreeMap<String, ResolveStats>,
+    Vec<Value>,
+    Vec<(&'static str, u128)>,
+) {
+    // milliseconds of its own phases: the indexes, the main loop, the rest
+    let started = std::time::Instant::now();
+    let mut timings: Vec<(&'static str, u128)> = Vec::new();
     let mut edges: Vec<EdgeOut> = Vec::new();
     // calls left without an edge whose name is one definition of the project
     let mut left: Vec<Value> = Vec::new();
@@ -9299,6 +9308,7 @@ pub fn resolve(
     let route_nodes: Vec<http::RouteNode>;
     {
         let p = Project::new(root, files, asm, manifests, repos);
+        timings.push(("resolve.index", started.elapsed().as_millis()));
         let mut ext_seen: HashSet<String> = HashSet::new();
         let mut ext_target = |e: usize, rest: &[String], symbol: bool| -> String {
             let (id, label, eco) = p.ext_node_id(e, rest, symbol);
@@ -9904,6 +9914,7 @@ pub fn resolve(
                 });
             }
         }
+        timings.push(("resolve.main", started.elapsed().as_millis()));
         // a name read as a value says nothing more where the same definition
         // already calls, builds or extends what it names (`new Foo()`, `class
         // A < B`)
@@ -10250,7 +10261,12 @@ pub fn resolve(
         edges,
         paths: files.iter().map(|f| f.path.clone()).collect(),
     };
-    (nodes, links, stats, left)
+    // each as the time it took
+    timings.push(("resolve.post", started.elapsed().as_millis()));
+    for i in (1..timings.len()).rev() {
+        timings[i].1 -= timings[i - 1].1;
+    }
+    (nodes, links, stats, left, timings)
 }
 
 /// ORM methods that read rows of a model's table, and that write them.

@@ -17,6 +17,9 @@ All notable changes to this project are documented here. The format is based on
 - **The engine's report gives the memory after each phase** (`memory_mb`:
   resident and peak, from `/proc/self/status`, Linux only), and
   `benchmarks/scale.py` prints it.
+  `phases_ms` splits resolution too: `resolve.index` (the project's indexes),
+  `resolve.main` (each file's references) and `resolve.post` (dispatch,
+  resources, HTTP, imports); on a kubernetes update 2.3 s, 33.7 s and 3.5 s.
 - **Scale, measured on kubernetes** (`docs/benchmark.md`, "Scale: kubernetes";
   `benchmarks/scale.py`): 4.2 million lines of Go, 263,363 nodes and 1.87
   million edges with `vendor/` left out; a full build in 118 s and 5.0 GB, an

@@ -367,7 +367,7 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
                 .or_default() += 1;
         }
     }
-    let (ext_nodes, edges, resolution, unresolved) = resolve::resolve(
+    let (ext_nodes, edges, resolution, unresolved, resolve_phases) = resolve::resolve(
         &root,
         &facts,
         &mut assembled,
@@ -380,6 +380,7 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
         std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     }
     lap("resolve", &mut phases);
+    phases.extend(resolve_phases);
     assembled.nodes.extend(ext_nodes);
     let documented = docs::link::edges(&facts, &assembled);
     report.doc_links = documented.len();
