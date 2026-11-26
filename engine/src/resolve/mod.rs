@@ -1469,6 +1469,22 @@ pub fn normalize(path: &str) -> Option<String> {
 }
 
 impl<'a> Project<'a> {
+    /// Forget what was worked out while resolving other files: what one
+    /// file's references resolve to then depends only on the facts it reads,
+    /// not on the files resolved before it.
+    fn forget(&self) {
+        self.bases_memo.borrow_mut().clear();
+        self.used_on.borrow_mut().clear();
+        self.structural.borrow_mut().clear();
+        self.local_types.borrow_mut().clear();
+        self.sealed_locals.borrow_mut().clear();
+        self.tuple_locals.borrow_mut().clear();
+        self.call_targets.borrow_mut().clear();
+        self.value_binds.borrow_mut().clear();
+        self.recv_types.borrow_mut().clear();
+        *self.go_alias_map.borrow_mut() = None;
+    }
+
     pub fn new(
         root: &Path,
         files: &'a [FileFacts],
@@ -9281,6 +9297,39 @@ struct EdgeOut {
     runs: Option<Runs>,
 }
 
+/// What resolving one file's references gives, before the files' results
+/// are put together.
+#[derive(Default)]
+struct FileOut {
+    edges: Vec<EdgeOut>,
+    left: Vec<Value>,
+    orm: Vec<(String, String, usize, u32, bool)>,
+    ext: Vec<(String, String, &'static str)>,
+    stats: ResolveStats,
+}
+
+/// The order the files' references are resolved in: file order, or for a
+/// check that the order leaves the graph as it is (tests, benchmarks)
+/// `GRAPHLORE_RESOLVE_ORDER=reverse` or `shuffle:SEED`.
+fn resolve_order(n: usize) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..n).collect();
+    match std::env::var("GRAPHLORE_RESOLVE_ORDER").as_deref() {
+        Ok("reverse") => order.reverse(),
+        Ok(v) if v.starts_with("shuffle:") => {
+            let seed: u64 = v["shuffle:".len()..].parse().unwrap_or(1);
+            let key = |i: usize| {
+                let mut h = seed ^ 0x9e37_79b9_7f4a_7c15;
+                h ^= i as u64;
+                h = h.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                h ^ (h >> 31)
+            };
+            order.sort_by_key(|&i| key(i));
+        }
+        _ => {}
+    }
+    order
+}
+
 /// What `resolve` gives the build.
 pub struct Resolution {
     /// The external, resource and route nodes.
@@ -9316,22 +9365,41 @@ pub fn resolve(
         let p = Project::new(root, files, asm, manifests, repos);
         timings.push(("resolve.index", started.elapsed().as_millis()));
         let mut ext_seen: HashSet<String> = HashSet::new();
-        let mut ext_target = |e: usize, rest: &[String], symbol: bool| -> String {
+        // an external node, in the order first seen: one file's, then all
+        let ext_in = |seen: &mut Vec<(String, String, &'static str)>,
+                      e: usize,
+                      rest: &[String],
+                      symbol: bool| {
             let (id, label, eco) = p.ext_node_id(e, rest, symbol);
-            if ext_seen.insert(id.clone()) {
-                ext_nodes.push((id.clone(), label, eco));
+            if !seen.iter().any(|s| s.0 == id) {
+                seen.push((id.clone(), label, eco));
             }
             id
         };
-        let mut orm_uses: Vec<(String, String, usize, u32, bool)> = Vec::new();
-        for (f, facts) in files.iter().enumerate() {
+        let mut ext_target_id = |node: (String, String, &'static str)| {
+            if ext_seen.insert(node.0.clone()) {
+                ext_nodes.push(node);
+            }
+        };
+        // each file's references resolved on their own, and their results
+        // put together in file order (so that the order they are resolved
+        // in leaves the graph as it is)
+        let mut per_file: Vec<FileOut> = (0..files.len()).map(|_| FileOut::default()).collect();
+        let order = resolve_order(files.len());
+        let fresh = std::env::var("GRAPHLORE_RESOLVE_FRESH").is_ok_and(|v| v == "1");
+        for f in order {
+            if fresh {
+                p.forget();
+            }
+            let facts = &files[f];
+            let out = &mut per_file[f];
             let Some(fam) = p.family[f] else { continue };
-            let st = stats.entry(fam.name().to_string()).or_default();
+            let st = &mut out.stats;
             for (ri, r) in facts.refs.iter().enumerate() {
                 let src = p.source_of(f, r);
                 // a data model's table, read or written through the ORM
                 if let Some((table, write)) = p.orm_use(f, r) {
-                    orm_uses.push((table, src.clone(), f, r.line, write));
+                    out.orm.push((table, src.clone(), f, r.line, write));
                 }
                 let heritage = matches!(
                     r.kind,
@@ -9475,7 +9543,7 @@ pub fn resolve(
                         };
                         if p.def(c).kind.is_class_like() {
                             if let Some(id) = p.node_id(c).filter(|id| *id != src) {
-                                edges.push(EdgeOut {
+                                out.edges.push(EdgeOut {
                                     source: src.clone(),
                                     target: id.to_string(),
                                     relation: "references",
@@ -9767,15 +9835,21 @@ pub fn resolve(
                     }
                     Some((Target::Ext(e, rest), conf)) => match r.kind {
                         RefKind::Call | RefKind::New => {
-                            (ext_target(e, &rest, false), "calls", conf)
+                            (ext_in(&mut out.ext, e, &rest, false), "calls", conf)
                         }
-                        RefKind::Decorator => (ext_target(e, &rest, true), "references", conf),
+                        RefKind::Decorator => {
+                            (ext_in(&mut out.ext, e, &rest, true), "references", conf)
+                        }
                         RefKind::Type
                         | RefKind::Indirect
                         | RefKind::Attr
                         | RefKind::Read
                         | RefKind::Write => continue,
-                        k => (ext_target(e, &rest, true), external_base(k, fam, &rest), conf),
+                        k => (
+                            ext_in(&mut out.ext, e, &rest, true),
+                            external_base(k, fam, &rest),
+                            conf,
+                        ),
                     },
                     Some(_) => continue,
                     None => {
@@ -9783,7 +9857,7 @@ pub fn resolve(
                             // a base or decorator the project does not define
                             let label = r.path.join(if fam == Family::Rust { "::" } else { "." });
                             let e = p.ext(&label, fam.ecosystem());
-                            let id = ext_target(e, &[], false);
+                            let id = ext_in(&mut out.ext, e, &[], false);
                             let rel = if r.kind == RefKind::Decorator {
                                 "references"
                             } else {
@@ -9801,13 +9875,13 @@ pub fn resolve(
                             .then(|| p.resolve_path(f, scope_def, &r.path[..1], true))
                             .flatten();
                             if diagnose && is_call {
-                                left.extend(p.explain_unresolved(f, scope_def, r));
+                                out.left.extend(p.explain_unresolved(f, scope_def, r));
                             }
                             if let Some((Target::Def(t), conf)) = head_type {
                                 if p.def(t).kind.is_class_like() {
                                     if let Some(id) = p.node_id(t) {
                                         if id != src {
-                                            edges.push(EdgeOut {
+                                            out.edges.push(EdgeOut {
                                                 source: src,
                                                 target: id.to_string(),
                                                 relation: "references",
@@ -9871,7 +9945,7 @@ pub fn resolve(
                 let sure = !kotlin || primary.is_some();
                 let picked = one.and_then(|c| p.node_id(*c));
                 if let Some(id) = picked.filter(|id| *id != src) {
-                    edges.push(EdgeOut {
+                    out.edges.push(EdgeOut {
                         source: src.clone(),
                         target: id.to_string(),
                         relation: "calls",
@@ -9887,7 +9961,7 @@ pub fn resolve(
                     for other in &tied {
                         let Some(id) = p.node_id(*other) else { continue };
                         if id != target {
-                            edges.push(EdgeOut {
+                            out.edges.push(EdgeOut {
                                 source: src.clone(),
                                 target: id.to_string(),
                                 relation,
@@ -9900,7 +9974,7 @@ pub fn resolve(
                         }
                     }
                 }
-                edges.push(EdgeOut {
+                out.edges.push(EdgeOut {
                     source: src,
                     target,
                     relation,
@@ -9918,6 +9992,19 @@ pub fn resolve(
                     },
                     runs: None,
                 });
+            }
+        }
+        let mut orm_uses: Vec<(String, String, usize, u32, bool)> = Vec::new();
+        for (f, out) in per_file.into_iter().enumerate() {
+            edges.extend(out.edges);
+            left.extend(out.left);
+            orm_uses.extend(out.orm);
+            for id in out.ext {
+                ext_target_id(id);
+            }
+            if let Some(fam) = p.family[f] {
+                let st = stats.entry(fam.name().to_string()).or_default();
+                st.unresolved += out.stats.unresolved;
             }
         }
         timings.push(("resolve.main", started.elapsed().as_millis()));
@@ -10135,7 +10222,11 @@ pub fn resolve(
                             }
                             continue;
                         }
-                        Target::Ext(e, rest) => ext_target(e, &rest, true),
+                        Target::Ext(e, rest) => {
+                            let (id, label, eco) = p.ext_node_id(e, &rest, true);
+                            ext_target_id((id.clone(), label, eco));
+                            id
+                        }
                         _ => continue,
                     };
                     edges.push(EdgeOut {
