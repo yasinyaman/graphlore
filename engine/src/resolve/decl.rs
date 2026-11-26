@@ -86,7 +86,7 @@ pub fn ranks(facts: &FileFacts) -> Ranks {
     let mut lines: Vec<u64> = Vec::new();
     let mut bytes: Vec<u64> = Vec::new();
     for d in &facts.defs {
-        lines.extend([d.region_start, d.def_line, d.end_line].map(u64::from));
+        lines.push(u64::from(d.def_line));
         if let Some((a, b)) = d.scope_lines {
             lines.extend([u64::from(a), u64::from(b)]);
         }
@@ -145,9 +145,11 @@ impl Write for Fnv {
 /// A definition with its positions as ranks.
 fn ranked_def(d: &Def, r: &Ranks) -> Def {
     let mut d = d.clone();
-    d.region_start = r.line(d.region_start);
+    // (where its region begins and its last line: the node's, which no
+    // resolution reads, and a comment above a definition moves the first)
+    d.region_start = 0;
     d.def_line = r.line(d.def_line);
-    d.end_line = r.line(d.end_line);
+    d.end_line = 0;
     d.scope_lines = d.scope_lines.map(|(a, b)| (r.line(a), r.line(b)));
     d.start_byte = r.byte(d.start_byte);
     d.end_byte = r.byte(d.end_byte);
