@@ -55,6 +55,16 @@ All notable changes to this project are documented here. The format is based on
   build took 167 s and 7.6 GB, from 236 s and 11.4 GB.
 
 ### Fixed
+- **Native engine: a local's value is read where the local is declared.**
+  It was resolved where the use being resolved is written: in a generated Go
+  deepcopy function, which shadows `in` and `out` in every block (`in, out :=
+  &in.X, &out.X`), the value's `in` was the local being typed, then the one of
+  the block before, and so on, the whole chain again at every use (8.6 s for
+  one file of kubernetes). Read where it is declared it is the receiver, as
+  Go's scopes say, and `(*in).DeepCopyInto(*out)` calls the field type's
+  method; kotlinpoet gains 13 edges (parameters with a default value). A
+  conformance case (Go), found by profiling, and goldens for the rule and the
+  time it takes.
 - **Native engine: a field assigned in another file resolves its readers
   again.** A type's fields come from every file that assigns one (a Go method
   in another file of the package), but a lookup recorded only the type's own
@@ -121,6 +131,17 @@ All notable changes to this project are documented here. The format is based on
   the same bytes twice).
 
 ### Changed
+- **Native engine: a full build of kubernetes takes 67 s instead of 117 s**
+  (`docs/native-engine.md`, "Build time"). The files' references are resolved
+  by several workers, one per thousand files to resolve, each with a project
+  of its own, the largest files first; the graph is the same byte for byte
+  with any number (`GRAPHLORE_RESOLVE_THREADS`; `GRAPHLORE_RESOLVE_TIMES=1`
+  prints each worker's time and every slow file). Reading a file looks a
+  field's id and a kind's name up once per language and thread instead of by
+  string at every call (`parse::Fields`, `parse::Kinds`: kubernetes' `pkg/`,
+  3,424 files, reads in 10.3 s instead of 15.8 s). `GRAPHLORE_TRACE_STATS=1`
+  prints the time each step of reading a file took. The workers' indexes
+  cost 0.7 GB at the peak (6.3 GB; 5.5 GB with one worker).
 - **An update costs less where nothing it must redo changed** (kubernetes:
   see `docs/benchmark.md`). The facts cache hands each file's facts over
   instead of copying them, keeps the hash of each file's facts and the names

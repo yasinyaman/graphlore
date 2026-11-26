@@ -705,6 +705,28 @@ assembling and resolving (1.8 s and 1.6 s), communities (3.0 s; 5.0 s on a
 first build, which settles from scratch) and writing a 250 MB graph.json
 (1.3 s), while parsing drops from 8.5 s to 0.2 s.
 
+### Build time
+
+Files are read in parallel (rayon), and so are their references resolved:
+each file's resolution is its own (`resolve_file`: the caches of one file are
+emptied at the next, the bases kept across files carry what they read), so
+the files are shared out among workers, each with a project of its own,
+taking the largest first; the results go back to their files' places and are
+put together in file order, so the graph is the same byte for byte with any
+number of workers. A worker builds the indexes again before it starts (on
+kubernetes 3 s and 0.7 GB each), so there is one per thousand files to
+resolve: an update that resolves a few hundred files has one
+(`GRAPHLORE_RESOLVE_THREADS` sets the number, `GRAPHLORE_RESOLVE_TIMES=1`
+prints each worker's time and every file over half a second).
+`GRAPHLORE_TRACE_STATS=1` prints the time each step of reading a file took,
+summed over the threads; on kubernetes most of it is the walk of the
+references (`refs::read`), then the definitions and tree-sitter itself.
+Reading a file asks for a node's child by field name and for a node's kind
+all the time, and tree-sitter answers both by looking the name up anew at
+every call: `parse::Fields::by_field` and `parse::Kinds::kind_str` look each
+up once per language and thread, which halved the time spent reading. On
+kubernetes a full build takes 67 s (117 s before: [benchmark.md](benchmark.md#scale-kubernetes)).
+
 ### Shared state and resources
 
 Two definitions that never call each other still affect each other when one

@@ -114,14 +114,21 @@ nodes and 1.87 million edges.
 
 | Build | seconds | peak memory | of which |
 |---|--:|--:|---|
-| full | 126 | 5.6 GB | parse 49 s, resolve 48 s, communities 12 s |
-| update, nothing changed | 23 | 4.7 GB | resolve 7 s (0 of 13,989 files resolved again), communities 3 s (kept) |
+| full | 67 | 6.3 GB | parse 32 s, resolve 17 s (four workers), communities 7 s |
+| update, nothing changed | 19 | 4.7 GB | resolve 6 s (0 of 13,989 files resolved again), communities 2 s (kept) |
 | update, a function added to a file no other reads | 28 | 5.2 GB | resolve 8 s (1 file), communities 5 s (two partitions) |
-| update, a line added to a function body of `pkg/kubelet/kubelet.go` | 24 | 5.2 GB | resolve 8 s (126 files), communities 3 s (kept) |
-| update, a method added to `pkg/kubelet/kubelet.go` | 53 | 5.3 GB | resolve 35 s (876 files), communities 5 s |
+| update, a line added to a function body of `pkg/kubelet/kubelet.go` | 23 | 5.2 GB | resolve 8 s (126 files), communities 3 s (kept) |
+| update, a method added to `pkg/kubelet/kubelet.go` | 35 | 5.3 GB | resolve 18 s (770 files), communities 4 s |
 
 (Peak memory from the engine's report, `memory_mb`, which reads
-`/proc/self/status` after each phase.) An update parses only what changed and
+`/proc/self/status` after each phase.) The full build took 117 s before three
+changes: resolution runs in workers, one per thousand files to resolve (each
+builds the indexes again, which is the 0.7 GB more: `GRAPHLORE_RESOLVE_THREADS=1`
+gives 96 s and 5.5 GB); a local's value is read where the local is declared
+(a generated deepcopy file shadows `in` in every block, and typing each took
+the chain of the ones before at every use: 8.6 s for one file of 571
+references); and reading a file looks a field's id and a kind's name up once
+per language (tree-sitter's own lookups were half the time spent reading). An update parses only what changed and
 resolves again only the files whose resolution read something that changed
 ([native-engine.md](native-engine.md#incremental-updates)); the graph is the
 one a full build of the same tree writes, byte for byte (checked on these
