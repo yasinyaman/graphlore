@@ -114,9 +114,9 @@ nodes and 1.87 million edges.
 
 | Build | seconds | peak memory | of which |
 |---|--:|--:|---|
-| full | 149 | 5.7 GB | parse 61 s, resolve 52 s, communities 15 s |
-| update, nothing changed | 44 | 5.4 GB | resolve 11 s (0 of 13,989 files resolved again), communities 12 s |
-| update, a line added to a file no other reads | 39 | – | resolve 11 s (1 file), communities 12 s |
+| full | 140 | 5.7 GB | parse 61 s, resolve 56 s, communities 16 s |
+| update, nothing changed | 43 | 5.4 GB | resolve 11 s (0 of 13,989 files resolved again), communities 14 s |
+| update, a line added to a file no other reads | 46 | 5.4 GB | resolve 12 s (1 file), communities 16 s |
 | update, a line added to `pkg/kubelet/kubelet.go` | 74 | 5.4 GB | resolve 41 s (876 files), communities 14 s |
 
 (Peak memory from the engine's report, `memory_mb`, which reads
@@ -129,7 +129,8 @@ and by `benchmarks/incremental_check.py` on the audit repositories).
 its types, which all resolve again. Before incremental resolution an update
 resolved every file: 67 s for each of the updates above, and the full build
 took 118 s and 5.0 GB; recording what each file reads costs the full build
-about a quarter of its time.
+about a fifth of its time. (The `kubelet.go` row was measured before the last
+fixes to incremental resolution, which left the others within a few seconds.)
 
 With `vendor/` read, as before this release (18,946 files, 508,099 nodes,
 2.44 million edges, a 1.1 GB `graph.json`):
