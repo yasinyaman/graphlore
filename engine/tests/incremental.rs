@@ -131,3 +131,88 @@ fn a_cache_that_cannot_be_used_means_a_full_parse() {
     assert!(!report.incremental.cache && report.incremental.reused == 0);
     fs::remove_dir_all(&root).unwrap();
 }
+
+fn write_files(root: &Path, files: &[(&str, &str)]) {
+    for (rel, text) in files {
+        let p = root.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, text).unwrap();
+    }
+}
+
+/// An update and a full build of the same tree, from the same previous graph.
+fn update_and_full(root: &Path) -> (Value, graphlore_engine::BuildReport, Value) {
+    let graph_path = root.join("graphify-out/graph.json");
+    let before = fs::read(&graph_path).unwrap();
+    let (updated, report) = build_graph(&opts(root, true)).unwrap();
+    let after = fs::read(&graph_path).unwrap();
+    fs::write(&graph_path, before).unwrap();
+    let (full, _) = build_graph(&opts(root, false)).unwrap();
+    fs::write(&graph_path, after).unwrap();
+    (content(updated), report, content(full))
+}
+
+#[test]
+fn a_file_is_resolved_again_only_when_what_it_read_changed() {
+    let root = std::env::temp_dir().join(format!("graphlore-incr-reuse-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    write_files(
+        &root,
+        &[
+            ("pkg/__init__.py", "from .core import Engine\n"),
+            ("pkg/core.py", "from .util import double\n\nclass Engine:\n    def run(self, x):\n        return double(x)\n"),
+            ("pkg/util.py", "def double(x):\n    return 2 * x\n"),
+            ("other.py", "def alone():\n    return 1\n"),
+        ],
+    );
+    age(&root);
+    let (_, first) = build_graph(&opts(&root, false)).unwrap();
+    assert!(first.incremental.resolve_cache_written);
+    // nothing changed: every file's resolution is the last build's
+    let (_, again) = build_graph(&opts(&root, true)).unwrap();
+    assert_eq!(again.incremental.resolve_reused, 4);
+    // the body of `double` changed: the files that read util.py resolve again
+    // (util.py, core.py, and pkg/__init__.py through core), other.py does not
+    fs::write(root.join("pkg/util.py"), "def double(x):\n    return x + x\n").unwrap();
+    let (updated, report, full) = update_and_full(&root);
+    assert!(report.incremental.resolve_reused >= 1, "reused {}", report.incremental.resolve_reused);
+    assert!(report.incremental.resolve_reused < 4, "reused {}", report.incremental.resolve_reused);
+    assert_eq!(updated, full);
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_definition_appearing_elsewhere_resolves_the_file_that_asked_for_it_again() {
+    let root = std::env::temp_dir().join(format!("graphlore-incr-key-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    write_files(
+        &root,
+        &[
+            ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+            ("app/a.go", "package app\n\nfunc Run() int {\n\treturn Helper()\n}\n"),
+            ("app/b.go", "package app\n\nfunc Other() int {\n\treturn 1\n}\n"),
+        ],
+    );
+    age(&root);
+    build_graph(&opts(&root, false)).unwrap();
+    // `Helper` appears in b.go: a.go never read b.go, but it asked for the name
+    fs::write(
+        root.join("app/b.go"),
+        "package app\n\nfunc Other() int {\n\treturn 1\n}\n\nfunc Helper() int {\n\treturn 2\n}\n",
+    )
+    .unwrap();
+    let (updated, report, full) = update_and_full(&root);
+    assert_eq!(
+        report.incremental.resolve_reused, 0,
+        "reused {}",
+        report.incremental.resolve_reused
+    );
+    assert_eq!(updated, full);
+    let calls = updated["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["relation"] == "calls" && e["target"].as_str().unwrap().ends_with("helper"));
+    assert!(calls, "a.go's call of Helper resolves after the update");
+    fs::remove_dir_all(&root).unwrap();
+}

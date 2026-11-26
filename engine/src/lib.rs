@@ -367,12 +367,42 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
                 .or_default() += 1;
         }
     }
+    // incremental resolution (`resolve/reuse.rs`): what every file's
+    // resolution depends on beside what it reads, and the last build's cache
+    let resolved_path = opts.out.as_deref().and_then(resolve::reuse::path_for);
+    let resolve_key = resolved_path.as_ref().map(|_| {
+        let mut h = resolve::trace::Fnv::new();
+        h.write(format!("{cache_key:?}").as_bytes());
+        h.sep();
+        for f in &facts {
+            h.write(f.path.as_bytes());
+            h.sep();
+        }
+        for (rel, abs) in &found.manifests {
+            h.write(rel.as_bytes());
+            h.sep();
+            h.write(&std::fs::read(abs).unwrap_or_default());
+            h.sep();
+        }
+        for r in &found.repos {
+            h.write(r.as_bytes());
+            h.sep();
+        }
+        h.0
+    });
+    let previous_resolution = match (&resolved_path, resolve_key, opts.incremental) {
+        (Some(path), Some(key), true) => resolve::reuse::load(path, key),
+        _ => None,
+    };
+    let content: Vec<u64> = stamps.iter().map(|s: &cache::Stamp| s.hash).collect();
     let resolve::Resolution {
         nodes: ext_nodes,
         links: edges,
         stats: resolution,
         unresolved,
         phases: resolve_phases,
+        stored: resolved_store,
+        reused: resolve_reused,
     } = resolve::resolve(
         &root,
         &facts,
@@ -380,7 +410,19 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
         found.manifests,
         &found.repos,
         opts.unresolved.is_some(),
+        resolve::Incremental {
+            content: &content,
+            previous: previous_resolution.as_ref(),
+            key: resolve_key,
+        },
     );
+    drop(previous_resolution);
+    report.incremental.resolve_reused = resolve_reused;
+    if let (Some(path), Some(store)) = (&resolved_path, &resolved_store) {
+        // (a cache that cannot be written costs the next update its speed)
+        report.incremental.resolve_cache_written = resolve::reuse::store(path, store).is_ok();
+    }
+    drop(resolved_store);
     if let Some(path) = &opts.unresolved {
         let text = serde_json::to_string(&unresolved).map_err(|e| e.to_string())?;
         std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;

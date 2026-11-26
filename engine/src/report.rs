@@ -111,6 +111,10 @@ pub struct Incremental {
     /// Cached files this build did not find.
     pub removed: usize,
     pub cache_written: bool,
+    /// Files whose resolution was taken from the last build (their reads
+    /// unchanged), and whether the resolution cache was written.
+    pub resolve_reused: usize,
+    pub resolve_cache_written: bool,
 }
 
 pub fn sample(mut v: Vec<String>) -> (Vec<String>, usize) {

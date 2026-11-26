@@ -14,81 +14,187 @@ use std::hash::Hash;
 use std::ops::{Deref, Index};
 use std::rc::Rc;
 
-/// What a piece of resolution read.
+/// What a piece of resolution read, once it is done: its own reads (sorted,
+/// without duplicates) and the frames of the work it took in (the pieces it
+/// opened, the cached answers it used). A file's frame is flattened when
+/// the file is done (`close_file`): copying the reads up at every level costs
+/// the depth of the work times what it read.
 #[derive(Default, Clone, Debug)]
 pub struct Frame {
     /// The files whose facts (or per-file tables) were read, by index.
-    pub files: Vec<u32>,
+    pub files: Box<[u32]>,
     /// The keys asked of project-wide indexes (`key_hash`).
-    pub keys: Vec<u64>,
+    pub keys: Box<[u64]>,
     /// Something read every file (a scan): any change counts.
     pub all: bool,
     /// Import uses noted (`Project::used`): `(file, import, file used)`.
-    pub used: Vec<(u32, u32, u32)>,
-    /// The cached frames already taken in (by address, each held so that
-    /// its address stays its own): a cache hit that comes again adds nothing.
-    taken: HashMap<usize, Rc<Frame>>,
-    /// The size past which the lists are sorted and deduplicated again
-    /// (doubled each time, so that a large frame is not sorted on every
-    /// absorb).
-    limit: usize,
+    pub used: Box<[(u32, u32, u32)]>,
+    /// The frames taken in; empty in a flattened frame.
+    pub parts: Box<[Rc<Frame>]>,
 }
 
 impl Frame {
-    fn tidy(&mut self) {
-        self.files.sort_unstable();
-        self.files.dedup();
-        self.keys.sort_unstable();
-        self.keys.dedup();
-        self.used.sort_unstable();
-        self.used.dedup();
-        self.limit = (2 * (self.files.len() + self.keys.len() + self.used.len())).max(4096);
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+            && self.keys.is_empty()
+            && !self.all
+            && self.used.is_empty()
+            && self.parts.is_empty()
     }
+}
 
-    fn absorb(&mut self, other: &Frame) {
-        self.files.extend_from_slice(&other.files);
-        self.keys.extend_from_slice(&other.keys);
-        self.all |= other.all;
-        self.used.extend_from_slice(&other.used);
-        if self.files.len() + self.keys.len() + self.used.len() > self.limit.max(4096) {
-            self.tidy();
+/// A frame being filled: a bit per file and a set of keys say what is in
+/// it already, so that a read is counted once.
+#[derive(Default)]
+struct Open {
+    bits: Vec<u64>,
+    files: Vec<u32>,
+    key_set: HashSet<u64>,
+    keys: Vec<u64>,
+    all: bool,
+    used: HashSet<(u32, u32, u32)>,
+    /// The frames taken in, each once (by address; each is held, so that
+    /// its address stays its own).
+    parts: Vec<Rc<Frame>>,
+    part_set: HashSet<usize>,
+}
+
+impl Open {
+    fn file(&mut self, i: u32) {
+        let (w, b) = ((i / 64) as usize, i % 64);
+        if w >= self.bits.len() {
+            self.bits.resize(w + 1, 0);
+        }
+        if self.bits[w] & (1 << b) == 0 {
+            self.bits[w] |= 1 << b;
+            self.files.push(i);
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.files.is_empty() && self.keys.is_empty() && !self.all && self.used.is_empty()
+    fn key(&mut self, k: u64) {
+        if self.key_set.insert(k) {
+            self.keys.push(k);
+        }
+    }
+
+    fn part(&mut self, frame: &Rc<Frame>) {
+        if frame.is_empty() {
+            return;
+        }
+        if self.part_set.insert(Rc::as_ptr(frame) as usize) {
+            self.parts.push(frame.clone());
+        }
+    }
+
+    /// The finished frame; the buffers are emptied for the next one.
+    fn finish(&mut self) -> Frame {
+        for &f in &self.files {
+            self.bits[(f / 64) as usize] = 0;
+        }
+        let mut files = std::mem::take(&mut self.files);
+        files.sort_unstable();
+        self.key_set.clear();
+        let mut keys = std::mem::take(&mut self.keys);
+        keys.sort_unstable();
+        let mut used: Vec<(u32, u32, u32)> = self.used.drain().collect();
+        used.sort_unstable();
+        self.part_set.clear();
+        let parts = std::mem::take(&mut self.parts);
+        let all = std::mem::take(&mut self.all);
+        Frame {
+            files: files.into_boxed_slice(),
+            keys: keys.into_boxed_slice(),
+            all,
+            used: used.into_boxed_slice(),
+            parts: parts.into_boxed_slice(),
+        }
     }
 }
 
-/// The frames open now, innermost last.
+/// Everything a frame and the frames it took in read, each frame visited once.
+fn flatten(top: Frame) -> Frame {
+    let mut out = Open::default();
+    for &f in &top.files {
+        out.file(f);
+    }
+    for &k in &top.keys {
+        out.key(k);
+    }
+    out.all = top.all;
+    out.used.extend(top.used.iter().copied());
+    let mut seen: HashSet<usize> = HashSet::new();
+    let mut todo: Vec<Rc<Frame>> = top.parts.into_vec();
+    while let Some(fr) = todo.pop() {
+        if !seen.insert(Rc::as_ptr(&fr) as usize) {
+            continue;
+        }
+        for &f in &fr.files {
+            out.file(f);
+        }
+        for &k in &fr.keys {
+            out.key(k);
+        }
+        out.all |= fr.all;
+        out.used.extend(fr.used.iter().copied());
+        todo.extend(fr.parts.iter().cloned());
+    }
+    let mut flat = out.finish();
+    flat.parts = Box::new([]);
+    flat
+}
+
+/// What a small frame with no parts is shared by: its files, keys and `all`.
+type SmallKey = (Box<[u32]>, Box<[u64]>, bool);
+
+/// The frames open now, innermost last, and buffers kept for the next ones.
 #[derive(Default)]
 pub struct Trace {
-    stack: RefCell<Vec<Frame>>,
+    stack: RefCell<Vec<Open>>,
+    spare: RefCell<Vec<Open>>,
     /// Where a scan made a file read everything (a measurement:
     /// `GRAPHLORE_TRACE_STATS`).
     pub scans: RefCell<HashMap<u32, usize>>,
+    /// Reads by the line that made them (a measurement).
+    pub sites: RefCell<HashMap<(&'static str, u32), usize>>,
+    /// Frames closed, empty ones among them, and their own files, keys and
+    /// parts (a measurement).
+    pub counts: RefCell<[u64; 5]>,
+    /// Kept as: the empty frame, its one part, a shared small one, a new
+    /// small one, a new large one, and the large ones' entries (a measurement).
+    pub kept: RefCell<[u64; 6]>,
+    /// The empty frame, and the small frames with no parts, each shared by
+    /// all that read the same (typing every local of a file reads that file):
+    /// there are millions of frames, most of them alike.
+    empty: Rc<Frame>,
+    small: RefCell<HashMap<SmallKey, Rc<Frame>>>,
 }
 
+/// Whether reads are recorded at all: off, every frame is empty, and no
+/// file's resolution can be reused (a build that writes no cache).
+pub static ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+fn enabled() -> bool {
+    ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Count reads by call site (`GRAPHLORE_TRACE_STATS=1`).
+pub static PROFILE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl Trace {
+    #[track_caller]
     pub fn file(&self, i: usize) {
+        if PROFILE.load(std::sync::atomic::Ordering::Relaxed) {
+            let at = std::panic::Location::caller();
+            *self.sites.borrow_mut().entry((at.file(), at.line())).or_default() += 1;
+        }
         if let Some(top) = self.stack.borrow_mut().last_mut() {
-            if top.files.last() != Some(&(i as u32)) {
-                top.files.push(i as u32);
-                if top.files.len() > top.limit.max(4096) {
-                    top.tidy();
-                }
-            }
+            top.file(i as u32);
         }
     }
 
     pub fn key(&self, k: u64) {
         if let Some(top) = self.stack.borrow_mut().last_mut() {
-            if top.keys.last() != Some(&k) {
-                top.keys.push(k);
-                if top.keys.len() > top.limit.max(4096) {
-                    top.tidy();
-                }
-            }
+            top.key(k);
         }
     }
 
@@ -108,67 +214,127 @@ impl Trace {
 
     pub fn used(&self, f: usize, imp: usize, g: usize) {
         if let Some(top) = self.stack.borrow_mut().last_mut() {
-            top.used.push((f as u32, imp as u32, g as u32));
+            top.used.insert((f as u32, imp as u32, g as u32));
         }
     }
 
     pub fn open(&self) {
-        self.stack.borrow_mut().push(Frame::default());
+        if !enabled() {
+            return;
+        }
+        let frame = self.spare.borrow_mut().pop().unwrap_or_default();
+        self.stack.borrow_mut().push(frame);
     }
 
-    /// Close the innermost frame: what it read is also what the frame
-    /// around it read.
+    fn pop(&self) -> Frame {
+        let mut open = self.stack.borrow_mut().pop().unwrap_or_default();
+        let frame = open.finish();
+        self.spare.borrow_mut().push(open);
+        frame
+    }
+
+    /// Close the innermost frame: the frame around it took it in.
     pub fn close(&self) -> Rc<Frame> {
-        let mut stack = self.stack.borrow_mut();
-        let mut frame = stack.pop().unwrap_or_default();
-        frame.tidy();
-        frame.taken = HashMap::new();
-        if let Some(top) = stack.last_mut() {
-            top.absorb(&frame);
+        if !enabled() {
+            return self.empty.clone();
+        }
+        let frame = self.shared(self.pop());
+        {
+            let mut c = self.counts.borrow_mut();
+            c[0] += 1;
+            c[1] += u64::from(frame.is_empty());
+            c[2] += frame.files.len() as u64;
+            c[3] += frame.keys.len() as u64;
+            c[4] += frame.parts.len() as u64;
+        }
+        if let Some(top) = self.stack.borrow_mut().last_mut() {
+            top.part(&frame);
+        }
+        frame
+    }
+
+    /// Close the innermost frame flattened: for a cache kept across files,
+    /// whose frame must not hold the frames of other files' work alive.
+    pub fn close_flat(&self) -> Rc<Frame> {
+        if !enabled() {
+            return self.empty.clone();
+        }
+        let frame = Rc::new(flatten(self.pop()));
+        if let Some(top) = self.stack.borrow_mut().last_mut() {
+            top.part(&frame);
+        }
+        frame
+    }
+
+    /// A frame as it is kept: one with nothing of its own is its one part (or
+    /// the empty frame), a small one with no parts the one of its reads.
+    fn shared(&self, frame: Frame) -> Rc<Frame> {
+        let own = frame.files.is_empty() && frame.keys.is_empty() && frame.used.is_empty();
+        if own && !frame.all {
+            match frame.parts.len() {
+                0 => {
+                    self.kept.borrow_mut()[0] += 1;
+                    return self.empty.clone();
+                }
+                1 => {
+                    self.kept.borrow_mut()[1] += 1;
+                    return frame.parts[0].clone();
+                }
+                _ => {}
+            }
+        }
+        if frame.parts.is_empty()
+            && frame.used.is_empty()
+            && frame.files.len() + frame.keys.len() <= 6
+        {
+            let key = (frame.files.clone(), frame.keys.clone(), frame.all);
+            let mut small = self.small.borrow_mut();
+            let fresh = !small.contains_key(&key);
+            self.kept.borrow_mut()[if fresh { 3 } else { 2 }] += 1;
+            return small.entry(key).or_insert_with(|| Rc::new(frame)).clone();
+        }
+        {
+            let mut k = self.kept.borrow_mut();
+            k[4] += 1;
+            k[5] += (frame.files.len() + frame.keys.len() + frame.parts.len()) as u64;
         }
         Rc::new(frame)
     }
 
-    /// Close a file's frame, the outermost: a frame still open inside it (an
-    /// early return between `open` and `close`) is closed into it, and the
-    /// file is then taken to read every file, so that nothing it read is lost.
+    /// Close a file's frame, the outermost, flattened: a frame still open
+    /// inside it (an early return between `open` and `close`) is closed into
+    /// it, and the file is then taken to read every file, so that nothing it
+    /// read is lost.
     pub fn close_file(&self) -> Rc<Frame> {
-        let mut stack = self.stack.borrow_mut();
+        if !enabled() {
+            return self.empty.clone();
+        }
         let mut unbalanced = false;
-        while stack.len() > 1 {
-            let inner = stack.pop().unwrap_or_default();
-            if let Some(top) = stack.last_mut() {
-                top.absorb(&inner);
-            }
+        while self.stack.borrow().len() > 1 {
+            self.close();
             unbalanced = true;
         }
-        let mut frame = stack.pop().unwrap_or_default();
         if unbalanced {
             *self.scans.borrow_mut().entry(0).or_default() += 1;
         }
+        let mut frame = flatten(self.pop());
         frame.all |= unbalanced;
-        frame.tidy();
-        frame.taken = HashMap::new();
         Rc::new(frame)
     }
 
     /// Close the innermost frame and drop what it read: work done for the
     /// whole project, which a key stands for (`go_aliases`).
     pub fn discard(&self) {
-        self.stack.borrow_mut().pop();
+        if !enabled() {
+            return;
+        }
+        self.pop();
     }
 
     /// A cached result was taken: what computing it read is read now.
     pub fn absorb(&self, frame: &Rc<Frame>) {
-        if frame.is_empty() {
-            return;
-        }
         if let Some(top) = self.stack.borrow_mut().last_mut() {
-            let at = Rc::as_ptr(frame) as usize;
-            if let std::collections::hash_map::Entry::Vacant(e) = top.taken.entry(at) {
-                e.insert(frame.clone());
-                top.absorb(frame);
-            }
+            top.part(frame);
         }
     }
 }
@@ -241,6 +407,7 @@ impl<T, S: Deref<Target = [T]>> Traced<S> {
         self.inner.is_empty()
     }
 
+    #[track_caller]
     pub fn get(&self, i: usize) -> Option<&T> {
         self.trace.file(i);
         self.inner.get(i)
@@ -256,6 +423,7 @@ impl<T, S: Deref<Target = [T]>> Traced<S> {
 
 impl<T, S: Deref<Target = [T]>> Index<usize> for Traced<S> {
     type Output = T;
+    #[track_caller]
     fn index(&self, i: usize) -> &T {
         self.trace.file(i);
         &self.inner[i]
@@ -343,10 +511,18 @@ impl<K: Eq + Hash + KeyText, V> Named<K, V> {
         &mut self.inner
     }
 
-    /// Each key's `key_hash` with a hash of what it holds, for comparing
-    /// one build's index with the last one's.
-    pub fn fingerprints(&self, value: impl Fn(&V) -> u64) -> HashMap<u64, u64> {
-        self.inner.iter().map(|(k, v)| (key_hash(self.name, k), value(v))).collect()
+    /// Each key's `key_hash` with a print of what it holds, for comparing
+    /// one build's index with the last one's (file indices are the same in
+    /// both: the set of paths is).
+    pub fn prints(&self, out: &mut HashMap<u64, u64>)
+    where
+        V: Print,
+    {
+        for (k, v) in &self.inner {
+            let mut h = Fnv::new();
+            v.print(&mut h);
+            out.insert(key_hash(self.name, k), h.0 | 1);
+        }
     }
 }
 
@@ -381,8 +557,10 @@ impl<K: Eq + Hash + KeyText> NamedSet<K> {
         &mut self.inner
     }
 
-    pub fn fingerprints(&self) -> HashMap<u64, u64> {
-        self.inner.iter().map(|k| (key_hash(self.name, k), 1)).collect()
+    pub fn prints(&self, out: &mut HashMap<u64, u64>) {
+        for k in &self.inner {
+            out.insert(key_hash(self.name, k), 1);
+        }
     }
 }
 
@@ -421,6 +599,7 @@ impl<K: Eq + Hash + FileOf, V> FileKeyed<K, V> {
         FileKeyed { inner: HashMap::new(), trace }
     }
 
+    #[track_caller]
     pub fn get(&self, k: &K) -> Option<&V> {
         self.trace.file(k.file_of());
         self.inner.get(k)
@@ -432,5 +611,45 @@ impl<K: Eq + Hash + FileOf, V> FileKeyed<K, V> {
 
     pub fn raw_mut(&mut self) -> &mut HashMap<K, V> {
         &mut self.inner
+    }
+}
+
+/// What an index holds at a key, into a print (never 0: `reuse::ABSENT`).
+pub trait Print {
+    fn print(&self, h: &mut Fnv);
+}
+
+impl Print for usize {
+    fn print(&self, h: &mut Fnv) {
+        h.write(&(*self as u64).to_le_bytes());
+    }
+}
+
+impl Print for u32 {
+    fn print(&self, h: &mut Fnv) {
+        h.write(&self.to_le_bytes());
+    }
+}
+
+impl Print for String {
+    fn print(&self, h: &mut Fnv) {
+        h.write(self.as_bytes());
+        h.sep();
+    }
+}
+
+impl<A: Print, B: Print> Print for (A, B) {
+    fn print(&self, h: &mut Fnv) {
+        self.0.print(h);
+        self.1.print(h);
+    }
+}
+
+impl<T: Print> Print for Vec<T> {
+    fn print(&self, h: &mut Fnv) {
+        h.write(&(self.len() as u64).to_le_bytes());
+        for x in self {
+            x.print(h);
+        }
     }
 }

@@ -158,13 +158,18 @@ pub fn store(path: &Path, key: Key, facts: Vec<(FileFacts, Stamp)>) -> Result<()
 /// Rebuild a `&'static str` field (a reference's `context`) from the cache:
 /// each distinct value is allocated once per process.
 pub fn static_str<'de, D: Deserializer<'de>>(d: D) -> Result<&'static str, D::Error> {
-    static SEEN: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
     let s = String::deserialize(d)?;
+    Ok(intern(&s))
+}
+
+/// A `&'static str` of `s`: each distinct value is allocated once per process.
+pub fn intern(s: &str) -> &'static str {
+    static SEEN: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
     let mut seen = SEEN.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(&known) = seen.get(s.as_str()) {
-        return Ok(known);
+    if let Some(&known) = seen.get(s) {
+        return known;
     }
-    let leaked: &'static str = Box::leak(s.into_boxed_str());
+    let leaked: &'static str = Box::leak(s.to_string().into_boxed_str());
     seen.insert(leaked);
-    Ok(leaked)
+    leaked
 }

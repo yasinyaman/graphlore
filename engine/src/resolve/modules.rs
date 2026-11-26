@@ -1040,17 +1040,10 @@ pub fn scope_lookup(
 ) -> Option<Target> {
     match fam {
         Family::Go => {
-            let pkg = p.files[f].package.as_deref();
-            let dir = dir_of(&p.files[f].path);
-            let files: Vec<usize> = p
-                .modsys
-                .go_dirs
-                .get(dir)
-                .into_iter()
-                .flatten()
-                .copied()
-                .filter(|&g| g != f && p.files[g].package.as_deref() == pkg)
-                .collect();
+            let pkg = p.files[f].package.clone().unwrap_or_default();
+            let dir = dir_of(&p.files[f].path).to_string();
+            let files: Vec<usize> =
+                p.go_pkg_files(&(dir, pkg)).iter().copied().filter(|&g| g != f).collect();
             p.top_in(&files, name).map(Target::Def)
         }
         Family::Jvm | Family::CSharp | Family::Php => {

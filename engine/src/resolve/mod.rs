@@ -29,6 +29,7 @@ use crate::resources::ResourceKind;
 
 mod http;
 mod modules;
+pub mod reuse;
 pub mod trace;
 
 use trace::{FileKeyed, Named, NamedSet, Trace, Traced};
@@ -1458,6 +1459,11 @@ pub struct Project<'a> {
     example_includes: Named<String, Vec<(usize, u32)>>,
     spec_includes: Named<String, Vec<Vec<String>>>,
     php_bases: Named<String, Vec<DefRef>>,
+    /// The files with a top-level definition of a name, in file order
+    /// (`top_in` reads only those), and the Go files of each (directory,
+    /// package).
+    top_files: Named<String, Vec<usize>>,
+    go_pkg: Named<(String, String), Vec<usize>>,
 }
 
 impl trace::KeyText for Family {
@@ -1513,12 +1519,14 @@ pub fn normalize(path: &str) -> Option<String> {
 }
 
 impl<'a> Project<'a> {
-    /// Forget what was worked out while resolving other files: what one
-    /// file's references resolve to then depends only on the facts it reads,
-    /// not on the files resolved before it.
+    /// Forget what was worked out for the file resolved before: what a
+    /// file's references resolve to is then worked out from what it reads
+    /// alone, and a cached answer cannot hide another file's reads from it
+    /// (`trace.rs`). Kept across files: the bases of each type, which save
+    /// most of the time a cache across files saves (their frames are
+    /// flattened, so they hold no other file's work), Go's aliases (one key)
+    /// and the member names used in each file (a read of that file only).
     fn forget(&self) {
-        self.bases_memo.borrow_mut().clear();
-        self.used_on.borrow_mut().clear();
         self.structural.borrow_mut().clear();
         self.local_types.borrow_mut().clear();
         self.sealed_locals.borrow_mut().clear();
@@ -1526,7 +1534,6 @@ impl<'a> Project<'a> {
         self.call_targets.borrow_mut().clear();
         self.value_binds.borrow_mut().clear();
         self.recv_types.borrow_mut().clear();
-        *self.go_alias_map.borrow_mut() = None;
     }
 
     pub fn new(
@@ -1613,6 +1620,8 @@ impl<'a> Project<'a> {
             example_includes: Named::new("example_includes", tr()),
             spec_includes: Named::new("spec_includes", tr()),
             php_bases: Named::new("php_bases", tr()),
+            top_files: Named::new("top_files", tr()),
+            go_pkg: Named::new("go_pkg", tr()),
         };
         p.index();
         p.index_locals();
@@ -1876,10 +1885,115 @@ impl<'a> Project<'a> {
         }
     }
 
+    /// The prints of every key of the project-wide indexes, for
+    /// incremental resolution (`reuse.rs`).
+    fn key_prints(&self) -> HashMap<u64, u64> {
+        let mut out = HashMap::new();
+        self.by_path.prints(&mut out);
+        self.by_name.prints(&mut out);
+        self.extensions.prints(&mut out);
+        self.by_qual.prints(&mut out);
+        self.fqn.prints(&mut out);
+        self.namespaces.prints(&mut out);
+        self.pkg_files.prints(&mut out);
+        self.owner_methods.prints(&mut out);
+        self.attrs.prints(&mut out);
+        self.attr_owners.prints(&mut out);
+        self.object_members.prints(&mut out);
+        self.created_from.prints(&mut out);
+        self.model_files.prints(&mut out);
+        self.request_props.prints(&mut out);
+        self.example_includes.prints(&mut out);
+        self.spec_includes.prints(&mut out);
+        self.php_bases.prints(&mut out);
+        self.top_files.prints(&mut out);
+        self.go_pkg.prints(&mut out);
+        // the Go aliases of the whole project, one key
+        if self.family.contains(&Some(Family::Go)) {
+            self.go_aliases((0, 0));
+            let mut all: Vec<(DefRef, Vec<DefRef>)> =
+                self.go_alias_map.borrow().iter().flatten().map(|(k, v)| (*k, v.clone())).collect();
+            all.sort();
+            let mut h = trace::Fnv::new();
+            for (k, v) in &all {
+                use trace::Print;
+                k.print(&mut h);
+                v.print(&mut h);
+            }
+            out.insert(trace::key_hash("go_aliases", ""), h.0 | 1);
+        }
+        out
+    }
+
+    /// What other files read of file `f`: its content (`content`, the
+    /// facts cache's hash), its scope and its node ids.
+    fn file_print(&self, f: usize, content: u64) -> u64 {
+        let mut h = trace::Fnv::new();
+        h.write(&content.to_le_bytes());
+        let target = |t: &Target| match t {
+            Target::Ext(e, rest) => {
+                let ext = &self.exts.borrow()[*e];
+                format!("Ext({}:{} {rest:?})", ext.eco, ext.label)
+            }
+            t => format!("{t:?}"),
+        };
+        let bind = |b: &Bind| match b {
+            Bind::T(t) => format!("T({})", target(t)),
+            Bind::Member(t, n) => format!("M({},{n})", target(t)),
+        };
+        let scope = &self.scopes.raw()[f];
+        let mut names: Vec<(&String, &(Bind, usize))> = scope.bindings.iter().collect();
+        names.sort_by(|a, b| a.0.cmp(b.0));
+        for (n, (b, i)) in names {
+            h.write(format!("b{n}={}#{i}", bind(b)).as_bytes());
+            h.sep();
+        }
+        for (lo, hi, n, b, i) in &scope.scoped {
+            h.write(format!("s{lo}-{hi}:{n}={}#{i}", bind(b)).as_bytes());
+            h.sep();
+        }
+        for (t, i) in &scope.stars {
+            h.write(format!("*{}#{i}", target(t)).as_bytes());
+            h.sep();
+        }
+        for m in &scope.modules {
+            let text = match m {
+                ModRes::Target(t) => target(t),
+                ModRes::Ext(l) => format!("ext:{l}"),
+                ModRes::Missing => "missing".to_string(),
+            };
+            h.write(text.as_bytes());
+            h.sep();
+        }
+        let mut imported: Vec<usize> = scope.imported.iter().copied().collect();
+        imported.sort_unstable();
+        h.write(format!("{imported:?}").as_bytes());
+        h.write(format!("{:?}", self.def_ids.raw()[f]).as_bytes());
+        h.write(self.hubs.raw()[f].as_bytes());
+        h.0
+    }
+
+    /// The Go files of a (directory, package).
+    pub(super) fn go_pkg_files(&self, key: &(String, String)) -> &[usize] {
+        self.go_pkg.get(key).map(Vec::as_slice).unwrap_or(&[])
+    }
+
     /// The tables `object_members` … `php_bases`, in file order (so that a
     /// lookup lists its candidates in the order a scan of the files did).
     fn index_scans(&mut self) {
         let files = *self.files.raw();
+        for (g, top) in self.top.raw().iter().enumerate() {
+            for name in top.keys() {
+                self.top_files.raw_mut().entry(name.clone()).or_default().push(g);
+            }
+        }
+        for (g, facts) in files.iter().enumerate() {
+            if facts.lang == Some(crate::lang::Lang::Go) {
+                let dir = facts.path.rsplit_once('/').map(|x| x.0).unwrap_or("").to_string();
+                let pkg = facts.package.clone().unwrap_or_default();
+                self.go_pkg.raw_mut().entry((dir, pkg)).or_default().push(g);
+            }
+        }
         for (g, facts) in files.iter().enumerate() {
             for (i, x) in facts.defs.iter().enumerate() {
                 if let Some(o) = &x.object {
@@ -4400,8 +4514,11 @@ impl<'a> Project<'a> {
     fn top_in(&self, files: &[usize], name: &str) -> Option<DefRef> {
         // an `extension Session { … }` adds to a type, it does not declare the
         // name: in a module that only extends it, the name is still the type's
+        // (only the files that define the name at their top level are read)
+        let defining: &[usize] = self.top_files.get(name).map(Vec::as_slice).unwrap_or(&[]);
         let mut found: Vec<DefRef> = files
             .iter()
+            .filter(|f| defining.binary_search(f).is_ok())
             .flat_map(|&f| self.top[f].get(name).into_iter().flatten().map(move |&d| (f, d)))
             // (an RSpec `let` is a name of its block only)
             .filter(|r| {
@@ -4541,7 +4658,7 @@ impl<'a> Project<'a> {
                 }
             }
         }
-        let frame = self.trace.close();
+        let frame = self.trace.close_flat();
         self.bases_memo.borrow_mut().insert(c, (out.clone(), frame));
         out
     }
@@ -9481,6 +9598,21 @@ fn resolve_order(n: usize) -> Vec<usize> {
     order
 }
 
+/// Resident memory now, in MB, on stderr with `what` (a measurement:
+/// `GRAPHLORE_TRACE_STATS=1`; Linux only).
+fn rss(what: &str) {
+    if !std::env::var("GRAPHLORE_TRACE_STATS").is_ok_and(|v| v == "1") {
+        return;
+    }
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let kb = status
+        .lines()
+        .find_map(|l| l.strip_prefix("VmRSS:"))
+        .and_then(|v| v.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    eprintln!("rss {what}: {} MB", kb / 1024);
+}
+
 /// Sizes of what each file's resolution read, on stderr (a measurement).
 fn trace_stats(per_file: &[FileOut]) {
     let mut files: Vec<usize> = per_file.iter().map(|o| o.frame.files.len()).collect();
@@ -9505,6 +9637,91 @@ fn trace_stats(per_file: &[FileOut]) {
     );
 }
 
+/// What incremental resolution is given (`reuse.rs`): the hash of each
+/// file's content, the last build's cache, and the key of what every file's
+/// resolution depends on beside what it reads. With no key, nothing is
+/// reused and no cache is made.
+#[derive(Default)]
+pub struct Incremental<'a> {
+    pub content: &'a [u64],
+    pub previous: Option<&'a reuse::Stored>,
+    pub key: Option<u64>,
+}
+
+impl FileOut {
+    fn from_stored(s: &reuse::StoredFile) -> FileOut {
+        let edges = s
+            .edges
+            .iter()
+            .map(|e| EdgeOut {
+                source: e.source.clone(),
+                target: e.target.clone(),
+                relation: e.relation,
+                confidence: if e.inferred { Confidence::Inferred } else { Confidence::Extracted },
+                file: e.file as usize,
+                line: e.line,
+                context: e.context,
+                runs: e.runs,
+            })
+            .collect();
+        let orm = s
+            .orm
+            .iter()
+            .map(|(t, src, f, line, w)| (t.clone(), src.clone(), *f as usize, *line, *w))
+            .collect();
+        let ext = s
+            .ext
+            .iter()
+            .map(|(id, label, eco)| (id.clone(), label.clone(), crate::cache::intern(eco)))
+            .collect();
+        let frame = trace::Frame {
+            files: s.files.clone().into_boxed_slice(),
+            keys: s.keys.clone().into_boxed_slice(),
+            all: s.all,
+            used: s.used.clone().into_boxed_slice(),
+            parts: Box::new([]),
+        };
+        FileOut {
+            edges,
+            left: Vec::new(),
+            orm,
+            ext,
+            stats: ResolveStats { unresolved: s.unresolved, ..Default::default() },
+            frame: Rc::new(frame),
+        }
+    }
+
+    fn to_stored(&self) -> reuse::StoredFile {
+        reuse::StoredFile {
+            edges: self
+                .edges
+                .iter()
+                .map(|e| reuse::StoredEdge {
+                    source: e.source.clone(),
+                    target: e.target.clone(),
+                    relation: e.relation,
+                    inferred: e.confidence == Confidence::Inferred,
+                    file: e.file as u32,
+                    line: e.line,
+                    context: e.context,
+                    runs: e.runs,
+                })
+                .collect(),
+            orm: self
+                .orm
+                .iter()
+                .map(|(t, src, f, line, w)| (t.clone(), src.clone(), *f as u32, *line, *w))
+                .collect(),
+            ext: self.ext.iter().map(|(a, b, c)| (a.clone(), b.clone(), c.to_string())).collect(),
+            unresolved: self.stats.unresolved,
+            files: self.frame.files.to_vec(),
+            keys: self.frame.keys.to_vec(),
+            all: self.frame.all,
+            used: self.frame.used.to_vec(),
+        }
+    }
+}
+
 /// What `resolve` gives the build.
 pub struct Resolution {
     /// The external, resource and route nodes.
@@ -9515,6 +9732,10 @@ pub struct Resolution {
     pub unresolved: Vec<Value>,
     /// Milliseconds of `resolve.index`, `resolve.main`, `resolve.post`.
     pub phases: Vec<(&'static str, u128)>,
+    /// The cache for the next update (`Incremental::key` given), and how
+    /// many files' resolution was taken from the last one.
+    pub stored: Option<reuse::Stored>,
+    pub reused: usize,
 }
 
 /// Every edge the files' facts prove, plus the external nodes they point at.
@@ -9525,11 +9746,14 @@ pub fn resolve(
     manifests: Vec<(String, PathBuf)>,
     repos: &[String],
     diagnose: bool,
+    incremental: Incremental<'_>,
 ) -> Resolution {
     // milliseconds of its own phases: the indexes, the main loop, the rest
     let started = std::time::Instant::now();
     let mut timings: Vec<(&'static str, u128)> = Vec::new();
     let mut edges: Vec<EdgeOut> = Vec::new();
+    let mut stored: Option<reuse::Stored> = None;
+    let mut reused = 0;
     // calls left without an edge whose name is one definition of the project
     let mut left: Vec<Value> = Vec::new();
     let mut stats: BTreeMap<String, ResolveStats> = BTreeMap::new();
@@ -9537,7 +9761,24 @@ pub fn resolve(
     let mut resource_nodes: Vec<(String, String, ResourceKind)> = Vec::new();
     let route_nodes: Vec<http::RouteNode>;
     {
+        rss("before the indexes");
         let p = Project::new(root, files, asm, manifests, repos);
+        rss("indexes");
+        // what can be taken from the last build: a file whose reads are all
+        // as they were (`reuse.rs`); never when the calls left unresolved
+        // are asked for, which the cache does not keep
+        let prints: Vec<u64> = match incremental.key {
+            Some(_) => (0..files.len())
+                .map(|f| p.file_print(f, incremental.content.get(f).copied().unwrap_or(0)))
+                .collect(),
+            None => Vec::new(),
+        };
+        let key_prints = if incremental.key.is_some() { p.key_prints() } else { HashMap::new() };
+        let reuse_ok: Vec<bool> = match incremental.previous {
+            Some(prev) if !diagnose => reuse::reusable(prev, &prints, &key_prints),
+            _ => vec![false; files.len()],
+        };
+        rss("prints");
         timings.push(("resolve.index", started.elapsed().as_millis()));
         let mut ext_seen: HashSet<String> = HashSet::new();
         // an external node, in the order first seen: one file's, then all
@@ -9561,14 +9802,32 @@ pub fn resolve(
         // in leaves the graph as it is)
         let mut per_file: Vec<FileOut> = (0..files.len()).map(|_| FileOut::default()).collect();
         let order = resolve_order(files.len());
-        let fresh = std::env::var("GRAPHLORE_RESOLVE_FRESH").is_ok_and(|v| v == "1");
-        for f in order {
-            if fresh {
-                p.forget();
+        let stats_on = std::env::var("GRAPHLORE_TRACE_STATS").is_ok_and(|v| v == "1");
+        trace::PROFILE.store(stats_on, std::sync::atomic::Ordering::Relaxed);
+        trace::ENABLED.store(
+            !std::env::var("GRAPHLORE_TRACE").is_ok_and(|v| v == "0"),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        for (n, f) in order.into_iter().enumerate() {
+            p.forget();
+            if n % 500 == 0 {
+                rss(&format!("file {n}"));
             }
             let facts = &files[f];
             let out = &mut per_file[f];
             let Some(fam) = p.family[f] else { continue };
+            if reuse_ok[f] {
+                if let Some(Some(stored)) = incremental.previous.map(|s| &s.files[f]) {
+                    *out = FileOut::from_stored(stored);
+                    // (the import uses it noted, which the imports' edges read)
+                    let mut used = p.used.borrow_mut();
+                    for &(a, b, c) in &stored.used {
+                        used.entry((a as usize, b as usize)).or_default().insert(c as usize);
+                    }
+                    reused += 1;
+                    continue;
+                }
+            }
             p.trace.open();
             p.trace.file(f);
             let st = &mut out.stats;
@@ -10172,12 +10431,41 @@ pub fn resolve(
             }
             out.frame = p.trace.close_file();
         }
+        rss("main loop");
         if std::env::var("GRAPHLORE_TRACE_STATS").is_ok_and(|v| v == "1") {
             trace_stats(&per_file);
             let mut scans: Vec<(u32, usize)> =
                 p.trace.scans.borrow().iter().map(|(k, v)| (*k, *v)).collect();
             scans.sort_by_key(|x| std::cmp::Reverse(x.1));
             eprintln!("trace: scans at line (0: unbalanced) {scans:?}");
+            let mut sites: Vec<((&str, u32), usize)> =
+                p.trace.sites.borrow().iter().map(|(k, v)| (*k, *v)).collect();
+            sites.sort_by_key(|x| std::cmp::Reverse(x.1));
+            sites.truncate(25);
+            eprintln!("trace: reads by site {sites:?}");
+            eprintln!(
+                "trace: frames closed, empty, own files, own keys, parts {:?}",
+                p.trace.counts.borrow()
+            );
+            eprintln!(
+                "trace: kept as empty, its part, shared small, new small, new large, large entries {:?}",
+                p.trace.kept.borrow()
+            );
+        }
+        if let Some(key) = incremental.key {
+            let files_out: Vec<Option<reuse::StoredFile>> = per_file
+                .iter()
+                .enumerate()
+                .map(|(f, out)| p.family[f].map(|_| out.to_stored()))
+                .collect();
+            let asked: HashSet<u64> =
+                files_out.iter().flatten().flat_map(|s| s.keys.iter().copied()).collect();
+            let keys = asked
+                .into_iter()
+                .map(|k| (k, key_prints.get(&k).copied().unwrap_or(reuse::ABSENT)))
+                .collect();
+            stored = Some(reuse::Stored { key, files: files_out, prints: prints.clone(), keys });
+            rss("cache made");
         }
         let mut orm_uses: Vec<(String, String, usize, u32, bool)> = Vec::new();
         for (f, out) in per_file.into_iter().enumerate() {
@@ -10548,7 +10836,7 @@ pub fn resolve(
     for i in (1..timings.len()).rev() {
         timings[i].1 -= timings[i - 1].1;
     }
-    Resolution { nodes, links, stats, unresolved: left, phases: timings }
+    Resolution { nodes, links, stats, unresolved: left, phases: timings, stored, reused }
 }
 
 /// ORM methods that read rows of a model's table, and that write them.
