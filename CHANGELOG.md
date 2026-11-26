@@ -17,10 +17,10 @@ All notable changes to this project are documented here. The format is based on
   build writes, byte for byte (`tests/incremental.rs`;
   `benchmarks/incremental_check.py` makes seeded edits to whole repositories
   and compares each update with a full build; all 45 audit repositories
-  agree). On kubernetes an update with nothing changed takes 43 s instead of
-  67 s, one after a line added to a file no other reads 46 s; one after a line
-  added to `kubelet.go`, which 876 files read, 74 s. The full build pays for
-  the recording: 140 s and 5.7 GB instead of 118 s and 5.0 GB. The report's `incremental` says how many files'
+  agree). On kubernetes an update with nothing changed takes 25 s instead of
+  67 s, one after a function added to a file no other reads 35 s; one after a
+  line added to `kubelet.go`, which 876 files read, 74 s. The full build pays
+  for the recording: 127 s and 5.6 GB instead of 118 s and 5.0 GB. The report's `incremental` says how many files'
   resolution was reused (`resolve_reused`), `phases_ms` splits resolution
   (`resolve.index`, `resolve.main`, `resolve.post`).
 - **A Go module's `vendor/` is left out of a build** unless `GRAPHLORE_VENDOR=1`

@@ -114,23 +114,27 @@ nodes and 1.87 million edges.
 
 | Build | seconds | peak memory | of which |
 |---|--:|--:|---|
-| full | 140 | 5.7 GB | parse 61 s, resolve 56 s, communities 16 s |
-| update, nothing changed | 43 | 5.4 GB | resolve 11 s (0 of 13,989 files resolved again), communities 14 s |
-| update, a line added to a file no other reads | 46 | 5.4 GB | resolve 12 s (1 file), communities 16 s |
+| full | 127 | 5.6 GB | parse 52 s, resolve 50 s, communities 11 s |
+| update, nothing changed | 25 | 4.7 GB | resolve 7 s (0 of 13,989 files resolved again), communities 3 s (kept) |
+| update, a function added to a file no other reads | 35 | 5.2 GB | resolve 6 s (1 file), communities 11 s |
 | update, a line added to `pkg/kubelet/kubelet.go` | 74 | 5.4 GB | resolve 41 s (876 files), communities 14 s |
 
 (Peak memory from the engine's report, `memory_mb`, which reads
 `/proc/self/status` after each phase.) An update parses only what changed and
 resolves again only the files whose resolution read something that changed
 ([native-engine.md](native-engine.md#incremental-updates)); the graph is the
-one a full build of the same tree writes, byte for byte (checked on this edit
-and by `benchmarks/incremental_check.py` on the audit repositories).
-`kubelet.go` is read by the 876 files of its package and of those that use
-its types, which all resolve again. Before incremental resolution an update
-resolved every file: 67 s for each of the updates above, and the full build
-took 118 s and 5.0 GB; recording what each file reads costs the full build
-about a fifth of its time. (The `kubelet.go` row was measured before the last
-fixes to incremental resolution, which left the others within a few seconds.)
+one a full build of the same tree writes, byte for byte (checked on these
+edits and by `benchmarks/incremental_check.py` on the audit repositories).
+When detection's input is the one the previous communities came from (no
+node, edge or weight changed: nothing, a comment, a function body that calls
+what it called) they are kept as they are; otherwise detection runs, and on
+kubernetes it settles for seven partitions (8.5 s). `kubelet.go` is read by
+the 876 files of its package and of those that use its types, which all
+resolve again (that row was measured before the last changes, which left the
+others within seconds of what it would be now). Before incremental resolution
+an update resolved every file: 67 s for each of the updates above, and the
+full build took 118 s and 5.0 GB; recording what each file reads costs the
+full build about a tenth of its time and 0.6 GB.
 
 With `vendor/` read, as before this release (18,946 files, 508,099 nodes,
 2.44 million edges, a 1.1 GB `graph.json`):
@@ -189,8 +193,9 @@ the adjacency already was.
 
 What this says: a graph of this size is served, the node tools answer in well
 under a second, and what costs is the build: an edit to a file many files read
-resolves all of those again, and an update's communities and caches take
-about 30 s whatever changed. `graph.json` itself is not the bottleneck
+resolves all of those again, an update that changes the graph runs community
+detection again (11 s), and the caches, indexes and passes over the whole
+graph take about 20 s whatever changed. `graph.json` itself is not the bottleneck
 (seconds to read once per server); a change of storage is not called for by
 these numbers.
 
