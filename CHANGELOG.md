@@ -53,7 +53,11 @@ All notable changes to this project are documented here. The format is based on
   overriding methods could differ with the order things were asked in. Each
   base is resolved with the state the main loop gives a base reference, and
   the passes after the main loop (dispatch, slots, resources) start from no
-  reference's state.
+  reference's state. A type whose base was resolved with the wrong state had
+  none of its inherited members: zod has 826 more calls (to `ZodType.decode`,
+  `encode` and the like, some `INFERRED` now `EXTRACTED`), gson two more
+  overrides (`NullSafeTypeAdapter.read` / `write`); the 43 other audit graphs
+  and the conformance cases are as they were.
 - **Native engine: a literal of many elements reads in linear time.** Each
   element asked its ancestors for a declared value and the literal answered
   by reading all of its children, so a 400 KB Go table took 200 s
