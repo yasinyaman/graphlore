@@ -9778,8 +9778,9 @@ pub struct Resolution {
     pub unresolved: Vec<Value>,
     /// Milliseconds of `resolve.index`, `resolve.main`, `resolve.post`.
     pub phases: Vec<(&'static str, u128)>,
-    /// The cache for the next update (`Incremental::key` given), and how
-    /// many files' resolution was taken from the last one.
+    /// The cache for the next update (`Incremental::key` given, and the
+    /// last one not already it), and how many files' resolution was taken
+    /// from the last one.
     pub stored: Option<reuse::Stored>,
     pub reused: usize,
 }
@@ -10503,7 +10504,12 @@ pub fn resolve(
                 p.trace.kept.borrow()
             );
         }
-        if let Some(key) = incremental.key {
+        // every file's resolution was the last build's: the cache that build
+        // wrote is the one this one would (each file's reads, and so the
+        // prints of what they read, unchanged)
+        let resolving = (0..files.len()).filter(|&f| p.family[f].is_some()).count();
+        let cache_current = incremental.previous.is_some() && reused == resolving;
+        if let (Some(key), false) = (incremental.key, cache_current) {
             let files_out: Vec<Option<reuse::StoredFile>> = per_file
                 .iter()
                 .enumerate()
@@ -10536,25 +10542,35 @@ pub fn resolve(
         // already calls, builds or extends what it names (`new Foo()`, `class
         // A < B`)
         {
-            let stronger: HashSet<(String, String)> = edges
-                .iter()
-                .filter(|e| {
-                    matches!(
-                        e.relation,
-                        "calls"
-                            | "indirect_call"
-                            | "inherits"
-                            | "implements"
-                            | "mixes_in"
-                            | "embeds"
-                    )
-                })
-                .map(|e| (e.source.clone(), e.target.clone()))
-                .collect();
-            edges.retain(|e| {
-                !(e.context == "value"
-                    && e.relation == "references"
-                    && stronger.contains(&(e.source.clone(), e.target.clone())))
+            let keep: Vec<bool> = {
+                let stronger: HashSet<(&str, &str)> = edges
+                    .iter()
+                    .filter(|e| {
+                        matches!(
+                            e.relation,
+                            "calls"
+                                | "indirect_call"
+                                | "inherits"
+                                | "implements"
+                                | "mixes_in"
+                                | "embeds"
+                        )
+                    })
+                    .map(|e| (e.source.as_str(), e.target.as_str()))
+                    .collect();
+                edges
+                    .iter()
+                    .map(|e| {
+                        !(e.context == "value"
+                            && e.relation == "references"
+                            && stronger.contains(&(e.source.as_str(), e.target.as_str())))
+                    })
+                    .collect()
+            };
+            let mut at = 0;
+            edges.retain(|_| {
+                at += 1;
+                keep[at - 1]
             });
         }
         // C, C++: a function put in a slot of a struct is what a call through
@@ -10769,12 +10785,24 @@ pub fn resolve(
     }
     // one edge per (source, target, relation): the first site, the earliest
     // time an import runs, the surest confidence
-    let mut seen: HashMap<(String, String, &'static str), usize> = HashMap::new();
+    // (by a hash of the three, the kept edges' own strings deciding a match:
+    // no key copied)
+    let mut seen: HashMap<u64, Vec<usize>> = HashMap::new();
     let mut kept: Vec<EdgeOut> = Vec::new();
     for e in edges {
-        let key = (e.source.clone(), e.target.clone(), e.relation);
-        match seen.get(&key) {
-            Some(&i) => {
+        let mut h = trace::Fnv::new();
+        h.write(e.source.as_bytes());
+        h.sep();
+        h.write(e.target.as_bytes());
+        h.sep();
+        h.write(e.relation.as_bytes());
+        let at = seen.entry(h.0).or_default();
+        let same = at.iter().copied().find(|&i| {
+            let k = &kept[i];
+            k.relation == e.relation && k.source == e.source && k.target == e.target
+        });
+        match same {
+            Some(i) => {
                 let k = &mut kept[i];
                 k.confidence = k.confidence.min(e.confidence);
                 if let (Some(a), Some(b)) = (k.runs, e.runs) {
@@ -10782,7 +10810,7 @@ pub fn resolve(
                 }
             }
             None => {
-                seen.insert(key, kept.len());
+                at.push(kept.len());
                 kept.push(e);
             }
         }

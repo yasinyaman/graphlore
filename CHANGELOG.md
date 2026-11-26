@@ -40,6 +40,23 @@ All notable changes to this project are documented here. The format is based on
   build took 167 s and 7.6 GB, from 236 s and 11.4 GB.
 
 ### Fixed
+- **Native engine: a build that changed nothing moved communities.**
+  Detection started from the previous communities and ran Leiden again, which
+  need not return them: on kubernetes every update with nothing changed ran
+  seven partitions (11 s) and moved 6,215 of 263,363 nodes to another
+  community. Detection now writes a hash of what it reads
+  (`graph.communities.input`: the nodes, the edges and their weights, the
+  engine's version); a build whose input has that hash keeps the previous
+  communities as they are. An external node's tie between neighbouring
+  communities goes to the one with the first member (it went to the one Leiden
+  found first): on the audit repositories 191 of 4,067 external and resource
+  nodes are in another community than before, and no other node is.
+- **Native engine: a file read again with names it no longer sees kept them.**
+  A file that saw a project type named like a wrapper (`Optional`, `Box`) was
+  read a second time with that name as the project's; from the cache on, it
+  kept those facts after the project's type was gone. The facts cache now
+  records the names each file was read with (`cache::FORMAT` 3), and a file
+  whose names changed either way is read again.
 - **Native engine: an update resolved C and C++ code otherwise than a full
   build.** A definition's byte range was left out of the facts cache, and
   resolution reads it (a struct's fields in source order for the functions put
@@ -69,6 +86,20 @@ All notable changes to this project are documented here. The format is based on
   the same bytes twice).
 
 ### Changed
+- **An update costs less where nothing it must redo changed** (kubernetes:
+  see `docs/benchmark.md`). The facts cache hands each file's facts over
+  instead of copying them, keeps the hash of each file's facts and the names
+  it was read with, so an unchanged file is neither hashed nor read again,
+  and is not written again when nothing was parsed, read again or removed
+  (`incremental.cache_kept`); the resolution cache is not written again when
+  every file's resolution was reused (`incremental.resolve_cache_kept`).
+  Community detection builds each group's subgraph once and with a map for a
+  small group, computes the node strengths once per level, starts from the
+  graph without copying it and splits groups in parallel; the value filter
+  and the dedup after resolution copy no strings. The report's `phases_ms`
+  has `cache_load`, `reread`, `resolve_cache_load`, `facts_hash` and
+  `resolve_cache_store`, and `communities` its own `phases_ms`,
+  `settle_passes` and `settle_end`.
 - **Native engine: less memory per build, the same graph.json.** The resolved
   edges stay in their compact form until the files' facts are let go (the
   facts cache is written right after resolution), they are kept typed through

@@ -22,8 +22,9 @@ use crate::facts::FileFacts;
 
 pub const CACHE_DIR: &str = "cache";
 /// The layout of the cached facts (`Key::format`): 2 keeps a definition's
-/// byte range, which an update resolved without before.
-pub const FORMAT: u32 = 2;
+/// byte range, which an update resolved without before; 3 keeps each file's
+/// shadowed names and the hash of its facts.
+pub const FORMAT: u32 = 3;
 pub const CACHE_FILE: &str = "graphlore-native.bin";
 /// A file modified this close to the cache being written may have changed
 /// again within the same timestamp: its content hash decides.
@@ -37,10 +38,15 @@ pub struct Stamp {
     pub hash: u64,
 }
 
+/// What the cache keeps of a file: its stamp, its facts, the names it was
+/// read with as the project's own types (`parse::shadowed`, sorted) and the
+/// hash of its facts (`facts_hash`).
 #[derive(Serialize, Deserialize)]
-struct Entry {
-    stamp: Stamp,
-    facts: FileFacts,
+pub struct Entry {
+    pub stamp: Stamp,
+    pub facts: FileFacts,
+    pub shadowed: Vec<String>,
+    pub facts_hash: u64,
 }
 
 /// Everything a cached fact depends on besides the file itself.
@@ -62,10 +68,11 @@ struct Stored {
     files: HashMap<String, Entry>,
 }
 
-/// A cache read back for one build.
+/// A cache read back for one build: each entry is taken out by the read of
+/// its file (no copy of the facts), once.
 pub struct Cache {
     written_ns: u64,
-    files: HashMap<String, Entry>,
+    files: HashMap<String, Mutex<Option<Entry>>>,
 }
 
 fn codec() -> impl Options {
@@ -126,7 +133,8 @@ impl Cache {
         let len = file.metadata().ok()?.len();
         // bounded by the file's size: a damaged length cannot ask for more memory
         let stored: Stored = codec().with_limit(len).deserialize_from(BufReader::new(file)).ok()?;
-        (stored.key == *key).then_some(Cache { written_ns: stored.written_ns, files: stored.files })
+        let files = stored.files.into_iter().map(|(k, e)| (k, Mutex::new(Some(e)))).collect();
+        (stored.key == *key).then_some(Cache { written_ns: stored.written_ns, files })
     }
 
     pub fn len(&self) -> usize {
@@ -139,17 +147,20 @@ impl Cache {
 
     /// The cached facts of `rel` when size and modification time say the file
     /// is unchanged (and it was not modified around the time of the cache).
-    pub fn unchanged(&self, rel: &str, size: u64, mtime: u64) -> Option<(FileFacts, Stamp)> {
-        let e = self.files.get(rel)?;
+    pub fn unchanged(&self, rel: &str, size: u64, mtime: u64) -> Option<Entry> {
+        let mut slot = self.files.get(rel)?.lock().unwrap_or_else(|e| e.into_inner());
+        let e = slot.as_ref()?;
         let settled = mtime.saturating_add(MTIME_SLACK_NS) < self.written_ns;
         (e.stamp.size == size && e.stamp.mtime_ns == mtime && mtime != 0 && settled)
-            .then(|| (e.facts.clone(), e.stamp))
+            .then(|| slot.take())
+            .flatten()
     }
 
-    /// The cached facts of `rel` when its content is the same.
-    pub fn same_content(&self, rel: &str, size: u64, hash: u64) -> Option<FileFacts> {
-        let e = self.files.get(rel)?;
-        (e.stamp.size == size && e.stamp.hash == hash).then(|| e.facts.clone())
+    /// The cached entry of `rel` when its content is the same.
+    pub fn same_content(&self, rel: &str, size: u64, hash: u64) -> Option<Entry> {
+        let mut slot = self.files.get(rel)?.lock().unwrap_or_else(|e| e.into_inner());
+        let e = slot.as_ref()?;
+        (e.stamp.size == size && e.stamp.hash == hash).then(|| slot.take()).flatten()
     }
 
     /// Paths cached but not found by this build: deleted, renamed or now ignored.
@@ -160,11 +171,11 @@ impl Cache {
 
 /// Write the cache for the facts a build used; files whose parse timed out are
 /// left out, to be tried again.
-pub fn store(path: &Path, key: Key, facts: Vec<(FileFacts, Stamp)>) -> Result<(), String> {
-    let files = facts
+pub fn store(path: &Path, key: Key, entries: Vec<Entry>) -> Result<(), String> {
+    let files: HashMap<String, Entry> = entries
         .into_iter()
-        .filter(|(f, _)| !f.parse.timed_out)
-        .map(|(facts, stamp)| (facts.path.clone(), Entry { stamp, facts }))
+        .filter(|e| !e.facts.parse.timed_out)
+        .map(|e| (e.facts.path.clone(), e))
         .collect();
     let stored = Stored { key, written_ns: now_ns(), files };
     let dir = path.parent().ok_or("no cache directory")?;

@@ -66,16 +66,26 @@ impl Graph {
 
     /// The graph induced by `nodes` (indices into `self`), re-indexed in order.
     pub fn subgraph(&self, nodes: &[usize]) -> Graph {
+        // (a small group of a large graph: a map, not an index of every node)
+        if nodes.len() * 16 < self.len() {
+            let index: std::collections::HashMap<usize, usize> =
+                nodes.iter().enumerate().map(|(k, &v)| (v, k)).collect();
+            return self.induced(nodes, |u| index.get(&u).copied());
+        }
         let mut index = vec![usize::MAX; self.len()];
         for (k, &v) in nodes.iter().enumerate() {
             index[v] = k;
         }
+        self.induced(nodes, |u| (index[u] != usize::MAX).then_some(index[u]))
+    }
+
+    fn induced(&self, nodes: &[usize], index: impl Fn(usize) -> Option<usize>) -> Graph {
         let mut g = Graph::new(nodes.len());
         for (k, &v) in nodes.iter().enumerate() {
             g.self_w[k] = self.self_w[v];
             for &(u, w) in &self.adj[v] {
-                if index[u] != usize::MAX {
-                    g.adj[k].push((index[u], w));
+                if let Some(i) = index(u) {
+                    g.adj[k].push((i, w));
                 }
             }
             g.adj[k].sort_by_key(|&(u, _)| u);
@@ -103,25 +113,27 @@ pub fn leiden(g: &Graph, resolution: f64, keys: &[u64], initial: Option<&[usize]
     if n == 0 {
         return Vec::new();
     }
-    let m2: f64 = g.strengths().iter().sum();
+    let mut k = g.strengths();
+    let m2: f64 = k.iter().sum();
     if m2 <= 0.0 {
         return (0..n).collect();
     }
     // which aggregate node each original node is part of, and the current level
+    // (the graph itself, borrowed, until the first aggregate)
     let mut member: Vec<usize> = (0..n).collect();
-    let mut level = g.clone();
+    let mut level: std::borrow::Cow<Graph> = std::borrow::Cow::Borrowed(g);
     let mut level_keys = keys.to_vec();
     let mut part: Vec<usize> = match initial {
         Some(p) if p.len() == n => p.to_vec(),
         _ => (0..n).collect(),
     };
     for _ in 0..64 {
-        let moved = local_moving(&level, &mut part, resolution, m2, &level_keys);
+        let moved = local_moving(&level, &k, &mut part, resolution, m2, &level_keys);
         let communities = renumber(&mut part);
         if !moved && communities == level.len() {
             break;
         }
-        let mut refined = refine(&level, &part, resolution, m2, &level_keys);
+        let mut refined = refine(&level, &k, &part, resolution, m2, &level_keys);
         let groups = renumber(&mut refined);
         if groups == level.len() {
             // nothing merges inside the communities: one more level changes nothing
@@ -135,7 +147,8 @@ pub fn leiden(g: &Graph, resolution: f64, keys: &[u64], initial: Option<&[usize]
             start[refined[v]] = part[v];
             agg_keys[refined[v]] = agg_keys[refined[v]].min(level_keys[v]);
         }
-        level = aggregate(&level, &refined, groups);
+        level = std::borrow::Cow::Owned(aggregate(&level, &refined, groups));
+        k = level.strengths();
         level_keys = agg_keys;
         for m in member.iter_mut() {
             *m = refined[*m];
@@ -189,9 +202,15 @@ fn renumber(part: &mut [usize]) -> usize {
 /// Leiden's fast local moving: visit nodes from a queue, move each to the
 /// neighbouring community with the largest modularity gain, and requeue the
 /// neighbours a move may now pull along. Returns whether anything moved.
-fn local_moving(g: &Graph, part: &mut [usize], gamma: f64, m2: f64, keys: &[u64]) -> bool {
+fn local_moving(
+    g: &Graph,
+    k: &[f64],
+    part: &mut [usize],
+    gamma: f64,
+    m2: f64,
+    keys: &[u64],
+) -> bool {
     let n = g.len();
-    let k = g.strengths();
     let mut tot = vec![0.0; n];
     for v in 0..n {
         tot[part[v]] += k[v];
@@ -260,16 +279,15 @@ fn local_moving(g: &Graph, part: &mut [usize], gamma: f64, m2: f64, keys: &[u64]
 /// Leiden's refinement: inside each community, start from singletons and merge
 /// a node that is still a singleton into the refined group it gains most by
 /// joining, when both are well connected to the rest of the community.
-fn refine(g: &Graph, part: &[usize], gamma: f64, m2: f64, keys: &[u64]) -> Vec<usize> {
+fn refine(g: &Graph, k: &[f64], part: &[usize], gamma: f64, m2: f64, keys: &[u64]) -> Vec<usize> {
     let n = g.len();
-    let k = g.strengths();
     let c_count = part.iter().copied().max().map_or(0, |x| x + 1);
     let mut members: Vec<Vec<usize>> = vec![Vec::new(); c_count];
     for v in 0..n {
         members[part[v]].push(v);
     }
     let mut refined: Vec<usize> = (0..n).collect();
-    let mut tot = k.clone(); // per refined group
+    let mut tot = k.to_vec(); // per refined group
     let mut ext = vec![0.0; n]; // weight from a refined group to the rest of its community
     let mut single = vec![true; n];
     for v in 0..n {

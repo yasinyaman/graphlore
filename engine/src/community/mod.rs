@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
 use std::time::Instant;
 
+use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -115,6 +116,10 @@ struct NodeInfo {
 pub struct Previous {
     pub community: HashMap<String, i64>,
     pub signatures: HashMap<i64, String>,
+    /// The hash of what detection read when it wrote these communities
+    /// (`graph.communities.input`): the same input keeps them as they are.
+    /// Never set for `cluster`, which is asked to detect them again.
+    pub input: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -143,6 +148,8 @@ struct PrevMeta {
 struct PrevCommunities {
     #[serde(default)]
     signatures: HashMap<String, Value>,
+    #[serde(default)]
+    input: Option<String>,
 }
 
 impl Previous {
@@ -159,7 +166,9 @@ impl Previous {
                 prev.community.insert(id, c);
             }
         }
-        let sigs = file.graph.and_then(|g| g.communities).map(|c| c.signatures);
+        let communities = file.graph.and_then(|g| g.communities);
+        prev.input = communities.as_ref().and_then(|c| c.input.clone());
+        let sigs = communities.map(|c| c.signatures);
         for (k, v) in sigs.into_iter().flatten() {
             if let (Ok(c), Some(s)) = (k.parse::<i64>(), v.as_str()) {
                 prev.signatures.insert(c, s.to_string());
@@ -198,6 +207,12 @@ pub struct CommunityReport {
     /// Communities that kept the id they had in the previous graph.
     pub kept_ids: usize,
     pub ms: u128,
+    /// Milliseconds per step, how many partitions settling took and how it
+    /// ended (`settled`: the previous communities again; `fixed`: a pass
+    /// returned its own start; `cycle`; `limit`).
+    pub phases_ms: BTreeMap<&'static str, u128>,
+    pub settle_passes: usize,
+    pub settle_end: &'static str,
 }
 
 pub struct Outcome {
@@ -234,6 +249,12 @@ pub fn detect<L: crate::graph::links::LinkSource + ?Sized>(
     saved: Option<&BTreeMap<String, String>>,
 ) -> Outcome {
     let started = Instant::now();
+    let mut phases: BTreeMap<&'static str, u128> = BTreeMap::new();
+    let mut lap_at = Instant::now();
+    let mut lap = |name: &'static str| {
+        phases.insert(name, lap_at.elapsed().as_millis());
+        lap_at = Instant::now();
+    };
     let mut order: Vec<usize> = (0..nodes.len()).collect();
     let mut test_file = HashMap::new();
     let infos: Vec<NodeInfo> = nodes.iter().map(|n| info(n, &mut test_file)).collect();
@@ -245,6 +266,7 @@ pub fn detect<L: crate::graph::links::LinkSource + ?Sized>(
     let n = infos.len();
     let index: HashMap<&str, usize> =
         infos.iter().enumerate().map(|(i, x)| (x.id.as_str(), i)).collect();
+    lap("nodes");
 
     // raw edges (degree, cohesion, externals) and weighted ones (partition)
     let mut raw: Vec<(usize, usize)> = Vec::new();
@@ -279,14 +301,22 @@ pub fn detect<L: crate::graph::links::LinkSource + ?Sized>(
     }
     weighted.extend(directory_ties(&infos));
     let mut degree = vec![0usize; n];
+    // (only an external's neighbours are asked for: it joins theirs)
     let mut neighbours: Vec<Vec<usize>> = vec![Vec::new(); n];
     for &(a, b) in &raw {
         degree[a] += 1;
         degree[b] += 1;
-        neighbours[a].push(b);
-        neighbours[b].push(a);
+        if infos[a].external {
+            neighbours[a].push(b);
+        }
+        if infos[b].external {
+            neighbours[b].push(a);
+        }
     }
+    lap("edges");
     let graph = Graph::from_edges(n, &weighted);
+    lap("graph");
+    let input = input_hash(&infos, &raw, &weighted);
 
     // partition the internal nodes that have edges, visiting nodes in an order
     // of their own (a hash of the id) and starting from the previous graph's
@@ -296,12 +326,30 @@ pub fn detect<L: crate::graph::links::LinkSource + ?Sized>(
         before: infos.iter().map(|x| prev.community.get(&x.id).copied()).collect(),
     };
     let warm = walk.before.iter().any(Option::is_some);
-    let mut groups = settle(&graph, &mut walk, &infos, &raw, warm);
-    // externals join their neighbours' community
+    let mut settled = Settled::default();
+    // what detection reads is what it read for the previous communities:
+    // they stand (Leiden from them need not return them; a graph that has
+    // not changed keeps its communities)
+    let kept = (prev.input.as_deref() == Some(input.as_str()))
+        .then(|| previous_groups(&infos, &walk.before))
+        .flatten();
+    let mut groups = match kept {
+        Some(groups) => {
+            settled.end = "kept";
+            groups
+        }
+        None => settle(&graph, &mut walk, &infos, &raw, warm, &mut settled),
+    };
+    lap("settle");
+    // externals join their neighbours' community; a tie goes to the group
+    // with the first member (an order of the graph's, not of how the groups
+    // were found)
     let mut of: Vec<usize> = vec![usize::MAX; n];
+    let mut first: Vec<usize> = vec![usize::MAX; groups.len()];
     for (c, g) in groups.iter().enumerate() {
         for &v in g {
             of[v] = c;
+            first[c] = first[c].min(v);
         }
     }
     for v in 0..n {
@@ -314,7 +362,10 @@ pub fn detect<L: crate::graph::links::LinkSource + ?Sized>(
                 *votes.entry(of[u]).or_default() += 1;
             }
         }
-        let best = votes.iter().max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0))).map(|(&c, _)| c);
+        let best = votes
+            .iter()
+            .max_by(|a, b| a.1.cmp(b.1).then(first[*b.0].cmp(&first[*a.0])))
+            .map(|(&c, _)| c);
         match best {
             Some(c) => groups[c].push(v),
             None => groups.push(vec![v]),
@@ -333,6 +384,7 @@ pub fn detect<L: crate::graph::links::LinkSource + ?Sized>(
         .filter(|(g, &id)| g.iter().any(|&v| prev.community.get(&infos[v].id) == Some(&id)))
         .count();
 
+    lap("ids");
     // names and the saved labels that still apply
     let mut header_sigs = Map::new();
     let mut names: HashMap<i64, String> = HashMap::new();
@@ -363,6 +415,7 @@ pub fn detect<L: crate::graph::links::LinkSource + ?Sized>(
     });
     let labels = labels.filter(|l| saved.is_some_and(|s| s != l));
 
+    lap("names");
     // write them on the nodes
     let mut node_comm: Vec<i64> = vec![0; n];
     for (g, &id) in groups.iter().zip(&ids) {
@@ -384,6 +437,7 @@ pub fn detect<L: crate::graph::links::LinkSource + ?Sized>(
         }
     }
     let modularity = (leiden::modularity(&graph, &part, RESOLUTION) * 10_000.0).round() / 10_000.0;
+    lap("modularity");
     let report = CommunityReport {
         count: groups.len(),
         largest: groups.first().map_or(0, Vec::len),
@@ -392,6 +446,9 @@ pub fn detect<L: crate::graph::links::LinkSource + ?Sized>(
         renamed_labels: renamed,
         kept_ids,
         ms: started.elapsed().as_millis(),
+        phases_ms: phases,
+        settle_passes: settled.passes,
+        settle_end: settled.end,
     };
     let header = json!({
         "count": report.count,
@@ -400,8 +457,52 @@ pub fn detect<L: crate::graph::links::LinkSource + ?Sized>(
         "largest": report.largest,
         "singletons": report.singletons,
         "signatures": Value::Object(header_sigs),
+        "input": input,
     });
     Outcome { report, header, labels }
+}
+
+/// A hash of everything detection reads (the nodes in id order, the edges
+/// and their weights) and of the engine: the same hash, the same input.
+fn input_hash(
+    infos: &[NodeInfo],
+    raw: &[(usize, usize)],
+    weighted: &[(usize, usize, f64)],
+) -> String {
+    let mut h = crate::resolve::trace::Fnv::new();
+    h.write(crate::VERSION.as_bytes());
+    h.sep();
+    for x in infos {
+        for part in [&x.id, &x.label, &x.file] {
+            h.write(part.as_bytes());
+            h.sep();
+        }
+        h.write(&[u8::from(x.external), u8::from(x.is_file), u8::from(x.test)]);
+    }
+    h.sep();
+    for &(a, b) in raw {
+        h.write(&(a as u64).to_le_bytes());
+        h.write(&(b as u64).to_le_bytes());
+    }
+    h.sep();
+    for &(a, b, w) in weighted {
+        h.write(&(a as u64).to_le_bytes());
+        h.write(&(b as u64).to_le_bytes());
+        h.write(&w.to_bits().to_le_bytes());
+    }
+    format!("{:016x}", h.0)
+}
+
+/// The previous communities as the groups settling gives: every node that is
+/// not external, by the community it had (`None` when one had none).
+fn previous_groups(infos: &[NodeInfo], before: &[Option<i64>]) -> Option<Vec<Vec<usize>>> {
+    let mut by: BTreeMap<i64, Vec<usize>> = BTreeMap::new();
+    for (v, x) in infos.iter().enumerate() {
+        if !x.external {
+            by.entry(before[v]?).or_default().push(v);
+        }
+    }
+    Some(by.into_values().collect())
 }
 
 /// A weak tie between the files of each directory, so a file with few edges
@@ -449,7 +550,7 @@ fn partition(
         (0..n).filter(|&v| !infos[v].external && !graph.adj[v].is_empty()).collect();
     let mut groups: Vec<Vec<usize>> = Vec::new();
     if !connected.is_empty() {
-        let part = walk.leiden(graph, &connected);
+        let part = walk.leiden(&graph.subgraph(&connected), &connected);
         let count = part.iter().copied().max().map_or(0, |x| x + 1);
         groups = vec![Vec::new(); count];
         for (k, &v) in connected.iter().enumerate() {
@@ -459,25 +560,31 @@ fn partition(
     groups
         .extend((0..n).filter(|&v| !infos[v].external && graph.adj[v].is_empty()).map(|v| vec![v]));
     let max_size = MIN_SPLIT_SIZE.max((n as f64 * MAX_COMMUNITY_FRACTION) as usize);
-    let mut split: Vec<Vec<usize>> = Vec::new();
-    for g in groups {
-        if g.len() > max_size {
-            split.extend(split_group(graph, walk, g));
-        } else {
-            split.push(g);
-        }
-    }
+    // (each split reads the graph only: in parallel, put together in order)
+    let split: Vec<Vec<usize>> = groups
+        .into_par_iter()
+        .map(|g| if g.len() > max_size { split_group(graph, walk, g) } else { vec![g] })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .flatten()
+        .collect();
     let inside = inside_pairs(raw, &split, n);
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    for (g, pairs) in split.into_iter().zip(inside) {
-        if g.len() >= COHESION_SPLIT_MIN_SIZE && cohesion(pairs, g.len()) < COHESION_SPLIT_THRESHOLD
-        {
-            groups.extend(split_group(graph, walk, g));
-        } else {
-            groups.push(g);
-        }
-    }
-    groups
+    split
+        .into_par_iter()
+        .zip(inside)
+        .map(|(g, pairs)| {
+            if g.len() >= COHESION_SPLIT_MIN_SIZE
+                && cohesion(pairs, g.len()) < COHESION_SPLIT_THRESHOLD
+            {
+                split_group(graph, walk, g)
+            } else {
+                vec![g]
+            }
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// Partition until a pass starting from the last result returns it again.
@@ -487,16 +594,26 @@ fn partition(
 /// splits it again): then the state of the cycle closest to where the build
 /// started is kept, which a rebuild starting from it keeps too. A first build
 /// settles the same way, so the first update after it moves nothing for nothing.
+/// How settling went (a measurement for the report).
+#[derive(Default)]
+struct Settled {
+    passes: usize,
+    end: &'static str,
+}
+
 fn settle(
     graph: &Graph,
     walk: &mut Walk,
     infos: &[NodeInfo],
     raw: &[(usize, usize)],
     warm: bool,
+    settled: &mut Settled,
 ) -> Vec<Vec<usize>> {
     let n = infos.len();
     let first = partition(graph, walk, infos, raw);
+    settled.passes = 1;
     if warm && reproduces(&first, &walk.before) {
+        settled.end = "settled";
         return first; // the previous communities, unchanged: already settled
     }
     let reference: Vec<Option<i64>> = if warm { walk.before.clone() } else { labels(&first, n) };
@@ -504,9 +621,14 @@ fn settle(
     for _ in 0..SETTLE_PASSES {
         walk.before = labels(states.last().expect("one state"), n);
         let next = partition(graph, walk, infos, raw);
+        settled.passes += 1;
         match states.iter().position(|s| same_partition(s, &next, n)) {
-            Some(at) if at + 1 == states.len() => break, // a fixed point
+            Some(at) if at + 1 == states.len() => {
+                settled.end = "fixed";
+                return states.pop().expect("one state");
+            }
             Some(at) => {
+                settled.end = "cycle";
                 // a cycle: keep its state closest to the start
                 let cycle = states.split_off(at);
                 return cycle
@@ -519,6 +641,7 @@ fn settle(
             None => states.push(next),
         }
     }
+    settled.end = "limit";
     states.pop().expect("one state")
 }
 
@@ -582,7 +705,8 @@ struct Walk {
 
 impl Walk {
     /// Leiden on the subgraph of `nodes`.
-    fn leiden(&self, graph: &Graph, nodes: &[usize]) -> Vec<usize> {
+    /// Leiden on `sub`, the graph induced by `nodes`.
+    fn leiden(&self, sub: &Graph, nodes: &[usize]) -> Vec<usize> {
         let keys: Vec<u64> = nodes.iter().map(|&v| self.keys[v]).collect();
         let mut label: HashMap<i64, usize> = HashMap::new();
         let mut next = 0;
@@ -601,7 +725,7 @@ impl Walk {
             initial.push(l);
         }
         let start = (!label.is_empty()).then_some(initial.as_slice());
-        leiden::leiden(&graph.subgraph(nodes), RESOLUTION, &keys, start)
+        leiden::leiden(sub, RESOLUTION, &keys, start)
     }
 }
 
@@ -610,7 +734,7 @@ fn split_group(graph: &Graph, walk: &Walk, g: Vec<usize>) -> Vec<Vec<usize>> {
     if sub.adj.iter().all(Vec::is_empty) {
         return g.into_iter().map(|v| vec![v]).collect();
     }
-    let part = walk.leiden(graph, &g);
+    let part = walk.leiden(&sub, &g);
     let count = part.iter().copied().max().map_or(0, |x| x + 1);
     if count <= 1 {
         return vec![g];

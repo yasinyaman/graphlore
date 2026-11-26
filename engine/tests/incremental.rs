@@ -226,3 +226,28 @@ fn a_definition_appearing_elsewhere_resolves_the_file_that_asked_for_it_again() 
     assert!(calls, "a.go's call of Helper resolves after the update");
     fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn an_unchanged_graph_keeps_its_communities() {
+    let root = project("kept");
+    age(&root);
+    let (first, report) = build_graph(&opts(&root, false)).unwrap();
+    assert_ne!(report.communities.settle_end, "kept");
+    // the same tree again, as an update and as a full build: the communities
+    // detection would give from the same input are the ones there are
+    let (again, report) = build_graph(&opts(&root, true)).unwrap();
+    assert_eq!(report.communities.settle_end, "kept");
+    assert_eq!(content(again), content(first.clone()));
+    let (full, report) = build_graph(&opts(&root, false)).unwrap();
+    assert_eq!(report.communities.settle_end, "kept");
+    assert_eq!(content(full), content(first));
+    // a changed file is a new input: detection runs
+    fs::write(
+        root.join("pkg/util.py"),
+        "def double(x):\n    return twice(x)\n\ndef twice(x):\n    return x\n",
+    )
+    .unwrap();
+    let (_, report) = build_graph(&opts(&root, true)).unwrap();
+    assert_ne!(report.communities.settle_end, "kept");
+    fs::remove_dir_all(&root).unwrap();
+}

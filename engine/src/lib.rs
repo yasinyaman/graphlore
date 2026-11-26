@@ -94,7 +94,10 @@ impl BuildOptions {
 
 #[allow(clippy::large_enum_variant)] // one per file, moved once
 enum Read {
-    Facts(FileFacts, cache::Stamp, bool),
+    /// A file's facts, its stamp, whether they came from the cache, the
+    /// names it was read with as the project's own types, and the hash of
+    /// its facts when the cache had it.
+    Facts(FileFacts, cache::Stamp, bool, Vec<String>, Option<u64>),
     Unreadable(String),
 }
 
@@ -108,8 +111,8 @@ fn read_all(
         .map(|c| {
             let meta = std::fs::metadata(&c.abs).ok();
             let (size, mtime) = meta.as_ref().map_or((0, 0), |m| (m.len(), cache::mtime_ns(m)));
-            if let Some((facts, stamp)) = cached.and_then(|k| k.unchanged(&c.rel, size, mtime)) {
-                return Read::Facts(facts, stamp, true);
+            if let Some(e) = cached.and_then(|k| k.unchanged(&c.rel, size, mtime)) {
+                return Read::Facts(e.facts, e.stamp, true, e.shadowed, Some(e.facts_hash));
             }
             let src = match std::fs::read(&c.abs) {
                 Err(_) => return Read::Unreadable(c.rel.clone()),
@@ -117,9 +120,8 @@ fn read_all(
             };
             let stamp =
                 cache::Stamp { size: src.len() as u64, mtime_ns: mtime, hash: cache::hash(&src) };
-            if let Some(facts) = cached.and_then(|k| k.same_content(&c.rel, stamp.size, stamp.hash))
-            {
-                return Read::Facts(facts, stamp, true);
+            if let Some(e) = cached.and_then(|k| k.same_content(&c.rel, stamp.size, stamp.hash)) {
+                return Read::Facts(e.facts, stamp, true, e.shadowed, Some(e.facts_hash));
             }
             let facts = match c.kind {
                 walk::FileKind::Code(lang) => {
@@ -130,7 +132,7 @@ fn read_all(
                     parse::file_facts(&c.rel, &src, None, Some(kind), timeout)
                 }
             };
-            Read::Facts(facts, stamp, false)
+            Read::Facts(facts, stamp, false, Vec::new(), None)
         })
         .collect()
 }
@@ -144,17 +146,17 @@ fn read_all(
 /// `java.util.Optional` beside the project's `com.acme.Optional`). The answer
 /// is the same from the cache as from the sources: what a file defines and
 /// imports does not depend on it.
-fn reread_shadowed(reads: &mut [Read], files: &[walk::Candidate], timeout: Option<Duration>) {
+/// Returns how many files were read again.
+fn reread_shadowed(
+    reads: &mut [Read],
+    files: &[walk::Candidate],
+    timeout: Option<Duration>,
+) -> usize {
     use std::collections::{HashMap, HashSet};
-    let same_language = |a: Lang, b: Lang| {
-        let ecma = |l: Lang| matches!(l, Lang::JavaScript | Lang::TypeScript | Lang::Tsx);
-        a == b || (ecma(a) && ecma(b))
-    };
-    let dir = |p: &str| p.rfind('/').map_or(String::new(), |i| p[..i].to_string());
     // (language, name) -> the files that define a type of that name
     let mut defined: HashMap<(Lang, String), Vec<usize>> = HashMap::new();
     for (i, r) in reads.iter().enumerate() {
-        let Read::Facts(f, _, _) = r else { continue };
+        let Read::Facts(f, ..) = r else { continue };
         let Some(lang) = f.lang else { continue };
         for d in &f.defs {
             if d.kind.is_class_like() && refs::wrapper_name(&d.name) {
@@ -165,18 +167,67 @@ fn reread_shadowed(reads: &mut [Read], files: &[walk::Candidate], timeout: Optio
             }
         }
     }
-    if defined.is_empty() {
-        return;
+    let mut plan: HashMap<usize, HashSet<String>> = HashMap::new();
+    if !defined.is_empty() {
+        plan = shadow_plan(reads, &defined);
     }
+    // what to read again: a file whose names differ from those its facts
+    // were read with (a cached file read with names it no longer sees is
+    // read again with none)
+    let mut again_with: Vec<(usize, Vec<String>)> = Vec::new();
+    for (i, r) in reads.iter().enumerate() {
+        let Read::Facts(_, _, _, shadowed, _) = r else { continue };
+        let mut names: Vec<String> = plan.remove(&i).into_iter().flatten().collect();
+        names.sort();
+        if names != *shadowed {
+            again_with.push((i, names));
+        }
+    }
+    let count = again_with.len();
+    let again: Vec<(usize, Option<FileFacts>, Vec<String>)> = again_with
+        .into_par_iter()
+        .map(|(i, names)| {
+            let c = &files[i];
+            let walk::FileKind::Code(lang) = c.kind else { return (i, None, names) };
+            let Ok(src) = std::fs::read(&c.abs) else { return (i, None, names) };
+            let lang = lang::detect(&c.rel, Some(&src)).unwrap_or(lang);
+            let set: HashSet<String> = names.iter().cloned().collect();
+            let facts = parse::with_shadowed(std::sync::Arc::new(set), || {
+                parse::file_facts(&c.rel, &src, Some(lang), None, timeout)
+            });
+            (i, Some(facts), names)
+        })
+        .collect();
+    for (i, facts, names) in again {
+        if let (Some(facts), Read::Facts(old, _, _, shadowed, hash)) = (facts, &mut reads[i]) {
+            *old = facts;
+            *shadowed = names;
+            *hash = None;
+        }
+    }
+    count
+}
+
+/// Which files see a project type named like a wrapper, with the names.
+fn shadow_plan(
+    reads: &[Read],
+    defined: &std::collections::HashMap<(Lang, String), Vec<usize>>,
+) -> std::collections::HashMap<usize, std::collections::HashSet<String>> {
+    use std::collections::{HashMap, HashSet};
+    let same_language = |a: Lang, b: Lang| {
+        let ecma = |l: Lang| matches!(l, Lang::JavaScript | Lang::TypeScript | Lang::Tsx);
+        a == b || (ecma(a) && ecma(b))
+    };
+    let dir = |p: &str| p.rfind('/').map_or(String::new(), |i| p[..i].to_string());
     let facts_of = |i: usize| match &reads[i] {
-        Read::Facts(f, _, _) => Some(f),
+        Read::Facts(f, ..) => Some(f),
         Read::Unreadable(_) => None,
     };
     let mut plan: HashMap<usize, HashSet<String>> = HashMap::new();
     for (i, r) in reads.iter().enumerate() {
-        let Read::Facts(f, _, _) = r else { continue };
+        let Read::Facts(f, ..) = r else { continue };
         let Some(lang) = f.lang else { continue };
-        for ((l, name), at) in &defined {
+        for ((l, name), at) in defined {
             if !same_language(*l, lang) {
                 continue;
             }
@@ -214,24 +265,7 @@ fn reread_shadowed(reads: &mut [Read], files: &[walk::Candidate], timeout: Optio
             }
         }
     }
-    let again: Vec<(usize, Option<FileFacts>)> = plan
-        .into_par_iter()
-        .map(|(i, names)| {
-            let c = &files[i];
-            let walk::FileKind::Code(lang) = c.kind else { return (i, None) };
-            let Ok(src) = std::fs::read(&c.abs) else { return (i, None) };
-            let lang = lang::detect(&c.rel, Some(&src)).unwrap_or(lang);
-            let facts = parse::with_shadowed(std::sync::Arc::new(names), || {
-                parse::file_facts(&c.rel, &src, Some(lang), None, timeout)
-            });
-            (i, Some(facts))
-        })
-        .collect();
-    for (i, facts) in again {
-        if let (Some(facts), Read::Facts(old, _, _)) = (facts, &mut reads[i]) {
-            *old = facts;
-        }
-    }
+    plan
 }
 
 /// Build the graph and its report. Writes `opts.out` when it is set.
@@ -281,6 +315,7 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
     } else {
         None
     };
+    lap("cache_load", &mut phases);
     let reads = match opts.threads {
         Some(n) => rayon::ThreadPoolBuilder::new()
             .num_threads(n.max(1))
@@ -291,9 +326,9 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
     };
 
     let mut reads = reads;
-    reread_shadowed(&mut reads, &found.files, opts.parse_timeout);
-
     lap("parse", &mut phases);
+    let reread = reread_shadowed(&mut reads, &found.files, opts.parse_timeout);
+    lap("reread", &mut phases);
     let mut report = BuildReport {
         engine: "graphlore",
         engine_version: VERSION,
@@ -313,19 +348,23 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
 
     let mut facts = Vec::new();
     let mut stamps = Vec::new();
+    let mut shadows: Vec<Vec<String>> = Vec::new();
+    let mut known_hashes: Vec<Option<u64>> = Vec::new();
     let mut unreadable = Vec::new();
     let mut timed_out = Vec::new();
     report.incremental.cache = cached.is_some();
     for r in reads {
         match r {
             Read::Unreadable(rel) => unreadable.push(rel),
-            Read::Facts(f, stamp, reused) => {
+            Read::Facts(f, stamp, reused, shadowed, hash) => {
                 if reused {
                     report.incremental.reused += 1;
                 } else {
                     report.incremental.parsed += 1;
                 }
                 stamps.push(stamp);
+                shadows.push(shadowed);
+                known_hashes.push(hash);
                 if f.is_document {
                     report.documents += 1;
                     report.headings += f.headings.len();
@@ -389,17 +428,23 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
             h.write(r.as_bytes());
             h.sep();
         }
+        // (the hosts a workspace file maps to repositories)
+        h.write(&std::fs::read(root.join(walk::WORKSPACE_FILE)).unwrap_or_default());
         h.0
     });
     let previous_resolution = match (&resolved_path, resolve_key, opts.incremental) {
         (Some(path), Some(key), true) => resolve::reuse::load(path, key),
         _ => None,
     };
-    // what other files read of each: its facts (`cache::facts_hash`)
-    let content: Vec<u64> = match resolve_key {
-        Some(_) => facts.par_iter().map(cache::facts_hash).collect(),
-        None => Vec::new(),
-    };
+    lap("resolve_cache_load", &mut phases);
+    // what other files read of each: its facts (`cache::facts_hash`; the
+    // cache's, for a file it gave unchanged)
+    let content: Vec<u64> = facts
+        .par_iter()
+        .zip(&known_hashes)
+        .map(|(f, known)| known.unwrap_or_else(|| cache::facts_hash(f)))
+        .collect();
+    lap("facts_hash", &mut phases);
     let resolve::Resolution {
         nodes: ext_nodes,
         links: edges,
@@ -421,19 +466,22 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
             key: resolve_key,
         },
     );
+    lap("resolve", &mut phases);
+    phases.extend(resolve_phases);
     drop(previous_resolution);
     report.incremental.resolve_reused = resolve_reused;
     if let (Some(path), Some(store)) = (&resolved_path, &resolved_store) {
         // (a cache that cannot be written costs the next update its speed)
         report.incremental.resolve_cache_written = resolve::reuse::store(path, store).is_ok();
     }
+    // (every file's resolution reused: the cache on disk is this build's)
+    report.incremental.resolve_cache_kept = resolve_key.is_some() && resolved_store.is_none();
     drop(resolved_store);
     if let Some(path) = &opts.unresolved {
         let text = serde_json::to_string(&unresolved).map_err(|e| e.to_string())?;
         std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     }
-    lap("resolve", &mut phases);
-    phases.extend(resolve_phases);
+    lap("resolve_cache_store", &mut phases);
     assembled.nodes.extend(ext_nodes);
     let documented = docs::link::edges(&facts, &assembled);
     report.doc_links = documented.len();
@@ -441,14 +489,33 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
     // before the graph's own phases (coupling, communities, the write), which
     // read only nodes and links. (A cache holds each file's facts, whatever the
     // graph's write does.)
-    if let (Some(path), true) = (&cache_path, opts.out.is_some()) {
+    // (nothing parsed, read again or gone: the cache on disk is the one this
+    // build would write)
+    let same_cache = report.incremental.cache
+        && report.incremental.parsed == 0
+        && report.incremental.removed == 0
+        && reread == 0;
+    if let (Some(path), true, false) = (&cache_path, opts.out.is_some(), same_cache) {
+        let entries: Vec<cache::Entry> = facts
+            .into_iter()
+            .zip(stamps)
+            .zip(shadows)
+            .zip(content)
+            .map(|(((facts, stamp), shadowed), facts_hash)| cache::Entry {
+                stamp,
+                facts,
+                shadowed,
+                facts_hash,
+            })
+            .collect();
         // a cache that cannot be written costs the next update its speed, nothing else
-        report.incremental.cache_written =
-            cache::store(path, cache_key, facts.into_iter().zip(stamps).collect()).is_ok();
+        report.incremental.cache_written = cache::store(path, cache_key, entries).is_ok();
         lap("cache", &mut phases);
     } else {
+        report.incremental.cache_kept = same_cache;
         drop(facts);
         drop(stamps);
+        drop(content);
     }
     // the resolver's edges stay typed to the end (`graph::links`)
     let mut links = graph::links::Links {
