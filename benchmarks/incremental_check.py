@@ -13,8 +13,10 @@ an update (`--incremental`) is compared, byte for byte, with a full build of
 the same tree from the same previous graph (communities start from it in both).
 The edits accumulate. A difference stops that repository, prints the edges
 that differ and keeps the copy. The table gives, per repository, the edits
-checked and the share of files whose resolution the updates took from the
-last build (`incremental.resolve_reused`).
+checked, the share of files whose resolution the updates took from the
+last build (`incremental.resolve_reused`), and the nodes an update moved to
+another community, on average per edit (`moved`: a small edit should move few),
+with how the updates' settling ended.
 """
 from __future__ import annotations
 
@@ -77,6 +79,12 @@ def differences(a: Path, b: Path) -> list[str]:
     return out
 
 
+def moved(before: bytes, after: Path) -> int:
+    """Nodes in both graphs whose community differs."""
+    a = {n["id"]: n.get("community") for n in json.loads(before)["nodes"]}
+    return sum(1 for n in json.loads(after.read_text())["nodes"] if n["id"] in a and a[n["id"]] != n.get("community"))
+
+
 def check(repo: Path, edits: int, seed: int, keep: bool) -> dict:
     work = Path(tempfile.mkdtemp(prefix=f"incr-{repo.name}-"))
     root = work / repo.name
@@ -85,7 +93,8 @@ def check(repo: Path, edits: int, seed: int, keep: bool) -> dict:
     build(root, out, incremental=False)
     files = source_files(out / "graph.json")
     rng = random.Random(f"{seed}:{repo.name}")
-    reused = total = 0
+    reused = total = shifted = 0
+    ends: dict[str, int] = {}
     row = {"repo": repo.name, "edits": 0, "same": True, "work": str(work)}
     for i in range(edits):
         if not files:
@@ -101,6 +110,9 @@ def check(repo: Path, edits: int, seed: int, keep: bool) -> dict:
         inc = report.get("incremental") or {}
         reused += inc.get("resolve_reused", 0)
         total += report.get("files", 0)
+        shifted += moved(previous, out / "graph.json")
+        end = (report.get("communities") or {}).get("settle_end") or "?"
+        ends[end] = ends.get(end, 0) + 1
         row["edits"] = i + 1
         if (out / "graph.json").read_bytes() != (full / "graph.json").read_bytes():
             row["same"] = False
@@ -108,6 +120,8 @@ def check(repo: Path, edits: int, seed: int, keep: bool) -> dict:
             row["diff"] = differences(out / "graph.json", full / "graph.json")
             return row
     row["reused"] = reused / total if total else 0.0
+    row["moved"] = shifted / row["edits"] if row["edits"] else 0.0
+    row["settle"] = ends
     if not keep:
         shutil.rmtree(work)
         row.pop("work")
@@ -134,7 +148,8 @@ def main() -> int:
             row = {"repo": repo.name, "same": False, "error": str(e)[-400:]}
         rows.append(row)
         if row["same"]:
-            print(f"{row['repo']:<28} {row['edits']:>3} edits  same   reused {100 * row.get('reused', 0):5.1f}%", flush=True)
+            ends = " ".join(f"{k} {v}" for k, v in sorted(row.get("settle", {}).items()))
+            print(f"{row['repo']:<28} {row['edits']:>3} edits  same   reused {100 * row.get('reused', 0):5.1f}%  moved {row.get('moved', 0):7.1f}  settle {ends}", flush=True)
         else:
             failed += 1
             print(f"{row['repo']:<28} DIFFERS after {row.get('failed_at', row.get('error'))} (copy kept at {row.get('work')})", flush=True)
