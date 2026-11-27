@@ -135,8 +135,7 @@ rust-analyzer, scip-java through javac and scip-ruby):
 python benchmarks/conformance.py --only go,csharp --scip --jobs 4 --baseline benchmarks/results-conformance.json
 ```
 
-Measured 2026-11-27 (engine 0.5.80, scip-go 0.2.10, scip-dotnet 0.2.16 on
-.NET 8): the engine alone holds 600 of the 715 Go and C# cases, precise mode
+Measured 2026-11-27 (engine 0.5.80, scip-go 0.2.10, scip-dotnet 0.2.16, the same with the .NET 8 and the .NET 10 SDK): the engine alone holds 600 of the 715 Go and C# cases, precise mode
 675 — Go 314 of 318, C# 361 of 397. Two the engine holds break, both the
 indexer's errors (a type parameter's constraint naming one declared after
 it, in scip-go; the more specific of two generic overloads, in scip-dotnet).
