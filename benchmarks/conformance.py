@@ -18,7 +18,9 @@ that must not be (`absent`).
   python benchmarks/conformance.py --only go,csharp --scip --baseline benchmarks/results-conformance.json
 
 `--scip` reads each case as graphlore's tools do in precise mode: the
-language's SCIP indexer (scip-go, scip-dotnet) is run on the case's project
+language's SCIP indexer (scip-go, scip-dotnet, scip-typescript,
+rust-analyzer, scip-ruby; for Java javac with the SemanticDB plugin named by
+`SEMANTICDB_JAVAC`, then `scip-java index-semanticdb`) is run on the case's project
 and the engine's edges are checked against it (`resolve._precise`); an edge
 the index contradicts counts as absent. Against the engine's baseline,
 "fixed" is a case precise mode holds and the engine alone does not.
@@ -38,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -5347,6 +5350,16 @@ def _scip_tool(name: str) -> str | None:
     return found
 
 
+def _scip_ruby_native() -> str | None:
+    """scip-ruby's own binary: the gem's wrapper runs only under `bundle exec`."""
+    try:
+        listed = subprocess.run(["gem", "contents", "scip-ruby"], capture_output=True,
+                                text=True, timeout=60).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return next((p for p in listed if p.endswith("/native/scip-ruby")), None)
+
+
 def _scip_index(lang: str, root: Path) -> str | None:
     """Run the language's indexer on a case's project: None, or why not."""
     if lang == "go":
@@ -5364,6 +5377,22 @@ def _scip_index(lang: str, root: Path) -> str | None:
         if not (root / "tsconfig.json").exists():
             (root / "tsconfig.json").write_text(SCIP_TSCONFIG, encoding="utf-8")
         argv = [tool, "index", "--output", "index.scip"] if tool else []
+    elif lang == "java":
+        # javac with the SemanticDB plugin, then scip-java's converter: its
+        # own javac mode fetches a JDK index from GitHub
+        tool, plugin = _scip_tool("scip-java"), os.environ.get("SEMANTICDB_JAVAC", "")
+        if not tool or not Path(plugin).is_file():
+            return "scip-java (on PATH) and SEMANTICDB_JAVAC (the semanticdb-javac jar) are needed"
+        sources = [str(p) for p in root.rglob("*.java")]
+        out = root / "graphify-out" / "semanticdb"
+        out.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["javac", "-cp", plugin, "-d", str(root / "graphify-out" / "classes"),
+                        f"-Xplugin:semanticdb -sourceroot:{root} -targetroot:{out}", *sources],
+                       cwd=root, capture_output=True, text=True, timeout=600)
+        argv = [tool, "index-semanticdb", "--output", "index.scip", str(out)]
+    elif lang == "ruby":
+        tool = os.environ.get("SCIP_RUBY") or _scip_ruby_native()
+        argv = [tool, "--index-file", "index.scip", "--gem-metadata", "case@1", "."] if tool else []
     elif lang == "rust":
         tool = _scip_tool("rust-analyzer")
         argv = [tool, "scip", ".", "--output", "index.scip"] if tool else []

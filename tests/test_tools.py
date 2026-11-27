@@ -11178,6 +11178,21 @@ def test_scip_reads_a_rust_crate_by_its_package_s_name():
     assert not scip._names(lines, 2, 4, 9, 1, crate)
 
 
+def test_scip_reads_java_and_ruby_symbols():
+    from graphlore import scip
+
+    java = "semanticdb maven maven/com.google.code.gson/gson 2.15 com/google/gson/"
+    assert scip.bare_name(java + "JsonPrimitive#`<init>`(+2).") == "JsonPrimitive"
+    assert scip.constructed_type(java + "Gson#`<init>`().") == java + "Gson#"
+    ruby = "scip-ruby gem thor 1 "
+    lines = ["instance = new(args, opts)", "req.options.timeout = timeout", "x.timeout"]
+    # `new` calls `initialize`; a writer is written without its `=`
+    assert scip._names(lines, 0, 11, 14, 1, ruby + "Thor#Base#initialize().")
+    assert scip._names(lines, 1, 12, 19, 1, ruby + "Object#`timeout=`().")
+    assert scip._names(lines, 2, 2, 9, 1, ruby + "Object#timeout().")
+    assert not scip._names(lines, 2, 2, 9, 1, ruby + "Object#other().")
+
+
 def test_scip_matches_a_symbol_by_its_descriptors():
     from graphlore import scip
 

@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Precise mode reads scip-java and scip-ruby indexes** (`docs/concepts.md`,
+  "Java", "Ruby"): a Java constructor `` `<init>` `` is named as its class; a
+  Ruby `X.new` names `initialize`, and a writer `x=` is written `x`. gson
+  (15,929 confirmed) shows the engine's Java overload choices the compiler
+  settles; 30 of faraday's 51 contradicted edges are RSpec `let`s Sorbet does
+  not know. `conformance.py --scip` runs the Java cases through javac with
+  the SemanticDB plugin (`SEMANTICDB_JAVAC`) and the Ruby cases through
+  scip-ruby's native binary: 62 and 35 hold.
 - **Precise mode reads `rust-analyzer scip` indexes** (`docs/concepts.md`,
   "Rust"): a crate (`crate/` under its package) is written by the package's
   name or `crate`. On four Rust repositories rust-analyzer confirms 14,940

@@ -326,6 +326,11 @@ def _names(lines: list[str], line: int, char: int, end: int, encoding: int,
     # (`x["name"]`: a member written as a string)
     if name in text or any(t[:1] in "\"'`" and t.strip("\"'`") == name for t in text):
         return True
+    # Ruby: `X.new(…)` calls `initialize`; a writer `timeout=` is written
+    # `x.timeout = v`
+    if (name == "initialize" and "new" in text) or (
+            len(name) > 1 and name.endswith("=") and name[:-1] in text):
+        return True
     # a C# attribute is written without its suffix: `[Option]` is `OptionAttribute`
     if name.endswith("Attribute") and name[:-len("Attribute")] in text:
         return True
@@ -351,8 +356,8 @@ _LAST_DESCRIPTOR = re.compile(
 
 
 _MAJOR_VERSION = re.compile(r"v[0-9]+")
-# scip-dotnet's and scip-typescript's names of a constructor
-_CONSTRUCTORS = (".ctor", ".cctor", "<constructor>")
+# scip-dotnet's, scip-typescript's and scip-java's names of a constructor
+_CONSTRUCTORS = (".ctor", ".cctor", "<constructor>", "<init>")
 # scip-typescript's accessors: `<get>body` and `<set>body` are written `body`
 _ACCESSORS = ("<get>", "<set>")
 

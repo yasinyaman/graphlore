@@ -246,6 +246,69 @@ methods (`branch`, `not`, `eq`, `index`), at a range that writes no name.
 not another `impl`'s, and on ripgrep `self.regex.find(…)` is regex-automata's
 `find`, not the project's. The 75 Rust conformance cases hold in precise mode.
 
+### Java
+
+```bash
+scip-java index --output index.scip -- test-compile -DskipTests   # Maven; Gradle and sbt likewise
+```
+
+scip-java runs the build with a compiler plugin (SemanticDB), so the build
+has to work: a Gradle build whose plugins it cannot fetch, or a Maven build
+that fails on a warning of a newer JDK (`-Werror`, `failOnWarning`), gives no
+index. Without a build tool, `javac -Xplugin:semanticdb …` with the
+`semanticdb-javac` jar and then `scip-java index-semanticdb` make one (what
+`conformance.py --scip` does). A constructor is `` `<init>` ``, named as its
+class.
+
+| Repository | Confirmed | Added | Contradicted |
+|---|---:|---:|---:|
+| gson | 15,929 | 3,003 | 1,090 |
+| spring-petclinic | 655 | 157 | 1 |
+
+89.1% of the edges the index has an answer for go where it says, and most of
+the rest are the engine's overload choices, which the compiler settles:
+`fromJson("{}", CustomClass3.class)` is `fromJson(String, Class)`, not
+`(String, Type)`, and `out.value(… ? null : value.getHostAddress())` is
+`value(String)`, not `value(float)`. The 62 Java conformance cases hold in
+precise mode.
+
+### Ruby
+
+```bash
+gem install scip-ruby
+"$(gem contents scip-ruby | grep /native/scip-ruby)" --index-file index.scip --gem-metadata myproject@1 .
+```
+
+The gem's `scip-ruby` runs only under `bundle exec`; its native binary runs
+anywhere. scip-ruby is Sorbet: `X.new(…)` names `initialize`, a writer
+`timeout=` is written `x.timeout = v`, and the reader takes both.
+
+| Repository | Confirmed | Added | Contradicted |
+|---|---:|---:|---:|
+| thor | 977 | 160 | 3 |
+| faraday | 881 | 243 | 51 |
+| rails-realworld | 42 | 15 | 0 |
+| sinatra-warden | 4 | 0 | 0 |
+
+96.4% of the edges the index has an answer for go where it says. Sorbet does
+not know RSpec: 30 of faraday's 51 contradicted edges are a `let` the engine
+scopes to its `describe` and the index binds to a method of the name in
+another spec; the other 21 are the engine's (`Logger.new` and `URI(url)` in a
+spec are the standard library's). The 35 Ruby conformance cases hold in
+precise mode.
+
+### What could not be measured here
+
+- **C and C++**: scip-clang is published as GitHub release binaries, which
+  this environment's network does not reach.
+- **PHP**: scip-php and the projects' own dependencies install through
+  Composer, whose downloads come from GitHub here.
+- **Kotlin and Scala**: scip-java indexes them through Gradle, sbt or mill
+  builds, which could not fetch their plugins (or Maven Central rate-limited
+  the requests); `kotlinc` with `semanticdb-kotlinc` is the build-tool-free
+  way.
+- **Swift**: there is no SCIP indexer of the Swift compiler's.
+
 ## Import edges, checked against the source
 
 `graphlore_cycles`, `graphlore_layers` and `graphlore_surprises` read each import
