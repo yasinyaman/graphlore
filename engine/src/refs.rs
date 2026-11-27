@@ -2354,6 +2354,7 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
                 from_def: None,
                 byte: *start,
                 until: 0,
+                scope: 0,
                 after: 0,
             });
         }
@@ -3345,11 +3346,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let go = facts.lang == Some(crate::lang::Lang::Go);
     let mut stamped = 0usize;
     let mut until = 0usize;
+    let mut scope = 0usize;
     let mut declared: Option<(usize, usize)> = None;
     let mut value_nodes: HashMap<usize, Option<(usize, usize)>> = HashMap::new();
     while let Some((n, depth)) = stack.pop() {
         for l in locals[stamped..].iter_mut().filter(|l| !l.field && l.until == 0) {
             l.until = until;
+            l.scope = scope;
             if let Some((_, end)) = declared.filter(|(value, _)| l.byte < *value && scoped) {
                 l.after = end;
             }
@@ -3357,6 +3360,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         stamped = locals.len();
         anc.truncate(depth);
         until = 0;
+        scope = 0;
         // (the declaration the node is, or is the name of)
         // (never a definition's own node: a parameter's default value is
         // no value its function is declared with)
@@ -3378,7 +3382,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         if scoped && !hoisted {
             // (what a definition's own node declares, its parameters, is its)
             let around = std::iter::once(&n).chain(anc.iter().rev());
-            until = around
+            (scope, until) = around
                 .into_iter()
                 .find(|a| {
                     // (Go `for x := …; …; … { … }`: the clause declares for
@@ -3389,7 +3393,12 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             || by_node.contains_key(&a.id())
                             || (go && GO_STATEMENT_BLOCKS.contains(&a.kind_str())))
                 })
-                .map_or(0, |a| a.end_byte());
+                // (the block's start only where a statement's init declares:
+                // a function's parameters and its body are one block)
+                .map_or((0, 0), |a| {
+                    let statement = go && GO_STATEMENT_BLOCKS.contains(&a.kind_str());
+                    (if statement { a.start_byte() } else { 0 }, a.end_byte())
+                });
         }
         steps += 1;
         if steps > 2_000_000 {
@@ -3645,6 +3654,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                         until: 0,
+                                        scope: 0,
                                         after: 0,
                                     });
                                 }
@@ -3687,6 +3697,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                         until: 0,
+                                        scope: 0,
                                         after: 0,
                                     });
                                 }
@@ -3717,6 +3728,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             from_def: Some(di),
                             byte: ps.start_byte(),
                             until: 0,
+                            scope: 0,
                             after: 0,
                         });
                     }
@@ -3771,6 +3783,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                     from_def: Some(di),
                                     byte: x.start_byte(),
                                     until: 0,
+                                    scope: 0,
                                     after: 0,
                                 });
                             }
@@ -4301,6 +4314,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     from_def: None,
                     byte: n.start_byte(),
                     until: 0,
+                    scope: 0,
                     after: 0,
                 });
             }
@@ -4335,6 +4349,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             from_def: None,
                             byte: n.start_byte(),
                             until: 0,
+                            scope: 0,
                             after: 0,
                         });
                     }
@@ -4360,6 +4375,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     from_def: None,
                     byte: range.map_or(n.start_byte(), |(lo, _)| lo),
                     until: range.map_or(0, |(_, hi)| hi),
+                    scope: 0,
                     after: range.map_or(0, |(lo, _)| lo),
                 });
             }
@@ -4417,6 +4433,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     from_def: None,
                     byte: declared_at,
                     until: 0,
+                    scope: 0,
                     after: 0,
                 });
             }
@@ -5155,6 +5172,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     from_def: None,
                     byte: n.start_byte(),
                     until: 0,
+                    scope: 0,
                     after: 0,
                 });
             }
@@ -5166,6 +5184,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     }
     for l in locals[stamped..].iter_mut().filter(|l| !l.field && l.until == 0) {
         l.until = until;
+        l.scope = scope;
         if let Some((_, end)) = declared.filter(|(value, _)| l.byte < *value && scoped) {
             l.after = end;
         }
@@ -5307,6 +5326,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     // = request` in `__init__(self, request: Request)`: the field never takes
     // the parameter's place)
     let redeclares = facts.lang == Some(crate::lang::Lang::Rust);
+    // (Go: an `else if` init declares the name again in a block that ends
+    // where the first one's does: two blocks, two locals)
+    let go_blocks = facts.lang == Some(crate::lang::Lang::Go);
     let apart = facts.lang == Some(crate::lang::Lang::Python);
     locals.dedup_by(|b, a| {
         a.from_def == b.from_def
@@ -5314,6 +5336,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             && !(apart && a.field != b.field)
             && !(redeclares && !a.field && !b.field)
             && (a.field || b.field || b.assigned || a.until == b.until)
+            && !(go_blocks && a.scope != 0 && b.scope != 0 && a.scope != b.scope)
     });
     for imp in imports.iter_mut() {
         if imp.runs == Runs::ModuleLevel && inside_callable(&facts.defs, imp.byte) {
@@ -8415,12 +8438,23 @@ fn add_extras(
             Some(p) => format!("{}.{name}", defs[p].qualname),
             None => name.clone(),
         };
-        // C, C++ `struct { … } ev;`: a field of an anonymous struct type
+        // C, C++ `struct { … } ev;`, Go `DB struct { … }`: a field of an
+        // anonymous struct type
         let inline = node
             .by_field("type")
-            .filter(|t| matches!(t.kind_str(), "struct_specifier" | "union_specifier"))
+            .filter(|t| {
+                matches!(t.kind_str(), "struct_specifier" | "union_specifier" | "struct_type")
+            })
             .filter(|t| t.by_field("name").is_none())
-            .and_then(|t| t.by_field("body"))
+            .and_then(|t| {
+                t.by_field("body").or_else(|| {
+                    (t.kind_str() == "struct_type")
+                        .then(|| {
+                            kids(t).into_iter().find(|c| c.kind_str() == "field_declaration_list")
+                        })
+                        .flatten()
+                })
+            })
             .map(|b| (b.start_byte(), b.end_byte()))
             .filter(|_| *state);
         let def_line = line(*node);

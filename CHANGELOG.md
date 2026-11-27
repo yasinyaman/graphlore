@@ -55,6 +55,18 @@ All notable changes to this project are documented here. The format is based on
   build took 167 s and 7.6 GB, from 236 s and 11.4 GB.
 
 ### Fixed
+- **Native engine: Go scopes and identifiers, as the specification has them.**
+  An unexported name of another package is another identifier, so a member
+  lookup through embedded types goes on past it (`v.run()` with `util.T` and
+  `A` embedded is `A.run`); a parameter's scope is the function body, not
+  its signature (`func Use(Config Real) *Config`: the result is the type);
+  a local's scope begins after its declaration and the value it is declared
+  with is outside it (`step := func() { step() }` calls the package's
+  `step`); an `else if` init declares a new variable; and a field of an
+  anonymous struct type has the members its body declares (`c.DB.Pool.Close()`,
+  cobra's `commandCalledAs.name`). Six conformance cases fixed (1157 of 1272,
+  none broken); of the audit repositories only cobra's graph changes (seven
+  `reads` / `writes` of `commandCalledAs`'s fields).
 - **Native engine: a local's value is read where the local is declared.**
   It was resolved where the use being resolved is written: in a generated Go
   deepcopy function, which shadows `in` and `out` in every block (`in, out :=

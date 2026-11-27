@@ -1,5 +1,5 @@
 {
- "passed": 1151,
+ "passed": 1157,
  "total": 1272,
  "cases": [
   {
@@ -4198,21 +4198,9 @@
   },
   {
    "id": "go/unexported-names-of-two-packages-differ",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "L.helper"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Run",
-     "calls",
-     "util/u.go:A.helper"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "go/constant-takes-the-type-of-its-value",
@@ -4726,14 +4714,8 @@
   },
   {
    "id": "go/parameter-hides-a-type",
-   "ok": false,
-   "missing": [
-    [
-     "Use",
-     "references",
-     "Config"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -4846,14 +4828,8 @@
   },
   {
    "id": "go/nested-anonymous-struct-field",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Pool.Close"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -4984,21 +4960,9 @@
   },
   {
    "id": "go/unexported-names-of-another-package",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "A.run"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Run",
-     "calls",
-     "T.run"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "go/method-expression-called",
@@ -5518,21 +5482,9 @@
   },
   {
    "id": "go/else-if-redeclares-a-name",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "B.Name"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Run",
-     "calls",
-     "A.Name"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "go/local-type-scope-starts-at-its-name",
@@ -5722,14 +5674,8 @@
   },
   {
    "id": "go/short-var-literal-sees-outer-name",
-   "ok": false,
-   "missing": [
-    [
-     "Walk",
-     "calls",
-     "step"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {

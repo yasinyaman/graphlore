@@ -4410,7 +4410,16 @@ impl<'a> Project<'a> {
                 let all = self.shadow_list(&key);
                 let mut each = all.into_iter().flatten().copied().chain(std::iter::once(li));
                 let locals = &self.files[f].locals;
-                if at.is_none_or(|at| each.any(|i| locals[i].until == 0 || at < locals[i].until)) {
+                // (Go: a local's scope begins after its declaration, the value
+                // it is declared with outside it, and a parameter's is the
+                // body: the spec's Declarations and scope)
+                let go = self.family[f] == Some(Family::Go);
+                let in_scope = |at: usize, i: usize| {
+                    let l = &locals[i];
+                    (l.until == 0 || at < l.until)
+                        && (!go || (l.byte <= at && (l.declared || l.after == 0 || l.after <= at)))
+                };
+                if at.is_none_or(|at| each.any(|i| in_scope(at, i))) {
                     return true;
                 }
             }
@@ -4966,7 +4975,16 @@ impl<'a> Project<'a> {
                 if level.is_empty() {
                     return None;
                 }
-                if let Some(m) = level.iter().find_map(|b| self.best(self.members(*b, name))) {
+                // (an unexported name of another package is another name:
+                // it is not the one asked for, and the lookup goes on)
+                if let Some(m) = level.iter().find_map(|b| {
+                    let found: Vec<DefRef> = self
+                        .members(*b, name)
+                        .into_iter()
+                        .filter(|m| self.go_visible_here(*m, name))
+                        .collect();
+                    self.best(found)
+                }) {
                     return Some(m);
                 }
                 level = level.iter().flat_map(|b| self.bases(*b)).collect();
@@ -4974,6 +4992,20 @@ impl<'a> Project<'a> {
             return None;
         }
         self.bases(c).into_iter().find_map(|b| self.class_member(b, name, depth - 1))
+    }
+
+    /// Go: whether a member named `name` is the name the use being resolved
+    /// writes. An unexported name (not starting with a capital) is qualified
+    /// by its package (the spec's Uniqueness of identifiers; go/types'
+    /// `sameId`): another package's is another identifier.
+    fn go_visible_here(&self, m: DefRef, name: &str) -> bool {
+        if name.chars().next().is_some_and(char::is_uppercase) {
+            return true;
+        }
+        let Some((here, _)) = *self.site.borrow() else { return true };
+        let dir = |p: &str| p.rfind('/').map_or(String::new(), |i| p[..i].to_string());
+        let (a, b) = (self.files.decl(here), self.files.decl(m.0));
+        dir(a.path()) == dir(b.path()) && a.package() == b.package()
     }
 
     /// The constructors a type declares, in source order.
@@ -7315,6 +7347,15 @@ impl<'a> Project<'a> {
                         }
                         _ => None,
                     };
+                    // a field of an anonymous struct type (C `struct { … } ev;`,
+                    // Go `DB struct { … }`): its members are the ones its body
+                    // declares, whatever a type written inside it says
+                    if let Some(Target::Def(p)) = &found {
+                        if self.def(*p).inline_body.is_some() {
+                            t = Target::Def(*p);
+                            continue;
+                        }
+                    }
                     if let Some((mut ft, cf)) = self.field_type(c, seg, 3).or_else(declared) {
                         conf = conf.max(cf);
                         // a field assigned a union-typed parameter (`stream:

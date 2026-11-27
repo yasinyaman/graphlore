@@ -4066,3 +4066,29 @@ fn shadowed_block_locals_are_typed_in_linear_time() {
     assert!(got.contains(&(".DeepCopyInto()".to_string(), "app_a_inner_copy".to_string())));
     assert!(started.elapsed().as_secs() < 20, "took {:?}", started.elapsed());
 }
+
+// Go scopes and identifiers (the spec's Declarations and scope, Uniqueness
+// of identifiers): an unexported name of another package is another name; a
+// parameter's scope is the body, a local's begins after its declaration (its
+// own value is outside it); an `else if` init declares a new variable; a
+// field of an anonymous struct type has the members its body declares.
+#[test]
+fn go_scopes_identifiers_and_anonymous_struct_fields() {
+    let got = call_ids("go-scopes", &[
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        (
+            "util/u.go",
+            "package util\n\ntype T struct{}\n\nfunc (T) run() int {\n\treturn 1\n}\n\nfunc (t T) Go() int {\n\treturn t.run()\n}\n",
+        ),
+        (
+            "a.go",
+            "package app\n\nimport \"example.com/app/util\"\n\ntype A struct{}\n\nfunc (A) run() int {\n\treturn 2\n}\n\ntype V struct {\n\tutil.T\n\tA\n}\n\nfunc Run(v V) int {\n\treturn v.run()\n}\n\ntype B struct{}\n\nfunc (B) Name() string { return \"b\" }\n\nfunc (A) Name() string { return \"a\" }\n\nfunc makeA() A { return A{} }\n\nfunc makeB() B { return B{} }\n\nfunc Pick(n int) string {\n\tif v := makeA(); n == 0 {\n\t\t_ = v\n\t} else if v := makeB(); n == 1 {\n\t\treturn v.Name()\n\t}\n\treturn \"\"\n}\n\nfunc step() {}\n\nfunc Walk() {\n\tstep := func() {\n\t\tstep()\n\t}\n\t_ = step\n}\n\ntype Pool struct{ n int }\n\nfunc (p *Pool) Close() int { return p.n }\n\ntype Config struct {\n\tDB struct {\n\t\tPool *Pool\n\t}\n}\n\nfunc Shut(c *Config) int {\n\treturn c.DB.Pool.Close()\n}\n",
+        ),
+    ]);
+    let has = |from: &str, to: &str| got.contains(&(from.to_string(), to.to_string()));
+    assert!(has("Run()", "a_a_run"), "{got:?}");
+    assert!(!has("Run()", "util_u_t_run"), "{got:?}");
+    assert!(has("Pick()", "a_b_name") && !has("Pick()", "a_a_name"), "{got:?}");
+    assert!(has("Walk()", "a_step"), "{got:?}");
+    assert!(has("Shut()", "a_pool_close"), "{got:?}");
+}

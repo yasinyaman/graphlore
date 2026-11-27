@@ -293,7 +293,7 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the 
 | an import of a directory is the file its `package.json` names | `package-json-types-entry` | – | yes |
 | where a type is written, a value of the name does not hide the type around it | `type-meaning-skips-values` | – | yes |
 
-### go (300 of 318)
+### go (306 of 318)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
@@ -372,7 +372,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | a label conflicts with no identifier: a call of a function named like a label is the function | `label-is-no-identifier` | – | yes |
 | a function of the package named like a predeclared one hides it: `max(a, b)` is the package function | `predeclared-name-redeclared-in-the-package` | – | yes |
 | a dot-import declares only the exported names of the package: an unexported name of its own is the file's own | `dot-import-takes-only-exported-names` | – | yes |
-| an unexported name of another package is a different identifier: a selector finds the one of its own package at the same depth | `unexported-names-of-two-packages-differ` | – | **no**: no Run -calls-> L.helper has Run -calls-> util/u.go:A.helper |
+| an unexported name of another package is a different identifier: a selector finds the one of its own package at the same depth | `unexported-names-of-two-packages-differ` | – | yes |
 | a constant declared without a type takes the type of its expression | `constant-takes-the-type-of-its-value` | – | yes |
 | a constant whose expression list is omitted repeats the previous list and its type: it has the type of the first | `implicitly-repeated-constant-has-the-type` | – | yes |
 | a variable declared with a type has that type, whatever its value: a method called on it is the declared type's | `declared-type-wins-over-the-value` | – | yes |
@@ -452,7 +452,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | a local assigned `new(Repo)` or `*r` is of type Repo | `new-and-dereference` | – | yes |
 | `open().Find()` and `make2(1)().Find()` on parameters of function type are the result type's method | `function-typed-value-result` | – | yes |
 | `repos ...*Repo` is a []*Repo: `repos[0]` is a *Repo | `variadic-parameter-is-a-slice` | – | yes |
-| a parameter or receiver named like a type hides it in the body only, not in the signature | `parameter-hides-a-type` | – | **no**: no Use -references-> Config |
+| a parameter or receiver named like a type hides it in the body only, not in the signature | `parameter-hides-a-type` | – | yes |
 | `util.Reader` embedded gives util's Reader.Read, not a local Reader's | `qualified-embedded-interface` | – | yes |
 | a value of type parameter T with constraint `Number` (embedding Labeled and `~int \| ~int64`) has Labeled.Label | `constraint-embeds-an-interface` | 1.18– | yes |
 | `for k := range m` over `map[Key]int` makes k a Key | `range-map-key` | – | yes |
@@ -470,7 +470,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | the value variable of `for _, v := range m` is the map's element type, not its key type | `range-map-value` | – | yes |
 | a method declared on a defined function type is called on a value of that type | `method-of-a-defined-function-type` | – | yes |
 | `b.V` and `b.Vs[0]` of a `Box[Item]` are Items | `generic-field-has-the-type-argument` | 1.18– | yes |
-| `c.DB.Pool.Close()` goes through a field of anonymous struct type to Pool's method | `nested-anonymous-struct-field` | – | **no**: no Run -calls-> Pool.Close |
+| `c.DB.Pool.Close()` goes through a field of anonymous struct type to Pool's method | `nested-anonymous-struct-field` | – | yes |
 | a defined type of a defined slice type is indexed to the element type | `underlying-through-a-chain` | – | yes |
 | `util.Map[int, string](…)` and `Map[int, int](…)` are calls of the function written, qualified or not | `instantiated-generic-function` | – | yes |
 | `(helper)()` is a call of helper and `((r)).Find()` a call on r | `parenthesized-operand` | – | yes |
@@ -492,7 +492,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | `util.Sin()` where util is a parameter is the parameter type's method, not the package's function | `local-hides-the-package-name` | – | yes |
 | `type Copy Base`: c.ID is Base's field; `type Wrapped Wrapper` (Wrapper embeds Base): w.Show() is Base's method | `defined-type-keeps-fields-and-promotions` | – | yes |
 | `type Alias = Repo`: a.Find() is Repo's method | `alias-has-the-methods` | – | yes |
-| V embeds util.T (unexported method run) and A (method run): `v.run()` is A's | `unexported-names-of-another-package` | – | **no**: no Run -calls-> A.run has Run -calls-> T.run |
+| V embeds util.T (unexported method run) and A (method run): `v.run()` is A's | `unexported-names-of-another-package` | – | yes |
 | `Counter.Value(c)`, `(Counter).Value(c)` and `(*Counter).Inc(&c)` are calls of the methods | `method-expression-called` | – | yes |
 | `(*Counter).Inc` and `(*Counter).Get` (Get has a value receiver) are uses of the methods | `pointer-method-expression` | – | yes |
 | `Wrapper.Value` with Counter embedded in Wrapper is Counter.Value | `method-expression-promoted` | – | yes |
@@ -578,7 +578,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | `p.hits++` through an embedded struct is a read and a write of the embedded type's field `hits` | `promoted-field-incdec` | – | yes |
 | a receive case written with `=` assigns an existing operand (a field is written) and declares nothing | `select-receive-assigns-a-field` | – | yes |
 | in `case nil` and `default` clauses the type switch variable has the guard expression's type (the interface), not the type of another clause | `type-switch-nil-and-default-keep-the-guard-type` | – | yes |
-| a name redeclared by an `else if` init statement is a new variable there, with its own type | `else-if-redeclares-a-name` | – | **no**: no Run -calls-> B.Name has Run -calls-> A.Name |
+| a name redeclared by an `else if` init statement is a new variable there, with its own type | `else-if-redeclares-a-name` | – | yes |
 | the scope of a type declared in a function starts at its identifier: `next *node` inside the local `node` is the local type | `local-type-scope-starts-at-its-name` | – | yes |
 | a range value over `[3]*T` or over a named `map[K]*T` type is a *T | `range-over-an-array-and-a-named-map` | – | yes |
 | `range t.children` and `range t.Kids()` iterate the field's and the declared result's element type | `range-over-a-field-and-a-call-result` | – | yes |
@@ -607,7 +607,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | for it := range All() with All returning func(yield func(Item) bool): it is an Item, so it.Size() is Item.Size | `range-over-a-function-iterator` | 1.23– | **no**: no Run -calls-> Item.Size |
 | the embedded field of `util.Base` is named Base: `Svc{Base: b}` and `s.Base.Touch()` are the type's, not the importing package's variable Base | `embedded-field-named-by-its-type` | – | yes |
 | h.run() on a field of function type reads the field Hook.run; a method run of another type is not called | `function-typed-field-called` | – | yes |
-| a literal assigned with := does not see the variable it initializes: its own name inside the body is the outer (package) one | `short-var-literal-sees-outer-name` | – | **no**: no Walk -calls-> step |
+| a literal assigned with := does not see the variable it initializes: its own name inside the body is the outer (package) one | `short-var-literal-sees-outer-name` | – | yes |
 | `Box[int].Get` is a use of Box.Get, not of Other.Get | `method-expression-on-an-instance` | – | yes |
 | an import name is a name of its file block: the same name in two files of a package means two packages | `go-import-name-is-per-file` | – | yes |
 | a call of a method promoted from an interface embedded in a struct is the interface's method | `go-embedded-interface-in-struct` | – | yes |
@@ -1523,4 +1523,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1151 of 1272 rules hold
+1157 of 1272 rules hold

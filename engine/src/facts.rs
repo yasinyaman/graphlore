@@ -500,6 +500,11 @@ pub struct Local {
     /// whose block it is written in.
     #[serde(default)]
     pub until: usize,
+    /// Where the block `until` ends begins: two of one name in two blocks
+    /// that end together (Go's `if v := a(); … {} else if v := b(); … {}`)
+    /// are two. Read only while the facts are read (not in the cache).
+    #[serde(skip)]
+    pub scope: usize,
     /// Where its declaration ends, for one declared with a value (0: none):
     /// inside its own value the name is still the outer one.
     #[serde(default)]
