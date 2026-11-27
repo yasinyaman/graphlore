@@ -128,7 +128,8 @@ Where a compiler-grade SCIP index is at hand, graphlore checks the graph
 against it at read time ([concepts](concepts.md#a-compilers-answer-scip-indexes)):
 the rules this list holds that need what only a type checker knows are the
 indexer's to settle. `--scip` reads the cases that way, with the language's
-indexer run on each case's project (scip-go and scip-dotnet for now):
+indexer run on each case's project (scip-go, scip-dotnet, scip-typescript,
+rust-analyzer, scip-java through javac and scip-ruby):
 
 ```bash
 python benchmarks/conformance.py --only go,csharp --scip --jobs 4 --baseline benchmarks/results-conformance.json
@@ -143,8 +144,14 @@ What stays open is mostly what an index does not say: a relation it marks
 no access for (an `indirect_call` of a method group, a `dispatches_to`), an
 implicit call it records no occurrence of (a base constructor, `GetAwaiter`
 of an extension, an indexer's `Count` for `l[^1]`), and a name a property
-pattern or attribute argument writes. `results-conformance-scip.json` holds
-the state.
+pattern or attribute argument writes.
+
+The other five languages with an indexer here lose nothing: TypeScript 58 of
+58, JavaScript 31 of 31, Rust 75 of 75, Java 62 of 62, Ruby 35 of 35 in
+precise mode as with the engine alone — 936 of the 976 cases of the seven.
+`results-conformance-scip.json` holds the state. C and C++, PHP, Kotlin,
+Scala and Swift have no indexer that could run here
+([concepts](concepts.md#what-could-not-be-measured-here)).
 
 ## The rules
 
