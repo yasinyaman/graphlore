@@ -5514,6 +5514,10 @@ def main() -> int:
     total = sum(1 for r in results.values() if r["ok"])
     print(f"\n{total} of {len(results)} rules hold")
 
+    if args.json:
+        Path(args.json).write_text(json.dumps(
+            {"passed": total, "total": len(results), "cases": list(results.values())}, indent=1)
+            + "\n", encoding="utf-8")
     if args.baseline:
         before = {r["id"]: r["ok"] for r in json.loads(Path(args.baseline).read_text())["cases"]}
         fixed = sorted(i for i, r in results.items() if r["ok"] and before.get(i) is False)
@@ -5526,10 +5530,6 @@ def main() -> int:
             print(f"  BROKEN: {i}")
         if broken:
             return 1
-    if args.json:
-        Path(args.json).write_text(json.dumps(
-            {"passed": total, "total": len(results), "cases": list(results.values())}, indent=1)
-            + "\n", encoding="utf-8")
     return 0
 
 

@@ -22,6 +22,9 @@ All notable changes to this project are documented here. The format is based on
   from 1,762 to 0, and contradicted edges on commandline from 496 to 121.
   On four Go repositories scip-go confirms 13,446 edges, adds 1,442 and
   contradicts 3; on four C# repositories scip-dotnet confirms 11,257.
+  An edge added from an index is `calls` after a `(`, and to state a `writes`
+  after an assignment (or a Go composite literal's key) and `reads` otherwise:
+  the two indexers mark no access.
   `benchmarks/conformance.py --scip` reads the cases in precise mode (it runs
   the indexer on each case's project, `--jobs` at once), and
   `oracle_scip.py` takes every definition of a symbol.

@@ -11078,6 +11078,41 @@ def test_scip_reads_go_and_csharp_symbols(tmp_path, monkeypatch):
     assert added == {("run", "r")}
 
 
+def test_scip_adds_reads_and_writes_of_state(tmp_path, monkeypatch):
+    from graphlore import resolve
+
+    (tmp_path / "c.go").write_text(
+        "package m\ntype C struct{ Use string }\n"
+        'func New() *C { return &C{Use: "x"} }\n'
+        'func Get(c *C) string { c.Use = "y"; return c.Use }\n'
+        "func Read(c *C) string { return c.Use }\n", encoding="utf-8")
+
+    def node(nid, label, line, kind, end=None):
+        return {"id": nid, "label": label, "source_file": "c.go", "source_location": f"L{line}",
+                "file_type": "code", "end_line": end or line, "kind": kind}
+
+    nodes = [node("f", "c.go", 1, "file", 5), node("c", "C", 2, "struct"),
+             node("use", ".Use", 2, "property"), node("new", "New()", 3, "function"),
+             node("get", "Get()", 4, "function"), node("read", "Read()", 5, "function")]
+    links = [{"source": s, "target": t, "relation": "contains"}
+             for s, t in [("f", "c"), ("c", "use"), ("f", "new"), ("f", "get"), ("f", "read")]]
+    _write_graph(tmp_path, {"nodes": nodes, "links": links})
+    occs = [_scip_occ(r, _GO + sym, roles=1) for r, sym in [
+        ([1, 5, 6], "C#"), ([1, 17, 20], "C#Use."), ([2, 5, 8], "New()."),
+        ([3, 5, 8], "Get()."), ([4, 5, 9], "Read().")]]
+    occs += [_scip_occ(r, _GO + "C#Use.") for r in ([2, 26, 29], [3, 26, 29], [3, 46, 49],
+                                                   [4, 34, 37])]
+    (tmp_path / "index.scip").write_bytes(_scip_index(tmp_path, {"c.go": occs}))
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.delenv("GRAPHLORE_SCIP", raising=False)
+    server._GRAPH_CACHE.clear()
+    nodes, edges = server._nodes_edges(server._load_graph())
+    added = {(e["source"], e["target"]): e["relation"]
+             for e in resolve._resolved(nodes, edges).edges if e.get("scip") == "added"}
+    # a composite literal's key and an assignment write the field; a use reads it
+    assert added == {("new", "use"): "writes", ("get", "use"): "writes", ("read", "use"): "reads"}
+
+
 def test_scip_matches_a_symbol_by_its_descriptors():
     from graphlore import scip
 

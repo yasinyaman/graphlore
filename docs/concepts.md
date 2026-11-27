@@ -131,6 +131,11 @@ takes both:
   (mx *Mux) Route(`) adds nothing: the containment edge already says it;
 - a byte-order mark is no character of the first line.
 
+Neither indexer marks a use as a read or a write, so an added edge takes its
+relation from the source after the name: `calls` after a `(`; to a field,
+property or variable, `writes` after an assignment (`=`, `+=`, `++`) or as a
+Go composite literal's key, else `reads`; else `references`.
+
 What the two give, on the audit repositories (the graph of engine 0.5.80):
 
 | Repository | Indexer | Confirmed | Added | Contradicted |

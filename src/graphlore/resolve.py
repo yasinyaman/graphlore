@@ -362,6 +362,10 @@ def _from_source(nodes: list[dict], edges: list[dict]) -> Resolved:
 # --- a compiler's answer: a SCIP index ------------------------------------------------
 
 SCIP_BY = "scip"
+# the nodes a use reads or writes (the native engine's `kind`)
+_STATE_KINDS = frozenset({"variable", "property", "constant", "field"})
+_WRITE_OPERATORS = ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=",
+                    "??=", "&^=", "++", "--")
 # how far a SCIP definition's line may be from the node's (a decorator, a comment
 # the extractor counted in) and still be that node
 _DEF_LINE_SLACK = 3
@@ -476,19 +480,37 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
 
     lines_of: dict[str, list[str] | None] = {}
 
-    def called(occ: Any) -> bool:
+    def after(occ: Any) -> str:
+        """The source after the use's name, on its line."""
         if occ.file not in lines_of:
             path = _resolve_in_project(occ.file)
             try:
-                lines_of[occ.file] = (path.read_text(encoding="utf-8", errors="replace")
+                lines_of[occ.file] = (path.read_text(encoding="utf-8-sig", errors="replace")
                                       .split("\n") if path else None)
             except OSError:
                 lines_of[occ.file] = None
         text = lines_of[occ.file]
         if not text or occ.line > len(text):
-            return False
-        rest = text[occ.line - 1][occ.end_char:].lstrip()
-        return rest.startswith(("(", "!(", "::<"))
+            return ""
+        return text[occ.line - 1][occ.end_char:].lstrip()
+
+    state = {_node_id(n) for n in nodes if n.get("kind") in _STATE_KINDS}
+
+    def relation(occ: Any, tgt: str) -> str:
+        """What a use is, from the source after its name (the indexers mark
+        no access): `(` a call; of state, an assignment (or a Go composite
+        literal's key, `Command{Use: "c"}`) a write, else a read; else a
+        reference."""
+        rest = after(occ)
+        if rest.startswith(("(", "!(", "::<")):
+            return "calls"
+        if tgt not in state:
+            return "references"
+        if rest.startswith(_WRITE_OPERATORS) and not rest.startswith(("==", "=>")):
+            return "writes"
+        if occ.file.endswith(".go") and rest.startswith(":") and not rest.startswith(":="):
+            return "writes"
+        return "reads"
 
     dependency = [
         i for i, e in enumerate(base.edges)
@@ -564,7 +586,7 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
                 def_line.get(src) == occ.line and holds(tgt, src)):
             added[(src, tgt)] = {
                 "source": src, "target": tgt,
-                "relation": "calls" if called(occ) else "references",
+                "relation": relation(occ, tgt),
                 "confidence": "EXTRACTED", "source_file": occ.file,
                 "source_location": f"L{occ.line}", "resolved_by": SCIP_BY, "scip": "added",
             }
