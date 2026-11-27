@@ -219,6 +219,33 @@ through a namespace import (`z.array(…)`) linked to a method of the same name
 linked to a type alias `Error` of the project where it is the built-in. The
 89 TypeScript and JavaScript conformance cases all hold in precise mode too.
 
+### Rust
+
+```bash
+rustup component add rust-analyzer
+rust-analyzer scip . --output index.scip                      # at the workspace root (it loads Cargo)
+```
+
+A crate is `` crate/ `` under its package (`rust-analyzer cargo grep-regex
+0.1.14 crate/`), written by the package's name with `_` for `-`, or `crate`
+inside it; a crate renamed in `Cargo.toml` (`printer` for `grep-printer`) is
+an alias, left out as mismatched. Most of what is left out are operators:
+`?`, `!`, `==` and `[]` are occurrences of the standard library's trait
+methods (`branch`, `not`, `eq`, `index`), at a range that writes no name.
+
+| Repository | Confirmed | Added | Contradicted |
+|---|---:|---:|---:|
+| ripgrep | 10,897 | 3,510 | 25 |
+| ureq | 3,173 | 1,433 | 37 |
+| actix-realworld | 588 | 252 | 0 |
+| axum-realworld | 282 | 162 | 3 |
+
+99.3% of the edges the index has an answer for go where it says
+(`oracle_scip.py`). The contradictions read are the engine's: on ureq
+`RequestBuilder::<WithBody>::new` is the `new` of the `impl` for `WithBody`,
+not another `impl`'s, and on ripgrep `self.regex.find(…)` is regex-automata's
+`find`, not the project's. The 75 Rust conformance cases hold in precise mode.
+
 ## Import edges, checked against the source
 
 `graphlore_cycles`, `graphlore_layers` and `graphlore_surprises` read each import

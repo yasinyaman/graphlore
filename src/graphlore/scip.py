@@ -329,6 +329,11 @@ def _names(lines: list[str], line: int, char: int, end: int, encoding: int,
     # a C# attribute is written without its suffix: `[Option]` is `OptionAttribute`
     if name.endswith("Attribute") and name[:-len("Attribute")] in text:
         return True
+    # rust-analyzer's crate (`rust-analyzer cargo grep-regex 0.1.14 crate/`)
+    # is written by its package's name, or `crate` inside it
+    parts = symbol.split(" ", 4)
+    if len(parts) == 5 and parts[4].rstrip() == "crate/":
+        return any(t in ("crate", parts[2], parts[2].replace("-", "_")) for t in text)
     # an import of a package names its whole path (Go: `import "net/http"`),
     # or a module by what the importer writes (TypeScript: `from "./util.js"`)
     m = _LAST_DESCRIPTOR.search(symbol.rstrip())

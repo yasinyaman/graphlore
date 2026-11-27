@@ -11168,6 +11168,16 @@ def test_scip_reads_typescript_symbols(tmp_path, monkeypatch):
     assert r.precision is not None and r.precision["contradicted"] == 0
 
 
+def test_scip_reads_a_rust_crate_by_its_package_s_name():
+    from graphlore import scip
+
+    crate = "rust-analyzer cargo grep-regex 0.1.14 crate/"
+    lines = ["use grep_regex::RegexMatcher;", "use crate::flags;", "use other::x;"]
+    assert scip._names(lines, 0, 4, 14, 1, crate)
+    assert scip._names(lines, 1, 4, 9, 1, crate)
+    assert not scip._names(lines, 2, 4, 9, 1, crate)
+
+
 def test_scip_matches_a_symbol_by_its_descriptors():
     from graphlore import scip
 

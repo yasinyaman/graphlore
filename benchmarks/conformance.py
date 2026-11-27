@@ -5364,6 +5364,9 @@ def _scip_index(lang: str, root: Path) -> str | None:
         if not (root / "tsconfig.json").exists():
             (root / "tsconfig.json").write_text(SCIP_TSCONFIG, encoding="utf-8")
         argv = [tool, "index", "--output", "index.scip"] if tool else []
+    elif lang == "rust":
+        tool = _scip_tool("rust-analyzer")
+        argv = [tool, "scip", ".", "--output", "index.scip"] if tool else []
     else:
         return f"no SCIP indexer for {lang} here"
     if not argv:

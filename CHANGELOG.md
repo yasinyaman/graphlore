@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Precise mode reads `rust-analyzer scip` indexes** (`docs/concepts.md`,
+  "Rust"): a crate (`crate/` under its package) is written by the package's
+  name or `crate`. On four Rust repositories rust-analyzer confirms 14,940
+  edges; the 75 Rust conformance cases hold in precise mode.
 - **Precise mode reads scip-typescript indexes** (`docs/concepts.md`,
   "TypeScript and JavaScript"). An accessor (`` `<get>body` `` /
   `` `<set>body` ``, both written at every use) is one use of the property, a
