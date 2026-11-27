@@ -10972,6 +10972,109 @@ def test_scip_paths_follow_the_index_s_project_root(tmp_path):
     assert "made in another directory" in apart.errors[0]
 
 
+_GO = "scip-go gomod example.com/m 1 `example.com/m`/"
+_STD = "scip-go gomod github.com/golang/go/src go1.24 `net/http`/"
+_CS = "scip-dotnet nuget . . App/"
+
+
+def test_scip_reads_go_and_csharp_symbols(tmp_path, monkeypatch):
+    from graphlore import resolve, scip
+
+    for sym, name in [(_STD, "http"), ("scip-go gomod x 1 `github.com/go-chi/chi/v5`/", "chi"),
+                      (_GO + "Mux#Route().", "Route"), (_CS + "R#`.ctor`(+1).", "R"),
+                      (_CS + "R#`.cctor`().", "R"), (_CS + "R#`.ctor`().(x)", "")]:
+        assert scip.bare_name(sym) == name, sym
+    files = {
+        "m.go": ('package m\nimport "net/http"\ntype Mux struct{}\n'
+                 "func (mx *Mux) Route() { http.Get() }\n"),
+        "a.cs": ("\ufeffusing System;\nclass Maybe<T> {}\n"
+                 "static class Maybe { public static void Just() {} }\n"
+                 "class OptionAttribute : Attribute {\n  public OptionAttribute() {} }\n"
+                 "class R { public R() {} }\nclass Use {\n  [Option] public int X;\n"
+                 "  void Run() { Maybe.Just(); var r = new R(); }\n}\n"),
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+
+    def node(nid, label, file, line, end=None):
+        return {"id": nid, "label": label, "source_file": file, "source_location": f"L{line}",
+                "file_type": "code", "end_line": end or line}
+
+    nodes = [node("m", "m.go", "m.go", 1, 4), node("mux", "Mux", "m.go", 3),
+             node("route", ".Route()", "m.go", 4),
+             node("a", "a.cs", "a.cs", 1, 10), node("maybe_t", "Maybe", "a.cs", 2),
+             node("maybe", "Maybe", "a.cs", 3), node("just", ".Just()", "a.cs", 3),
+             node("opt", "OptionAttribute", "a.cs", 4, 5),
+             node("opt_ctor", ".OptionAttribute()", "a.cs", 5),
+             node("r", "R", "a.cs", 6), node("r_ctor", ".R()", "a.cs", 6),
+             node("use", "Use", "a.cs", 7, 10), node("x", ".X", "a.cs", 8),
+             node("run", ".Run()", "a.cs", 9)]
+    links = [{"source": s, "target": t, "relation": rel} for s, t, rel in [
+        ("m", "mux", "contains"), ("mux", "route", "method"), ("a", "maybe_t", "contains"),
+        ("a", "maybe", "contains"), ("maybe", "just", "method"), ("a", "opt", "contains"),
+        ("opt", "opt_ctor", "method"), ("a", "r", "contains"), ("r", "r_ctor", "method"),
+        ("a", "use", "contains"), ("use", "x", "contains"), ("use", "run", "method")]]
+    for s, t, rel, line in [("run", "maybe", "references", 9), ("run", "just", "calls", 9),
+                            ("run", "r_ctor", "calls", 9), ("x", "opt", "references", 8)]:
+        links.append({"source": s, "target": t, "relation": rel, "confidence": "INFERRED",
+                      "source_file": "a.cs", "source_location": f"L{line}"})
+    _write_graph(tmp_path, {"nodes": nodes, "links": links})
+    index = _scip_index(tmp_path, {
+        "m.go": [
+            _scip_occ([2, 5, 8], _GO + "Mux#", roles=1),
+            _scip_occ([3, 15, 20], _GO + "Mux#Route().", roles=1),
+            # an import writes the package's path; a use, its name
+            _scip_occ([1, 8, 16], _STD, roles=8), _scip_occ([3, 25, 29], _STD, roles=8),
+            _scip_occ([3, 30, 33], _STD + "Get().", roles=8),
+            # the method's receiver: what holds it, said by the containment edge
+            _scip_occ([3, 10, 13], _GO + "Mux#", roles=8),
+        ],
+        "a.cs": [
+            # two namesakes, one symbol (scip-dotnet writes no type parameters)
+            _scip_occ([1, 6, 11], _CS + "Maybe#", roles=1),
+            _scip_occ([2, 13, 18], _CS + "Maybe#", roles=1),
+            _scip_occ([2, 40, 44], _CS + "Maybe#Just().", roles=1),
+            _scip_occ([3, 6, 21], _CS + "OptionAttribute#", roles=1),
+            _scip_occ([4, 9, 24], _CS + "OptionAttribute#`.ctor`().", roles=1),
+            _scip_occ([5, 6, 7], _CS + "R#", roles=1),
+            _scip_occ([5, 17, 18], _CS + "R#`.ctor`().", roles=1),
+            _scip_occ([6, 6, 9], _CS + "Use#", roles=1),
+            _scip_occ([7, 22, 23], _CS + "Use#X.", roles=1),
+            _scip_occ([8, 7, 10], _CS + "Use#Run().", roles=1),
+            # after the file's byte-order mark
+            _scip_occ([0, 6, 12], "scip-dotnet nuget . . System/", roles=8),
+            _scip_occ([7, 3, 9], _CS + "OptionAttribute#`.ctor`().", roles=8),
+            _scip_occ([8, 15, 20], _CS + "Maybe#", roles=8),
+            _scip_occ([8, 21, 25], _CS + "Maybe#Just().", roles=8),
+            # `new R()`: the type, no constructor
+            _scip_occ([8, 41, 42], _CS + "R#", roles=8),
+        ],
+    })
+    (tmp_path / "index.scip").write_bytes(index)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.delenv("GRAPHLORE_SCIP", raising=False)
+    server._GRAPH_CACHE.clear()
+    idx = scip.load()
+    assert idx is not None and idx.mismatched == 0
+    assert idx.defs_of(_CS + "Maybe#") == [("a.cs", 2), ("a.cs", 3)]
+    nodes, edges = server._nodes_edges(server._load_graph())
+    r = resolve._resolved(nodes, edges)
+    assert r.precision is not None
+    by = {(e["source"], e["target"], e["relation"]): e for e in r.edges}
+    # the second namesake, a call of its method, an attribute's constructor
+    # where the graph names its type: confirmed
+    for key in [("run", "maybe", "references"), ("run", "just", "calls"),
+                ("x", "opt", "references")]:
+        assert by[key].get("scip") == "confirmed", key
+    # a constructor where the index names its type: not contradicted
+    assert "scip" not in by[("run", "r_ctor", "calls")]
+    assert r.precision["contradicted"] == 0
+    # what the source names and the graph lacks: the type `new R()` builds;
+    # never the receiver of a method
+    added = {(e["source"], e["target"]) for e in r.edges if e.get("scip") == "added"}
+    assert added == {("run", "r")}
+
+
 def test_scip_matches_a_symbol_by_its_descriptors():
     from graphlore import scip
 

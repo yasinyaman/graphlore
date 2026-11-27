@@ -67,8 +67,7 @@ def uses_of(index: scip.Index, imports: dict[str, set[int]] | None = None) -> li
         name = scip.bare_name(o.symbol)
         if not name:
             continue
-        decl = index.def_of(o.symbol)
-        decls = [decl] if decl else []
+        decls = index.defs_of(o.symbol)
         uses.append({"file": o.file, "line": o.line, "expr": name, "symbol": o.symbol,
                      "decls": decls, "lib": not decls, "alias": False,
                      "declares": bool(o.roles & scip.DEFINITION)})

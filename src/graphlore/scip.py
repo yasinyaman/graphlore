@@ -59,6 +59,10 @@ class Index:
     documents: int = 0
     # symbol -> (file, 1-based line) of its first definition in the project
     defs: dict[str, tuple[str, int]] = field(default_factory=dict)
+    # symbol -> every definition, for a symbol defined more than once: a
+    # partial type, or namesakes the indexer gives one symbol (scip-dotnet
+    # writes `Maybe<T>` and `Maybe` as `Maybe#`, a namespace by its last part)
+    more_defs: dict[str, list[tuple[str, int]]] = field(default_factory=dict)
     refs: list[Occurrence] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     # uses left out because the source text at their range is not the name of
@@ -91,6 +95,13 @@ class Index:
         cands = {where for m, where in self._by_descriptor.get(rest, [])
                  if m == module or (module and m.endswith("." + module))}
         return next(iter(cands)) if len(cands) == 1 else None
+
+    def defs_of(self, symbol: str) -> list[tuple[str, int]]:
+        """Every definition of a symbol in the project (``def_of`` first)."""
+        first = self.def_of(symbol)
+        if first is None:
+            return []
+        return self.more_defs.get(symbol) or [first]
 
 
 # --- protobuf ------------------------------------------------------------------
@@ -264,7 +275,12 @@ def _read_document(doc: bytes, prefix: str, into: Index, project: Path) -> None:
         roles = next((int(v) for n, w, v in fs if n == 3 and w == 0), 0)  # type: ignore[call-overload]
         line, char, end = rng
         if roles & DEFINITION:
-            into.defs.setdefault(symbol, (rel, line + 1))
+            where = (rel, line + 1)
+            first = into.defs.setdefault(symbol, where)
+            if first != where:
+                more = into.more_defs.setdefault(symbol, [first])
+                if where not in more:
+                    more.append(where)
         elif lines is not None and not _names(lines, line, char, end, encoding, symbol):
             into.mismatched += 1
         else:
@@ -275,7 +291,8 @@ def _lines(path: Path) -> list[str] | None:
     """A source file's lines, split on ``\n`` only (as an indexer counts them;
     ``str.splitlines`` also splits on form feeds and line separators)."""
     try:
-        return path.read_text(encoding="utf-8", errors="replace").split("\n")
+        # a byte-order mark is no character of the first line (`utf-8-sig`)
+        return path.read_text(encoding="utf-8-sig", errors="replace").split("\n")
     except OSError:
         return None
 
@@ -302,7 +319,15 @@ def _names(lines: list[str], line: int, char: int, end: int, encoding: int,
     name = bare_name(symbol)
     if not name or line >= len(lines) or end <= char:
         return True
-    return name in _slice(lines[line], char, end, encoding)
+    text = _slice(lines[line], char, end, encoding)
+    if name in text:
+        return True
+    # a C# attribute is written without its suffix: `[Option]` is `OptionAttribute`
+    if name.endswith("Attribute") and name[:-len("Attribute")] in text:
+        return True
+    # an import of a package names its whole path (Go: `import "net/http"`)
+    m = _LAST_DESCRIPTOR.search(symbol.rstrip())
+    return bool(m and m.group("kind") == "/" and m.group("q") in text)
 
 
 # --- symbols ---------------------------------------------------------------------
@@ -311,6 +336,10 @@ _LAST_DESCRIPTOR = re.compile(
     r"(?:`(?P<q>[^`]+)`|(?P<n>[^\s`/#.:!()\[\]]+))"
     r"(?P<kind>\([^)]*\)\.|[#.:!/]|\([^)]*\)|\[[^\]]*\])$"
 )
+
+
+_MAJOR_VERSION = re.compile(r"v[0-9]+")
+_CONSTRUCTORS = (".ctor", ".cctor")
 
 
 def descriptor(symbol: str) -> str:
@@ -345,6 +374,19 @@ def bare_name(symbol: str) -> str:
     if kind.startswith("(") and not kind.endswith(".") or kind.startswith("["):
         return ""
     name = m.group("q") or m.group("n") or ""
+    if kind == "/" and "/" in name:
+        # a package named by its import path (scip-go: `` `net/http`/ ``) is
+        # written by its last segment, the one before a major version
+        # (`github.com/go-chi/chi/v5` is `chi`)
+        segs = [s for s in name.split("/") if s]
+        if len(segs) > 1 and _MAJOR_VERSION.fullmatch(segs[-1]):
+            segs.pop()
+        name = segs[-1] if segs else ""
+    if name in _CONSTRUCTORS and kind.startswith("("):
+        # a constructor (scip-dotnet: ``RestRequest#`.ctor`(+1).``) is named
+        # as its type, the way the source writes it and the graph names it
+        inner = _LAST_DESCRIPTOR.search(symbol.rstrip()[:m.start()])
+        return (inner.group("q") or inner.group("n") or "") if inner else ""
     if kind == ":" and name == "__init__":
         # scip-python's module: `` `pkg.sub`/__init__: `` is the module ``sub``
         before = symbol.rstrip()[:m.start()].rstrip("/")

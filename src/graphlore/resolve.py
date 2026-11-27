@@ -414,16 +414,16 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
     from . import scip
 
     by_file = _nodes_by_file(nodes)
-    def_node: dict[str, str | None] = {}
+    def_node: dict[str, frozenset[str]] = {}
 
-    def node_of(symbol: str) -> str | None:
+    def node_of(symbol: str) -> frozenset[str]:
+        """The nodes a symbol's definitions are: several for a partial type
+        or for namesakes the indexer gives one symbol."""
         if symbol in def_node:
             return def_node[symbol]
-        got = None
-        where = index.def_of(symbol)
+        got: set[str] = set()
         name = scip.bare_name(symbol)
-        if where and name:
-            file, line = where
+        for file, line in (index.defs_of(symbol) if name else []):
             best = None
             for n in by_file.get(file, []):
                 if _is_file_hub_node(n) or _bare_name(_node_label(n)) != name:
@@ -434,9 +434,10 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
                     continue
                 if d <= _DEF_LINE_SLACK and (best is None or d < best[0]):
                     best = (d, _node_id(n))
-            got = best[1] if best else None
-        def_node[symbol] = got
-        return got
+            if best:
+                got.add(best[1])
+        def_node[symbol] = frozenset(got)
+        return def_node[symbol]
 
     owners: dict[tuple[str, int], str | None] = {}
     # a native graph's nodes carry their spans: (start, end, id) per file, and
@@ -497,9 +498,38 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
     for i in dependency:
         s, t = _edge_ends(base.edges[i])
         pairs.setdefault((s, t), []).append(i)
+    # what holds each node, and the line it is defined on: a definition's own
+    # signature naming what holds it (a Go method's receiver, `func (m *Mux)
+    # Route(`) says what the containment edge says, and adds nothing
+    parent: dict[str, str] = {}
+    for e in base.edges:
+        if _rel(e) in _CONTAINMENT_RELATIONS:
+            s, t = _edge_ends(e)
+            parent.setdefault(t, s)
+    def_line: dict[str, int] = {}
+    for n in nodes:
+        try:
+            def_line[_node_id(n)] = int(_node_line(n))
+        except (TypeError, ValueError):
+            pass
 
-    # what the index names at each site: (file, line) -> [(name, node or None, outside)]
-    sites: dict[tuple[str, int], list[tuple[str, str | None, bool]]] = {}
+    label_of = {_node_id(n): _bare_name(_node_label(n)) for n in nodes}
+    # a constructor -> its type (a definition named as what holds it)
+    ctor_of = {c: p for c, p in parent.items()
+               if label_of.get(c) and label_of.get(c) == label_of.get(p)}
+
+    def holds(tgt: str, src: str) -> bool:
+        seen = {src}
+        cur = parent.get(src)
+        while cur is not None and cur not in seen:
+            if cur == tgt:
+                return True
+            seen.add(cur)
+            cur = parent.get(cur)
+        return False
+
+    # what the index names at each site: (file, line) -> [(name, nodes, outside)]
+    sites: dict[tuple[str, int], list[tuple[str, frozenset[str], bool]]] = {}
     confirmed: set[int] = set()
     added: dict[tuple[str, str], dict] = {}
     names: dict[str, str] = {}
@@ -511,18 +541,27 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
             name = names[occ.symbol] = scip.bare_name(occ.symbol)
         if not name:
             continue
-        tgt = node_of(occ.symbol)
+        tgts = node_of(occ.symbol)
         sites.setdefault((occ.file, occ.line), []).append(
-            (name, tgt, index.def_of(occ.symbol) is None))
-        if tgt is None:
+            (name, tgts, index.def_of(occ.symbol) is None))
+        if not tgts:
             continue
         src = owner(occ.file, occ.line)
-        if src is None or src == tgt:
+        if src is None or src in tgts:
             continue
-        have = pairs.get((src, tgt))
+        have = [i for t in tgts for i in pairs.get((src, t), ())]
+        if not have:
+            # a constructor's use is a use of its type (`[Option(…)]`, an
+            # edge the graph writes to `OptionAttribute`)
+            have = [i for t in tgts if (p := ctor_of.get(t)) is not None
+                    for i in pairs.get((src, p), ())]
         if have:
             confirmed.update(have)
-        elif (src, tgt) not in added:
+            continue
+        # a use of one of several namesakes adds no edge: which one is not said
+        tgt = next(iter(tgts))
+        if len(tgts) == 1 and (src, tgt) not in added and not (
+                def_line.get(src) == occ.line and holds(tgt, src)):
             added[(src, tgt)] = {
                 "source": src, "target": tgt,
                 "relation": "calls" if called(occ) else "references",
@@ -530,7 +569,7 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
                 "source_location": f"L{occ.line}", "resolved_by": SCIP_BY, "scip": "added",
             }
 
-    labels = {_node_id(n): _bare_name(_node_label(n)) for n in nodes}
+    labels = label_of
     # only an edge to the project's own code can be contradicted: one to an
     # external node already says "the library's", as the index does
     own = {_node_id(n) for n in nodes if _node_file(n) and n.get("type") != "external"}
@@ -553,7 +592,10 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
         same = [x for x in said if x[0] == name]
         # the index names this name here as something else: another node of the
         # graph, or a symbol defined outside the project
-        if same and all((x[1] is not None and x[1] != t) or (x[1] is None and x[2])
+        # (a constructor is its type where the index names only the type:
+        # scip-dotnet's `new RestRequest()`)
+        held_by = ctor_of.get(t)
+        if same and all((x[1] and t not in x[1] and held_by not in x[1]) or (not x[1] and x[2])
                         for x in same):
             contradicted.add(i)
 

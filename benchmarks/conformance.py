@@ -15,6 +15,13 @@ that must not be (`absent`).
   python benchmarks/conformance.py --failed        # only what the engine gets wrong
   python benchmarks/conformance.py --json out.json --baseline benchmarks/results-conformance.json
   python benchmarks/conformance.py --markdown      # the table of docs/resolution-rules.md
+  python benchmarks/conformance.py --only go,csharp --scip --baseline benchmarks/results-conformance.json
+
+`--scip` reads each case as graphlore's tools do in precise mode: the
+language's SCIP indexer (scip-go, scip-dotnet) is run on the case's project
+and the engine's edges are checked against it (`resolve._precise`); an edge
+the index contradicts counts as absent. Against the engine's baseline,
+"fixed" is a case precise mode holds and the engine alone does not.
 
 A case names its ends by qualified name (`Repo.find`, or `find` when one
 definition has that last name), by `path:name` when two files define the name,
@@ -31,9 +38,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -5309,20 +5318,80 @@ case("go", "local-value-is-read-where-it-is-declared", "a local's value names wh
      source="go/types: a local's scope begins after its ShortVarDecl (Scope.Insert in assignment.go shortVarDecl)")
 
 
-def run_case(c: dict[str, Any]) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp) / "project"
-        for rel, src in c["files"].items():
-            path = root / rel
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(src, encoding="utf-8")
-        out = Path(tmp) / "graph.json"
-        done = subprocess.run([sys.executable, "-m", "graphlore_engine", "build", str(root),
-                               "--out", str(out)], capture_output=True, text=True)
-        if done.returncode != 0 or not out.exists():
-            return {"id": c["id"], "ok": False, "missing": [], "unwanted": [],
-                    "error": done.stderr.strip()[-200:]}
-        graph = json.loads(out.read_text(encoding="utf-8"))
+# the SCIP indexer of a language, and what a case's project needs for it
+SCIP_GO_MOD = "module example.com/conformance\n\ngo 1.22\n"
+SCIP_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <LangVersion>preview</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>
+"""
+
+
+def _scip_tool(name: str) -> str | None:
+    found = shutil.which(name)
+    for d in (Path.home() / "go" / "bin", Path.home() / ".dotnet" / "tools"):
+        if not found and (d / name).exists():
+            found = str(d / name)
+    return found
+
+
+def _scip_index(lang: str, root: Path) -> str | None:
+    """Run the language's indexer on a case's project: None, or why not."""
+    if lang == "go":
+        tool = _scip_tool("scip-go")
+        if not (root / "go.mod").exists():
+            (root / "go.mod").write_text(SCIP_GO_MOD, encoding="utf-8")
+        argv = [tool, "--output", "index.scip"] if tool else []
+    elif lang == "csharp":
+        tool = _scip_tool("scip-dotnet")
+        if not any(root.rglob("*.csproj")):
+            (root / "Case.csproj").write_text(SCIP_CSPROJ, encoding="utf-8")
+        argv = [tool, "index", "--output", "index.scip"] if tool else []
+    else:
+        return f"no SCIP indexer for {lang} here"
+    if not argv:
+        return f"the {lang} indexer is not installed"
+    done = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=600)
+    if not (root / "index.scip").exists():
+        return "the indexer failed: " + (done.stderr or done.stdout).strip()[-200:]
+    return None
+
+
+def _precise_edges(root: Path) -> list[dict[str, Any]]:
+    """The edges graphlore's tools read in precise mode, the contradicted
+    ones left out."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+    from graphlore import config, resolve, server
+    config.PROJECT_DIR = root
+    server._GRAPH_CACHE.clear()
+    graph = server._load_graph()
+    if isinstance(graph, str):
+        return []
+    nodes, edges = server._nodes_edges(graph)
+    return [e for e in resolve._resolved(nodes, edges).edges if e.get("scip") != "contradicted"]
+
+
+def _prepare(c: dict[str, Any], root: Path, out: Path) -> dict[str, Any] | str:
+    """Write a case's project and build its graph: the graph, or an error."""
+    for rel, src in c["files"].items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(src, encoding="utf-8")
+    done = subprocess.run([sys.executable, "-m", "graphlore_engine", "build", str(root),
+                           "--out", str(out)], capture_output=True, text=True)
+    if done.returncode != 0 or not out.exists():
+        return done.stderr.strip()[-200:] or "no graph"
+    graph: dict[str, Any] = json.loads(out.read_text(encoding="utf-8"))
+    return graph
+
+
+def _judge(c: dict[str, Any], graph: dict[str, Any] | str) -> dict[str, Any]:
+    if isinstance(graph, str):
+        return {"id": c["id"], "ok": False, "missing": [], "unwanted": [], "error": graph}
     nodes = {n["id"]: n for n in graph["nodes"]}
 
     def has(edge: Edge) -> bool:
@@ -5338,6 +5407,34 @@ def run_case(c: dict[str, Any]) -> dict[str, Any]:
             "unwanted": unwanted}
 
 
+def run_case(c: dict[str, Any]) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory() as tmp:
+        return _judge(c, _prepare(c, Path(tmp) / "project", Path(tmp) / "graph.json"))
+
+
+def _run_scip(cases: list[dict[str, Any]], jobs: int) -> dict[str, dict[str, Any]]:
+    def index(c: dict[str, Any]) -> tuple[str, dict[str, Any] | str]:
+        tmp = tempfile.mkdtemp(prefix="conformance-")
+        root = Path(tmp) / "project"
+        graph = _prepare(c, root, root / "graphify-out" / "graph.json")
+        if not isinstance(graph, str):
+            why = _scip_index(c["lang"], root)
+            if why:
+                graph = why
+        return tmp, graph
+
+    results: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(jobs) as pool:
+        for c, (tmp, graph) in zip(cases, pool.map(index, cases), strict=True):
+            try:
+                if not isinstance(graph, str):
+                    graph["links"] = _precise_edges(Path(tmp) / "project")
+                results[c["id"]] = _judge(c, graph)
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+    return results
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--only", default="", help="comma-separated languages or case ids")
@@ -5345,10 +5442,18 @@ def main() -> int:
     ap.add_argument("--json", help="write the result of every case here")
     ap.add_argument("--baseline", help="an earlier --json: say what changed")
     ap.add_argument("--markdown", action="store_true", help="print the table as Markdown")
+    ap.add_argument("--scip", action="store_true",
+                    help="read each case in precise mode, with the language's SCIP indexer")
+    ap.add_argument("--jobs", type=int, default=1, help="indexers to run at once (--scip)")
     args = ap.parse_args()
     only = {x for x in args.only.split(",") if x}
     cases = [c for c in CASES if not only or c["lang"] in only or c["id"] in only]
-    results = {c["id"]: run_case(c) for c in cases}
+    if args.scip:
+        # the indexers run in parallel; graphlore reads each index in turn
+        # (its project directory is one setting of the process)
+        results = _run_scip(cases, max(1, args.jobs))
+    else:
+        results = {c["id"]: run_case(c) for c in cases}
 
     versions_path = Path(__file__).resolve().parent / "results-case-versions.json"
     measured: dict[str, Any] = json.loads(versions_path.read_text(encoding="utf-8")) \

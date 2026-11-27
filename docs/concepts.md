@@ -95,6 +95,73 @@ edges the index has an answer for go where it says, and 92.8% of the uses it
 binds to a definition of the graph have an edge (click 97.7% / 91.3%,
 fastapi-template 100% / 92.4%).
 
+### Go and C#
+
+```bash
+go install github.com/scip-code/scip-go/cmd/scip-go@latest   # Go 1.26 builds it; any go on PATH loads the packages
+scip-go --output index.scip                                  # at a module's root
+dotnet tool install --global scip-dotnet
+scip-dotnet index --output index.scip                        # at the solution's directory (it runs dotnet restore)
+```
+
+scip-go indexes one module: in a repository of several, run it in each
+module's directory and list the files, `GRAPHLORE_SCIP=index.scip,grpc/index.scip,…`
+(each index is read by its own root). scip-dotnet loads the projects the
+solution names and needs the SDK they target: a project it cannot load (a
+`net48` target on Linux, a package of a newer runtime) is left out of the
+index, and a source written in a newer C# than the SDK's compiler is bound
+by guesswork, so its answers are not to be believed there.
+
+The two indexers write symbols differently from scip-python, and the reader
+takes both:
+
+- a Go package is named by its import path (`` `net/http`/ ``): its name is
+  the last segment, the one before a major version
+  (`github.com/go-chi/chi/v5` is `chi`), and an import writes the whole path;
+- a C# constructor is `` `.ctor` ``: it is named as its type, as the source
+  writes it and the graph names it, an attribute without its `Attribute`
+  suffix, and a `new T()` the index names only as `T` does not contradict an
+  edge to T's constructor;
+- scip-dotnet gives namesakes one symbol (`Maybe<T>` and `Maybe` are both
+  `` Maybe# ``; a namespace is written by its last part): a symbol defined
+  more than once is every one of its definitions, an edge to any of them is
+  confirmed, and a use of one adds no edge, since which one is not said;
+- a definition's own signature naming what holds it (Go's receiver, `func
+  (mx *Mux) Route(`) adds nothing: the containment edge already says it;
+- a byte-order mark is no character of the first line.
+
+What the two give, on the audit repositories (the graph of engine 0.5.80):
+
+| Repository | Indexer | Confirmed | Added | Contradicted |
+|---|---|---:|---:|---:|
+| chi | scip-go | 1,547 | 96 | 0 |
+| cobra | scip-go | 3,031 | 730 | 0 |
+| resty | scip-go | 8,617 | 589 | 2 |
+| gin-examples (8 modules) | scip-go | 251 | 27 | 1 |
+| commandline | scip-dotnet | 4,083 | 1,539 | 121 |
+| restsharp | scip-dotnet | 5,788 | 1,261 | 119 |
+| aspnetcore-realworld | scip-dotnet | 1,125 | 57 | 0 |
+| todoapi | scip-dotnet | 252 | 27 | 10 |
+
+`oracle_scip.py` over the four Go repositories: 99.9% of the edges scip-go
+has an answer for go where it says, 89.9% of the uses it binds to a definition
+of the graph have an edge (`go/types` itself, `oracle_go.py`: 99.9% / 86.0%,
+which counts a method's receiver as a use). Most
+of what scip-go adds are keys of composite literals (`Command{Use: "c"}`: the
+field, which the engine does not record) and fields read through a named
+slice type; resty's two contradicted edges are the engine's errors
+(`url.URL.Query` taken for `Request.Query`). Over the four C# repositories
+97.4% / 84.7% (Roslyn on the sources alone, `oracle_csharp.py`, 98.3% on
+commandline and restsharp); of the 240 edges scip-dotnet contradicts there,
+122 Roslyn calls wrong too, and the rest are mostly overload choices the
+engine made, plus sources of C# 14 (`extension` blocks) the .NET 8 compiler
+reads wrong. The C# indexes here are partial: .NET 8 was the SDK at hand, the
+repositories target 9 and 10.
+
+`benchmarks/conformance.py --scip` reads each conformance case in precise
+mode (it runs the indexer on the case's project), which says which of the
+rules the engine does not follow a compiler's index settles.
+
 ## Import edges, checked against the source
 
 `graphlore_cycles`, `graphlore_layers` and `graphlore_surprises` read each import

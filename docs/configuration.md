@@ -279,7 +279,7 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_CACHE_DIR` | `$XDG_CACHE_HOME/graphlore` (`~/.cache/graphlore`) | Where the built-in index keeps chunk vectors between runs, and `graphlore hook` its index of the graph's names (one file per project; never inside the project); `off` keeps them in memory only |
 | `GRAPHLORE_HOOKS` | on | `0`: `graphlore hook` (the Claude Code plugin's hooks, `graphlore setup claude-code --with-hooks`) says nothing. See [Claude Code](clients.md#claude-code) |
 | `GRAPHLORE_SEARCH_KERNEL` | _(auto)_ | `python` forces the built-in index's reference kernel even when the native engine's (graphlore-engine 0.5.80 or later) is installed |
-| `GRAPHLORE_SCIP` | `auto` | SCIP index files to check the graph against ([concepts](concepts.md#a-compilers-answer-scip-indexes)): `auto` reads `index.scip` at the project root or in the output directory, `off` none, or a comma-separated list of paths inside the project |
+| `GRAPHLORE_SCIP` | `auto` | SCIP index files to check the graph against ([concepts](concepts.md#a-compilers-answer-scip-indexes)): `auto` reads `index.scip` at the project root or in the output directory, `off` none, or a comma-separated list of paths inside the project (one per Go module: [Go and C#](concepts.md#go-and-c)) |
 | `GRAPHLORE_RESOLVE` | `1` | Resolve calls and imports made through a module object (`mod.func()`) from the source at read time; `0` reads graph.json as it is |
 | `GRAPHLORE_WATCH` | `0` | Filesystem watcher: auto re-sync on structural changes (`[watch]` extra) |
 | `GRAPHLORE_WATCH_DEBOUNCE` | `2.0` | Watcher debounce window (seconds) |
