@@ -11,7 +11,8 @@ All notable changes to this project are documented here. The format is based on
   (`docs/concepts.md`, "Go and C#"). The SCIP reader takes the two
   indexers' symbols: a Go package named by its import path is its last
   segment (the one before a major version) and an import writes the path; a
-  C# `` `.ctor` `` is named as its type and an attribute without its suffix;
+  C# `` `.ctor` `` is named as its type (an implicit one is the type) and an
+  attribute without its suffix;
   a first line's byte-order mark is skipped; a symbol defined more than once
   (a partial type, or namesakes scip-dotnet gives one symbol) is every
   definition, so an edge to the second is confirmed, not contradicted. A
@@ -20,7 +21,7 @@ All notable changes to this project are documented here. The format is based on
   (`new T()`) is not contradicted. On chi, uses left out as mismatched fall
   from 1,762 to 0, and contradicted edges on commandline from 496 to 121.
   On four Go repositories scip-go confirms 13,446 edges, adds 1,442 and
-  contradicts 3; on four C# repositories scip-dotnet confirms 11,248.
+  contradicts 3; on four C# repositories scip-dotnet confirms 11,257.
   `benchmarks/conformance.py --scip` reads the cases in precise mode (it runs
   the indexer on each case's project, `--jobs` at once), and
   `oracle_scip.py` takes every definition of a symbol.

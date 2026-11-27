@@ -11057,6 +11057,9 @@ def test_scip_reads_go_and_csharp_symbols(tmp_path, monkeypatch):
     idx = scip.load()
     assert idx is not None and idx.mismatched == 0
     assert idx.defs_of(_CS + "Maybe#") == [("a.cs", 2), ("a.cs", 3)]
+    # a constructor the source does not declare is its type's
+    assert idx.defs_of(_CS + "Use#`.ctor`().") == [("a.cs", 7)]
+    assert scip.constructed_type(_CS + "Use#Run().") is None
     nodes, edges = server._nodes_edges(server._load_graph())
     r = resolve._resolved(nodes, edges)
     assert r.precision is not None

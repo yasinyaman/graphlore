@@ -120,8 +120,9 @@ takes both:
   (`github.com/go-chi/chi/v5` is `chi`), and an import writes the whole path;
 - a C# constructor is `` `.ctor` ``: it is named as its type, as the source
   writes it and the graph names it, an attribute without its `Attribute`
-  suffix, and a `new T()` the index names only as `T` does not contradict an
-  edge to T's constructor;
+  suffix; one the source does not declare (the implicit one) is its type, and
+  a `new T()` the index names only as `T` does not contradict an edge to T's
+  constructor;
 - scip-dotnet gives namesakes one symbol (`Maybe<T>` and `Maybe` are both
   `` Maybe# ``; a namespace is written by its last part): a symbol defined
   more than once is every one of its definitions, an edge to any of them is
@@ -138,8 +139,8 @@ What the two give, on the audit repositories (the graph of engine 0.5.80):
 | cobra | scip-go | 3,031 | 730 | 0 |
 | resty | scip-go | 8,617 | 589 | 2 |
 | gin-examples (8 modules) | scip-go | 251 | 27 | 1 |
-| commandline | scip-dotnet | 4,083 | 1,539 | 121 |
-| restsharp | scip-dotnet | 5,788 | 1,261 | 119 |
+| commandline | scip-dotnet | 4,083 | 1,546 | 121 |
+| restsharp | scip-dotnet | 5,797 | 1,303 | 111 |
 | aspnetcore-realworld | scip-dotnet | 1,125 | 57 | 0 |
 | todoapi | scip-dotnet | 252 | 27 | 10 |
 
@@ -151,8 +152,8 @@ of what scip-go adds are keys of composite literals (`Command{Use: "c"}`: the
 field, which the engine does not record) and fields read through a named
 slice type; resty's two contradicted edges are the engine's errors
 (`url.URL.Query` taken for `Request.Query`). Over the four C# repositories
-97.4% / 84.7% (Roslyn on the sources alone, `oracle_csharp.py`, 98.3% on
-commandline and restsharp); of the 240 edges scip-dotnet contradicts there,
+97.5% / 84.6% (Roslyn on the sources alone, `oracle_csharp.py`, 98.3% on
+commandline and restsharp); of the 232 edges scip-dotnet contradicts there,
 122 Roslyn calls wrong too, and the rest are mostly overload choices the
 engine made, plus sources of C# 14 (`extension` blocks) the .NET 8 compiler
 reads wrong. The C# indexes here are partial: .NET 8 was the SDK at hand, the

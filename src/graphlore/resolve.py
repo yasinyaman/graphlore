@@ -543,7 +543,7 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
             continue
         tgts = node_of(occ.symbol)
         sites.setdefault((occ.file, occ.line), []).append(
-            (name, tgts, index.def_of(occ.symbol) is None))
+            (name, tgts, not index.defs_of(occ.symbol)))
         if not tgts:
             continue
         src = owner(occ.file, occ.line)

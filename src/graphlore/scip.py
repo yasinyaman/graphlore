@@ -97,10 +97,13 @@ class Index:
         return next(iter(cands)) if len(cands) == 1 else None
 
     def defs_of(self, symbol: str) -> list[tuple[str, int]]:
-        """Every definition of a symbol in the project (``def_of`` first)."""
+        """Every definition of a symbol in the project (``def_of`` first). A
+        constructor the source does not declare (C#'s implicit one, which
+        scip-dotnet names at `[Mark]` and `new T()`) is its type's."""
         first = self.def_of(symbol)
         if first is None:
-            return []
+            owner = constructed_type(symbol)
+            return self.defs_of(owner) if owner else []
         return self.more_defs.get(symbol) or [first]
 
 
@@ -340,6 +343,17 @@ _LAST_DESCRIPTOR = re.compile(
 
 _MAJOR_VERSION = re.compile(r"v[0-9]+")
 _CONSTRUCTORS = (".ctor", ".cctor")
+
+
+def constructed_type(symbol: str) -> str | None:
+    """The type a constructor symbol builds (``…/R#`.ctor`().`` is
+    ``…/R#``), None for any other symbol."""
+    m = _LAST_DESCRIPTOR.search(symbol.rstrip())
+    if not m or (m.group("q") or m.group("n")) not in _CONSTRUCTORS \
+            or not m.group("kind").startswith("("):
+        return None
+    owner = symbol.rstrip()[:m.start()]
+    return owner if owner.endswith("#") else None
 
 
 def descriptor(symbol: str) -> str:
