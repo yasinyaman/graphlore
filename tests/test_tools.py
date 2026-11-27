@@ -11113,6 +11113,61 @@ def test_scip_adds_reads_and_writes_of_state(tmp_path, monkeypatch):
     assert added == {("new", "use"): "writes", ("get", "use"): "writes", ("read", "use"): "reads"}
 
 
+def test_scip_reads_typescript_symbols(tmp_path, monkeypatch):
+    from graphlore import resolve, scip
+
+    ts = "scip-typescript npm demo 1.0 `o.ts`/"
+    assert scip.bare_name(ts + "Options#`<get>body`().") == "body"
+    assert scip.bare_name(ts + "Options#`<constructor>`().") == "Options"
+    (tmp_path / "o.ts").write_text(
+        'import * as u from "./u.js";\nexport class Options {\n  constructor() {}\n'
+        "  get body() { return 1; }\n  set body(v) {}\n}\n"
+        'export function run(o: Options) { return o.body + o["body"] + u.f(); }\n'
+        "const x = new Options();\n", encoding="utf-8")
+
+    def node(nid, label, line, end=None):
+        return {"id": nid, "label": label, "source_file": "o.ts", "source_location": f"L{line}",
+                "file_type": "code", "end_line": end or line}
+
+    nodes = [node("f", "o.ts", 1, 8), node("opt", "Options", 2, 6),
+             node("ctor", ".constructor()", 3), node("get", ".body()", 4),
+             node("set", ".body()", 5), node("run", "run()", 7)]
+    links = [{"source": s, "target": t, "relation": "contains"}
+             for s, t in [("f", "opt"), ("opt", "ctor"), ("opt", "get"), ("opt", "set"),
+                          ("f", "run")]]
+    for src, tgt, rel, line in [("run", "get", "reads", 7), ("f", "ctor", "calls", 8),
+                                ("f", "opt", "calls", 8)]:
+        links.append({"source": src, "target": tgt, "relation": rel, "confidence": "INFERRED",
+                      "source_file": "o.ts", "source_location": f"L{line}"})
+    _write_graph(tmp_path, {"nodes": nodes, "links": links})
+    occs = [_scip_occ(r, ts + sym, roles=1) for r, sym in [
+        ([1, 13, 20], "Options#"), ([2, 2, 13], "Options#`<constructor>`()."),
+        ([3, 6, 10], "Options#`<get>body`()."), ([4, 6, 10], "Options#`<set>body`()."),
+        ([6, 16, 19], "run().")]]
+    # every use of a property names both accessors; a member may be written as
+    # a string; an import names its module by the path it writes
+    occs += [_scip_occ(r, ts + sym) for r, sym in [
+        ([6, 43, 47], "Options#`<get>body`()."), ([6, 43, 47], "Options#`<set>body`()."),
+        ([6, 52, 58], "Options#`<get>body`()."), ([6, 52, 58], "Options#`<set>body`()."),
+        ([7, 14, 21], "Options#`<constructor>`().")]]
+    occs.append(_scip_occ([0, 19, 27], "scip-typescript npm demo 1.0 `u.ts`/"))
+    (tmp_path / "index.scip").write_bytes(_scip_index(tmp_path, {"o.ts": occs}))
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.delenv("GRAPHLORE_SCIP", raising=False)
+    server._GRAPH_CACHE.clear()
+    idx = scip.load()
+    assert idx is not None and idx.mismatched == 0
+    nodes, edges = server._nodes_edges(server._load_graph())
+    r = resolve._resolved(nodes, edges)
+    by = {(e["source"], e["target"], e["relation"]): e for e in r.edges}
+    # `new Options()` is the class's `constructor`, and a use of the class
+    for key in [("run", "get", "reads"), ("f", "ctor", "calls"), ("f", "opt", "calls")]:
+        assert by[key]["scip"] == "confirmed", key
+    # the setter is the same use as the getter, not a second one
+    assert not any(e.get("scip") == "added" for e in r.edges)
+    assert r.precision is not None and r.precision["contradicted"] == 0
+
+
 def test_scip_matches_a_symbol_by_its_descriptors():
     from graphlore import scip
 

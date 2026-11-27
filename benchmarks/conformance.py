@@ -5331,6 +5331,14 @@ SCIP_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
 """
 
 
+SCIP_TSCONFIG = """{
+  "compilerOptions": {"allowJs": true, "checkJs": false, "noEmit": true, "strict": true,
+                      "target": "es2022", "module": "nodenext", "moduleResolution": "nodenext"},
+  "include": ["**/*"], "exclude": ["graphify-out"]
+}
+"""
+
+
 def _scip_tool(name: str) -> str | None:
     found = shutil.which(name)
     for d in (Path.home() / "go" / "bin", Path.home() / ".dotnet" / "tools"):
@@ -5350,6 +5358,11 @@ def _scip_index(lang: str, root: Path) -> str | None:
         tool = _scip_tool("scip-dotnet")
         if not any(root.rglob("*.csproj")):
             (root / "Case.csproj").write_text(SCIP_CSPROJ, encoding="utf-8")
+        argv = [tool, "index", "--output", "index.scip"] if tool else []
+    elif lang in ("typescript", "javascript"):
+        tool = _scip_tool("scip-typescript")
+        if not (root / "tsconfig.json").exists():
+            (root / "tsconfig.json").write_text(SCIP_TSCONFIG, encoding="utf-8")
         argv = [tool, "index", "--output", "index.scip"] if tool else []
     else:
         return f"no SCIP indexer for {lang} here"

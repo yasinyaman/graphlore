@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Precise mode reads scip-typescript indexes** (`docs/concepts.md`,
+  "TypeScript and JavaScript"). An accessor (`` `<get>body` `` /
+  `` `<set>body` ``, both written at every use) is one use of the property, a
+  `` `<constructor>` `` is the class's `.constructor()` node and a use of the
+  class, and a member read by a string or a module named by an import's string
+  is its name. On got, uses left out as mismatched fall from 6,501 to 687; on
+  six repositories scip-typescript confirms 18,364 edges. A constructor's use
+  confirms an edge to its class beside one to the constructor (C# too).
 - **Precise mode reads scip-go and scip-dotnet indexes**
   (`docs/concepts.md`, "Go and C#"). The SCIP reader takes the two
   indexers' symbols: a Go package named by its import path is its last

@@ -323,14 +323,18 @@ def _names(lines: list[str], line: int, char: int, end: int, encoding: int,
     if not name or line >= len(lines) or end <= char:
         return True
     text = _slice(lines[line], char, end, encoding)
-    if name in text:
+    # (`x["name"]`: a member written as a string)
+    if name in text or any(t[:1] in "\"'`" and t.strip("\"'`") == name for t in text):
         return True
     # a C# attribute is written without its suffix: `[Option]` is `OptionAttribute`
     if name.endswith("Attribute") and name[:-len("Attribute")] in text:
         return True
-    # an import of a package names its whole path (Go: `import "net/http"`)
+    # an import of a package names its whole path (Go: `import "net/http"`),
+    # or a module by what the importer writes (TypeScript: `from "./util.js"`)
     m = _LAST_DESCRIPTOR.search(symbol.rstrip())
-    return bool(m and m.group("kind") == "/" and m.group("q") in text)
+    if not m or m.group("kind") != "/":
+        return False
+    return m.group("q") in text or any(t[:1] in "\"'" and t[-1:] == t[:1] for t in text)
 
 
 # --- symbols ---------------------------------------------------------------------
@@ -342,7 +346,10 @@ _LAST_DESCRIPTOR = re.compile(
 
 
 _MAJOR_VERSION = re.compile(r"v[0-9]+")
-_CONSTRUCTORS = (".ctor", ".cctor")
+# scip-dotnet's and scip-typescript's names of a constructor
+_CONSTRUCTORS = (".ctor", ".cctor", "<constructor>")
+# scip-typescript's accessors: `<get>body` and `<set>body` are written `body`
+_ACCESSORS = ("<get>", "<set>")
 
 
 def constructed_type(symbol: str) -> str | None:
@@ -401,6 +408,8 @@ def bare_name(symbol: str) -> str:
         # as its type, the way the source writes it and the graph names it
         inner = _LAST_DESCRIPTOR.search(symbol.rstrip()[:m.start()])
         return (inner.group("q") or inner.group("n") or "") if inner else ""
+    if name.startswith(_ACCESSORS):
+        name = name[len("<get>"):]
     if kind == ":" and name == "__init__":
         # scip-python's module: `` `pkg.sub`/__init__: `` is the module ``sub``
         before = symbol.rstrip()[:m.start()].rstrip("/")

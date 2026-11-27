@@ -427,10 +427,12 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
             return def_node[symbol]
         got: set[str] = set()
         name = scip.bare_name(symbol)
+        # a constructor is named as its type, or (TypeScript) `constructor`
+        wanted = {name, "constructor"} if scip.constructed_type(symbol) else {name}
         for file, line in (index.defs_of(symbol) if name else []):
             best = None
             for n in by_file.get(file, []):
-                if _is_file_hub_node(n) or _bare_name(_node_label(n)) != name:
+                if _is_file_hub_node(n) or _bare_name(_node_label(n)) not in wanted:
                     continue
                 try:
                     d = abs(int(_node_line(n)) - line)
@@ -538,7 +540,8 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
     label_of = {_node_id(n): _bare_name(_node_label(n)) for n in nodes}
     # a constructor -> its type (a definition named as what holds it)
     ctor_of = {c: p for c, p in parent.items()
-               if label_of.get(c) and label_of.get(c) == label_of.get(p)}
+               if label_of.get(c) and (label_of.get(c) == label_of.get(p)
+                                       or label_of.get(c) == "constructor")}
 
     def holds(tgt: str, src: str) -> bool:
         seen = {src}
@@ -555,28 +558,34 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
     confirmed: set[int] = set()
     added: dict[tuple[str, str], dict] = {}
     names: dict[str, str] = {}
+    # the uses, one per range and name: scip-typescript writes both accessors
+    # of a property (`<get>body`, `<set>body`) at every use of it, which is
+    # one use of either, as two namesakes are
+    uses: dict[tuple[str, int, int, int, str], list[Any]] = {}
     for occ in index.refs:
         if occ.roles & (scip.DEFINITION | scip.IMPORT):
             continue
         name = names.get(occ.symbol)
         if name is None:
             name = names[occ.symbol] = scip.bare_name(occ.symbol)
-        if not name:
-            continue
-        tgts = node_of(occ.symbol)
+        if name:
+            uses.setdefault((occ.file, occ.line, occ.char, occ.end_char, name), []).append(occ)
+    for (_f, _l, _c, _e, name), same_use in uses.items():
+        occ = same_use[0]
+        tgts = frozenset().union(*(node_of(o.symbol) for o in same_use))
         sites.setdefault((occ.file, occ.line), []).append(
-            (name, tgts, not index.defs_of(occ.symbol)))
+            (name, tgts, not any(index.defs_of(o.symbol) for o in same_use)))
         if not tgts:
             continue
         src = owner(occ.file, occ.line)
         if src is None or src in tgts:
             continue
+        # a constructor's use is a use of its type too (`[Option(…)]`, an
+        # edge the graph writes to `OptionAttribute`; `new Command()`, to
+        # the class beside the constructor)
         have = [i for t in tgts for i in pairs.get((src, t), ())]
-        if not have:
-            # a constructor's use is a use of its type (`[Option(…)]`, an
-            # edge the graph writes to `OptionAttribute`)
-            have = [i for t in tgts if (p := ctor_of.get(t)) is not None
-                    for i in pairs.get((src, p), ())]
+        have += [i for t in tgts if (p := ctor_of.get(t)) is not None
+                 for i in pairs.get((src, p), ())]
         if have:
             confirmed.update(have)
             continue
@@ -617,8 +626,9 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
         # (a constructor is its type where the index names only the type:
         # scip-dotnet's `new RestRequest()`)
         held_by = ctor_of.get(t)
-        if same and all((x[1] and t not in x[1] and held_by not in x[1]) or (not x[1] and x[2])
-                        for x in same):
+        if same and all((x[1] and t not in x[1] and held_by not in x[1]
+                         and not any(ctor_of.get(c) == t for c in x[1]))
+                        or (not x[1] and x[2]) for x in same):
             contradicted.add(i)
 
     precision = {

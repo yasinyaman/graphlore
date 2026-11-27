@@ -178,6 +178,47 @@ picks the more specific `Take<T>(List<T>)` (Roslyn agrees with the engine);
 the engine's edge is kept, marked contradicted. `benchmarks/results-conformance-scip.json`
 holds the state.
 
+### TypeScript and JavaScript
+
+```bash
+npm install -g @sourcegraph/scip-typescript
+scip-typescript index --output index.scip                   # where tsconfig.json is
+scip-typescript index --infer-tsconfig --output index.scip  # a JavaScript project with none
+```
+
+It needs no `node_modules` for the project's own names (a library's are then
+unbound, which only leaves them out), but a `tsconfig.json` that `extends` a
+package must find it. The reader takes its forms:
+
+- an accessor is `` `<get>body` `` / `` `<set>body` ``, written `body`, and
+  scip-typescript writes both at every use of the property: occurrences of one
+  name at one range are one use, of whichever their symbols are;
+- a constructor is `` `<constructor>` ``: written as its class (`new
+  Options()`), it is the graph's `.constructor()` node, and a use of the class
+  too;
+- a member read by a string (`x["_zod"]`) and a module named by what an
+  import writes (`from "./util.js"`) are their names.
+
+A namespace import (`import * as z from "zod"`) names the module by an alias;
+its uses are left out as mismatched (19,303 on zod), as an aliased import is
+in Python.
+
+| Repository | Confirmed | Added | Contradicted |
+|---|---:|---:|---:|
+| zod | 14,215 | 3,511 | 301 |
+| got | 3,177 | 597 | 161 |
+| commander | 515 | 117 | 0 |
+| nestjs-realworld | 242 | 59 | 0 |
+| express | 174 | 104 | 0 |
+| express-mongoose-demo | 41 | 8 | 1 |
+
+Over the six, 95.9% of the edges the index has an answer for go where it says
+(`oracle_scip.py`). The contradictions read are the engine's: on zod a call
+through a namespace import (`z.array(…)`) linked to a method of the same name
+(`ZodType.array`) where it is the module's function, on got `new Error(…)`
+linked to a type alias `Error` of the project where it is the built-in. The
+89 TypeScript and JavaScript conformance cases all hold in precise mode too.
+
 ## Import edges, checked against the source
 
 `graphlore_cycles`, `graphlore_layers` and `graphlore_surprises` read each import
