@@ -166,7 +166,17 @@ repositories target 9 and 10.
 
 `benchmarks/conformance.py --scip` reads each conformance case in precise
 mode (it runs the indexer on the case's project), which says which of the
-rules the engine does not follow a compiler's index settles.
+rules the engine does not follow a compiler's index settles. Of the 715 Go
+and C# cases, the engine alone holds 600; in precise mode 675 hold (Go 314
+of 318, C# 361 of 397): 77 of the 115 the engine leaves open, most of them
+the ones that need types (generic instantiation, a type parameter's core
+type, overloads by argument type, delegates, nullable access, patterns).
+Two cases the engine holds break, both the indexer's errors: scip-go binds
+the `E` of `[S ~[]E, E any]` to the package's type `E`, not to the type
+parameter declared after it, and scip-dotnet takes `Take<T>(T)` where C#
+picks the more specific `Take<T>(List<T>)` (Roslyn agrees with the engine);
+the engine's edge is kept, marked contradicted. `benchmarks/results-conformance-scip.json`
+holds the state.
 
 ## Import edges, checked against the source
 

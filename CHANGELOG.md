@@ -26,7 +26,9 @@ All notable changes to this project are documented here. The format is based on
   after an assignment (or a Go composite literal's key) and `reads` otherwise:
   the two indexers mark no access.
   `benchmarks/conformance.py --scip` reads the cases in precise mode (it runs
-  the indexer on each case's project, `--jobs` at once), and
+  the indexer on each case's project, `--jobs` at once): of the 715 Go and C#
+  cases the engine alone holds 600, precise mode 675 (two the engine holds
+  break, both the indexers' errors; `results-conformance-scip.json`), and
   `oracle_scip.py` takes every definition of a symbol.
 - **An edit of a function body no longer resolves the files that only read
   the file's declarations** (`docs/native-engine.md`, "Incremental updates";

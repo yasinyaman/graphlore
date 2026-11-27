@@ -122,6 +122,30 @@ named `Box` / `value` / `get` ran into the wrapper names, which is now a
 case of its own; and an object literal's method named `get` is a library's
 name to the engine, so the case names it `fetchAll`.
 
+## In precise mode
+
+Where a compiler-grade SCIP index is at hand, graphlore checks the graph
+against it at read time ([concepts](concepts.md#a-compilers-answer-scip-indexes)):
+the rules this list holds that need what only a type checker knows are the
+indexer's to settle. `--scip` reads the cases that way, with the language's
+indexer run on each case's project (scip-go and scip-dotnet for now):
+
+```bash
+python benchmarks/conformance.py --only go,csharp --scip --jobs 4 --baseline benchmarks/results-conformance.json
+```
+
+Measured 2026-11-27 (engine 0.5.80, scip-go 0.2.10, scip-dotnet 0.2.16 on
+.NET 8): the engine alone holds 600 of the 715 Go and C# cases, precise mode
+675 — Go 314 of 318, C# 361 of 397. Two the engine holds break, both the
+indexer's errors (a type parameter's constraint naming one declared after
+it, in scip-go; the more specific of two generic overloads, in scip-dotnet).
+What stays open is mostly what an index does not say: a relation it marks
+no access for (an `indirect_call` of a method group, a `dispatches_to`), an
+implicit call it records no occurrence of (a base constructor, `GetAwaiter`
+of an extension, an indexer's `Count` for `l[^1]`), and a name a property
+pattern or attribute argument writes. `results-conformance-scip.json` holds
+the state.
+
 ## The rules
 
 
