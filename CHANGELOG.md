@@ -41,7 +41,7 @@ All notable changes to this project are documented here. The format is based on
   (`new T()`) is not contradicted. On chi, uses left out as mismatched fall
   from 1,762 to 0, and contradicted edges on commandline from 496 to 121.
   On four Go repositories scip-go confirms 13,446 edges, adds 1,442 and
-  contradicts 3; on four C# repositories scip-dotnet confirms 11,257.
+  contradicts 3; on four C# repositories scip-dotnet confirms 11,457.
   An edge added from an index is `calls` after a `(`, and to state a `writes`
   after an assignment (or a Go composite literal's key) and `reads` otherwise:
   the two indexers mark no access.

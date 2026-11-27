@@ -108,9 +108,10 @@ scip-go indexes one module: in a repository of several, run it in each
 module's directory and list the files, `GRAPHLORE_SCIP=index.scip,grpc/index.scip,…`
 (each index is read by its own root). scip-dotnet loads the projects the
 solution names and needs the SDK they target: a project it cannot load (a
-`net48` target on Linux, a package of a newer runtime) is left out of the
-index, and a source written in a newer C# than the SDK's compiler is bound
-by guesswork, so its answers are not to be believed there.
+`net48` target on Linux, a package of a newer runtime, a package with a
+security advisory where warnings are errors: `NuGetAudit=false`) is left out
+of the index, and a source written in a newer C# than the SDK's compiler is
+bound by guesswork, so its answers are not to be believed there.
 
 The two indexers write symbols differently from scip-python, and the reader
 takes both:
@@ -145,9 +146,9 @@ What the two give, on the audit repositories (the graph of engine 0.5.80):
 | resty | scip-go | 8,617 | 589 | 2 |
 | gin-examples (8 modules) | scip-go | 251 | 27 | 1 |
 | commandline | scip-dotnet | 4,083 | 1,546 | 121 |
-| restsharp | scip-dotnet | 5,797 | 1,303 | 111 |
-| aspnetcore-realworld | scip-dotnet | 1,125 | 57 | 0 |
-| todoapi | scip-dotnet | 252 | 27 | 10 |
+| restsharp | scip-dotnet | 5,885 | 1,331 | 119 |
+| aspnetcore-realworld | scip-dotnet | 1,237 | 163 | 30 |
+| todoapi | scip-dotnet | 252 | 28 | 16 |
 
 `oracle_scip.py` over the four Go repositories: 99.9% of the edges scip-go
 has an answer for go where it says, 89.9% of the uses it binds to a definition
@@ -157,12 +158,15 @@ of what scip-go adds are keys of composite literals (`Command{Use: "c"}`: the
 field, which the engine does not record) and fields read through a named
 slice type; resty's two contradicted edges are the engine's errors
 (`url.URL.Query` taken for `Request.Query`). Over the four C# repositories
-97.5% / 84.6% (Roslyn on the sources alone, `oracle_csharp.py`, 98.3% on
-commandline and restsharp); of the 232 edges scip-dotnet contradicts there,
-122 Roslyn calls wrong too, and the rest are mostly overload choices the
-engine made, plus sources of C# 14 (`extension` blocks) the .NET 8 compiler
-reads wrong. The C# indexes here are partial: .NET 8 was the SDK at hand, the
-repositories target 9 and 10.
+97.4% / 83.9% (Roslyn on the sources alone, `oracle_csharp.py`, 98.3% on
+commandline and restsharp); of the 240 edges scip-dotnet contradicts there,
+123 Roslyn calls wrong too, and the rest are mostly overload choices the
+engine made, and definitions written twice under `#if` (restsharp's
+`[GeneratedRegex]` methods under `NET7_0_OR_GREATER`, plain ones under
+`#else`): the index is of one target framework, the engine linked the other
+branch, and both are right for some target. Measured with the SDKs the
+repositories name (.NET 9 and 10; `NuGetAudit=false` in the environment, so
+that a package's security advisory does not stop a project from loading).
 
 `benchmarks/conformance.py --scip` reads each conformance case in precise
 mode (it runs the indexer on the case's project), which says which of the
@@ -299,14 +303,16 @@ precise mode.
 
 ### What could not be measured here
 
-- **C and C++**: scip-clang is published as GitHub release binaries, which
-  this environment's network does not reach.
+- **C and C++**: scip-clang is published only as GitHub release binaries
+  (building it needs LLVM and Bazel); the session these numbers come from
+  could read other GitHub repositories with git only, not their releases.
 - **PHP**: scip-php and the projects' own dependencies install through
-  Composer, whose downloads come from GitHub here.
+  Composer, which downloads each package from its GitHub repository, so the
+  same limit applies, once per package.
 - **Kotlin and Scala**: scip-java indexes them through Gradle, sbt or mill
-  builds, which could not fetch their plugins (or Maven Central rate-limited
-  the requests); `kotlinc` with `semanticdb-kotlinc` is the build-tool-free
-  way.
+  builds, which could not fetch their plugins (Maven Central also
+  rate-limited the requests), and `semanticdb-kotlinc` 0.6.0, built against
+  the compiler Gradle embeds, does not load into the `kotlinc` command.
 - **Swift**: there is no SCIP indexer of the Swift compiler's.
 
 ## Import edges, checked against the source
