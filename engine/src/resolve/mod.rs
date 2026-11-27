@@ -2479,18 +2479,28 @@ impl<'a> Project<'a> {
         // a literal is no instance of a class of the project where nothing
         // converts one implicitly
         let strict = matches!(self.family[c.0], Some(Family::Jvm | Family::CSharp));
+        let java = self.files.decl(c.0).lang() == Some(crate::lang::Lang::Java);
+        // (a type parameter of the method or its class: any argument)
+        let type_param = || {
+            self.def(c).type_params.iter().any(|t| t == name)
+                || self
+                    .class_of(c.0, self.def(c).parent)
+                    .is_some_and(|k| self.def(k).type_params.iter().any(|t| t == name))
+        };
         let literal = |want: Prim| match prim {
             Some(p) if p == want => Some(1),
             Some(Prim::Any) => Some(0),
             Some(_) => None,
             None if strict && self.param_type(c, ty).is_some() => None,
+            // Java: a literal is a `String`, a boxed number or a `Boolean`,
+            // final classes of the platform: no other library type is one
+            None if java && !type_param() => None,
             None => Some(0),
         };
         // Java: a number or a flag fits a primitive parameter without boxing,
         // which phase 1 of overload resolution takes first (JLS 15.12.2.2);
         // of the primitives an integer literal widens to, the narrowest is
         // the most specific (15.12.2.5: int <: long <: float <: double)
-        let java = self.files.decl(c.0).lang() == Some(crate::lang::Lang::Java);
         let unboxed = java
             && matches!(
                 name.as_str(),
@@ -2509,7 +2519,19 @@ impl<'a> Project<'a> {
             Arg::Str if self.family[c.0] == Some(Family::C) => {
                 literal(Prim::Str).map(|x| x + i32::from(name == "char"))
             }
+            // Java: a string literal is a `String`, never a `char` or a
+            // `Character` (JLS 3.10.5); a character literal a `char`, boxed
+            // to `Character` and widened to `int` and on (5.1.2, 5.1.7)
+            Arg::Str if java && matches!(name.as_str(), "char" | "Character") => None,
             Arg::Str => literal(Prim::Str),
+            Arg::Char if java => match name.as_str() {
+                "char" => Some(3),
+                "Character" => Some(2),
+                "int" | "long" | "float" | "double" => Some(0),
+                "String" | "CharSequence" | "StringBuilder" => None,
+                _ => literal(Prim::Str),
+            },
+            Arg::Char => literal(Prim::Str),
             Arg::Num => literal(Prim::Num).map(|x| x + i32::from(unboxed)),
             Arg::Int if java && matches!(name.as_str(), "short" | "byte" | "char") => None,
             // (C++: an `int` parameter is an exact match, any other numeric
@@ -2521,7 +2543,9 @@ impl<'a> Project<'a> {
                 literal(Prim::Num).map(|x| x + if unboxed { 1 + widening(name) } else { 0 })
             }
             Arg::Bool => literal(Prim::Bool).map(|x| x + i32::from(unboxed)),
-            Arg::Class => literal(Prim::Class),
+            // (Java: a class literal is a `Class`, which is a `Type`: the
+            // parameter written `Class<T>` is the more specific, 15.12.2.5)
+            Arg::Class => literal(Prim::Class).map(|x| x + i32::from(java && name == "Class")),
             // a lambda is something to call: no string, number, flag or
             // class (it may be an interface of one method, which a class of
             // the project can be)
@@ -2570,6 +2594,20 @@ impl<'a> Project<'a> {
                         .then(|| self.local_written_type(f, d, &path[0]))
                         .flatten()
                         .or_else(|| held.and_then(|p| self.written_field_type(p)));
+                    // (a primitive local, `boolean b`, whose written type the
+                    // path leaves empty)
+                    let written = written.or_else(|| {
+                        (java && path.len() == 1)
+                            .then(|| self.local_written_head(f, d, &path[0]).map(str::to_string))
+                            .flatten()
+                    });
+                    if java {
+                        if let Some(fits) =
+                            self.java_library_arg(f, d, c, path, written.as_deref(), ty)
+                        {
+                            return fits;
+                        }
+                    }
                     return match written {
                         Some(w) if w.eq_ignore_ascii_case(name) => Some(1),
                         Some(w) => match (primitive(&w), prim) {
@@ -2605,6 +2643,53 @@ impl<'a> Project<'a> {
                 }
             }
         }
+    }
+
+    /// Java: an argument of a type the project does not define, against one
+    /// parameter, where the source writes that type: a cast (`(String) x`,
+    /// the path of its type), a construction (`new StringReader(s)`, the
+    /// type and `()`) or a local, parameter or field declared with it.
+    /// That very type is the better fit; a type of the project is none (a
+    /// library's class names no base of the project, JLS 8.1.4); a string
+    /// and a character are not one another. `None` where the source does
+    /// not write the type.
+    fn java_library_arg(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        c: DefRef,
+        path: &[String],
+        written: Option<&str>,
+        ty: &[String],
+    ) -> Option<Option<i32>> {
+        let name = ty.last()?;
+        let capital = |s: &str| s.chars().next().is_some_and(char::is_uppercase);
+        let named = match path {
+            [t] if capital(t) && written.is_none() => t.as_str(),
+            [t, call] if call == crate::refs::UNKNOWN && capital(t) => t.as_str(),
+            _ => written?,
+        };
+        // (a type of the project, or a type parameter: the walk's to type)
+        if self.type_of_path(f, d, &[named.to_string()], true).is_some()
+            || primitive(named) == Some(Prim::Any)
+        {
+            return None;
+        }
+        let stringy = |n: &str| matches!(n, "String" | "CharSequence");
+        let chary = |n: &str| matches!(n, "char" | "Character");
+        Some(if named == name.as_str() {
+            Some(2)
+        } else if (stringy(named) && chary(name))
+            || (chary(named) && stringy(name))
+            || self.param_type(c, ty).is_some()
+        {
+            None
+        } else {
+            match (primitive(named), primitive(name)) {
+                (Some(a), Some(b)) if a != b && a != Prim::Any && b != Prim::Any => None,
+                _ => Some(0),
+            }
+        })
     }
 
     /// The field, property, variable or constant a path names, if it names one.

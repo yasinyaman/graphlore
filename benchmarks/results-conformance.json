@@ -1,6 +1,6 @@
 {
- "passed": 1157,
- "total": 1272,
+ "passed": 1166,
+ "total": 1281,
  "cases": [
   {
    "id": "python/module-function",
@@ -8573,6 +8573,60 @@
   },
   {
    "id": "go/local-value-is-read-where-it-is-declared",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/class-literal-picks-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/string-literal-is-no-char",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/cast-to-a-library-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/library-object-is-no-project-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/primitive-local-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/conditional-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/primitive-local-hides-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/string-literal-is-no-other-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/primitive-field-argument",
    "ok": true,
    "missing": [],
    "unwanted": []

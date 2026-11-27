@@ -5452,6 +5452,88 @@ def _judge(c: dict[str, Any], graph: dict[str, Any] | str) -> dict[str, Any]:
             "unwanted": unwanted}
 
 
+# Found by precise mode: scip-java (javac) on gson contradicted 1,025 of the
+# engine's Java calls, most of them an overload of a library type the engine
+# could not tell from another (`fromJson(json, Foo.class)` is the `Class<T>`
+# one, `addProperty("x", "1")` the `String` one).
+found_by("compiler")
+JLS_15_12 = "The Java Language Specification, 15.12.2 'Compile-Time Step 2: Determine Method Signature'"
+case("java", "class-literal-picks-class", "a class literal `Foo.class` is a `Class`: of `from(String, Class<T>)` and `from(String, Type)` it is the first, the more specific",
+     JLS_15_12, {"app/A.java": "package app;\n\nimport java.lang.reflect.Type;\n\npublic class A {\n"
+                              "    <T> T from(String s, Class<T> c) {\n        return null;\n    }\n\n"
+                              "    <T> T from(String s, Type t) {\n        return null;\n    }\n\n"
+                              "    Object run() {\n        return from(\"x\", A.class);\n    }\n\n"
+                              "    Object typed(Type t) {\n        return from(\"x\", t);\n    }\n}\n"},
+     [("A.run", "calls", "app/A.java:A.from@6"), ("A.typed", "calls", "app/A.java:A.from@10")],
+     [("A.run", "calls", "app/A.java:A.from@10"), ("A.typed", "calls", "app/A.java:A.from@6")],
+     source="JLS 15.12.2.5 (the most specific method: Class<T> is a subtype of Type); gson Gson.fromJson")
+case("java", "string-literal-is-no-char", "a string literal is a `String`, never a `char` or a `Character`; a character literal is a `char`, boxed to `Character`",
+     JLS_15_12, {"app/A.java": "package app;\n\npublic class A {\n"
+                              "    void add(Character c) {\n    }\n\n    void add(String s) {\n    }\n\n"
+                              "    void text() {\n        add(\"x\");\n    }\n\n"
+                              "    void letter() {\n        add('x');\n    }\n}\n"},
+     [("A.text", "calls", "app/A.java:A.add@7"), ("A.letter", "calls", "app/A.java:A.add@4")],
+     [("A.text", "calls", "app/A.java:A.add@4"), ("A.letter", "calls", "app/A.java:A.add@7")],
+     source="JLS 3.10.4, 3.10.5 (character and string literals), 5.1.7 (boxing); gson JsonObject.addProperty")
+case("java", "cast-to-a-library-type", "`(String) null` is a `String`: of `add(String)`, `add(Number)` and `add(Character)` the first",
+     JLS_15_12, {"app/A.java": "package app;\n\npublic class A {\n"
+                              "    void add(Number n) {\n    }\n\n    void add(String s) {\n    }\n\n"
+                              "    void add(Character c) {\n    }\n\n"
+                              "    void run() {\n        add((String) null);\n    }\n}\n"},
+     [("A.run", "calls", "app/A.java:A.add@7")],
+     [("A.run", "calls", "app/A.java:A.add@4"), ("A.run", "calls", "app/A.java:A.add@10")],
+     source="JLS 15.16 (a cast expression has the type it names); gson JsonObject.addProperty(\"x\", (String) null)")
+case("java", "library-object-is-no-project-type", "an object of a library's class (`new StringReader(s)`) is no instance of a class of the project: of `parse(Reader)` and `parse(JsonReader)` it is the first",
+     JLS_15_12, {"app/JsonReader.java": "package app;\n\npublic class JsonReader {\n}\n",
+                 "app/A.java": "package app;\n\nimport java.io.Reader;\nimport java.io.StringReader;\n\npublic class A {\n"
+                              "    static Object parse(Reader r) {\n        return null;\n    }\n\n"
+                              "    static Object parse(JsonReader r) {\n        return null;\n    }\n\n"
+                              "    Object run(String s) {\n        return parse(new StringReader(s));\n    }\n}\n"},
+     [("A.run", "calls", "app/A.java:A.parse@7")], [("A.run", "calls", "app/A.java:A.parse@11")],
+     source="JLS 8.1.4, 8.1.5 (a class's superclass and interfaces are written where it is declared: a library's class names none of the project's); gson JsonParser.parseReader")
+
+case("java", "primitive-local-argument", "a local declared with a primitive type (`boolean b`, `int i`) is that type as an argument: `add(b)` is `add(Boolean)`, `add(i)` is `add(Number)`, never `add(Character)`",
+     JLS_15_12, {"app/A.java": "package app;\n\npublic class A {\n"
+                              "    void add(Character c) {\n    }\n\n    void add(Boolean b) {\n    }\n\n"
+                              "    void add(Number n) {\n    }\n\n"
+                              "    void flag() {\n        boolean b = true;\n        add(b);\n    }\n\n"
+                              "    void count() {\n        for (int i = 0; i < 3; i++) {\n            add(i);\n        }\n    }\n}\n"},
+     [("A.flag", "calls", "app/A.java:A.add@7"), ("A.count", "calls", "app/A.java:A.add@10")],
+     [("A.flag", "calls", "app/A.java:A.add@4"), ("A.count", "calls", "app/A.java:A.add@4")],
+     source="JLS 5.1.7 (boxing), 5.1.5 (widening reference: Integer to Number); gson JsonArray.add")
+case("java", "conditional-argument", "`c ? null : s.toString()` is a `String`: `null` takes the type of the other branch",
+     JLS_15_12, {"app/A.java": "package app;\n\npublic class A {\n"
+                              "    void value(String s) {\n    }\n\n    void value(long n) {\n    }\n\n"
+                              "    void text(Object o) {\n        value(o == null ? null : o.toString());\n    }\n\n"
+                              "    void number(boolean b) {\n        value(b ? 1 : 0);\n    }\n}\n"},
+     [("A.text", "calls", "app/A.java:A.value@4"), ("A.number", "calls", "app/A.java:A.value@7")],
+     [("A.text", "calls", "app/A.java:A.value@7"), ("A.number", "calls", "app/A.java:A.value@4")],
+     source="JLS 15.25 (the type of a conditional expression); gson TypeAdapters")
+
+case("java", "primitive-local-hides-field", "a local declared with a primitive type hides the field of its name: `count++` after `int count = 0;` writes no field",
+     "The Java Language Specification, 6.4.1 'Shadowing'", {"app/A.java": "package app;\n\npublic class A {\n"
+                              "    int count;\n\n    void run() {\n        int count = 0;\n        count++;\n    }\n\n"
+                              "    void bump() {\n        count++;\n    }\n}\n"},
+     [("A.bump", "writes", "A.count")], [("A.run", "writes", "A.count")],
+     source="JLS 6.4.1 (a local variable shadows a field of the same name in its scope)")
+
+case("java", "string-literal-is-no-other-class", "a string literal is a `String`, a final class: no `Throwable` parameter takes it, so `error(m, \"x\", arg)` is `error(Method, String, Object...)`, not `error(Method, Throwable, String, Object...)`",
+     JLS_15_12, {"app/A.java": "package app;\n\nimport java.lang.reflect.Method;\n\npublic class A {\n"
+                              "    static RuntimeException error(Method m, String message, Object... args) {\n        return null;\n    }\n\n"
+                              "    static RuntimeException error(Method m, Throwable cause, String message, Object... args) {\n        return null;\n    }\n\n"
+                              "    String name;\n\n"
+                              "    void run(Method m) {\n        throw error(m, \"missing %s\", name);\n    }\n}\n"},
+     [("A.run", "calls", "app/A.java:A.error@6")], [("A.run", "calls", "app/A.java:A.error@10")],
+     source="JLS 3.10.5 (a string literal is a reference to an instance of class String), 8.1.1.2 (String is final); retrofit Utils.methodError")
+case("java", "primitive-field-argument", "a field declared with a primitive type, passed by name, is the field, not a reference to a method of its name",
+     JLS_15_12, {"app/A.java": "package app;\n\npublic class A {\n"
+                              "    private final boolean lenient;\n\n    A(boolean lenient) {\n        this.lenient = lenient;\n    }\n\n"
+                              "    A lenient() {\n        return new A(true);\n    }\n\n"
+                              "    A copy() {\n        return new A(lenient);\n    }\n}\n"},
+     [], [("A.copy", "indirect_call", "A.lenient")],
+     source="JLS 6.5.6.1 (a simple expression name is a variable: the field), 15.12.1 (a method is named only with an argument list); retrofit MoshiConverterFactory")
+
+
 def run_case(c: dict[str, Any]) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as tmp:
         return _judge(c, _prepare(c, Path(tmp) / "project", Path(tmp) / "graph.json"))

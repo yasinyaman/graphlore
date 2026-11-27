@@ -1,6 +1,6 @@
 {
- "passed": 936,
- "total": 976,
+ "passed": 945,
+ "total": 985,
  "cases": [
   {
    "id": "go/package-scope",
@@ -6138,6 +6138,60 @@
   },
   {
    "id": "ruby/bare-name-as-a-hash-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/class-literal-picks-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/string-literal-is-no-char",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/cast-to-a-library-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/library-object-is-no-project-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/primitive-local-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/conditional-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/primitive-local-hides-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/string-literal-is-no-other-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/primitive-field-argument",
    "ok": true,
    "missing": [],
    "unwanted": []

@@ -642,6 +642,9 @@ pub enum Arg {
     /// A C# lambda or anonymous method, with how many parameters it writes:
     /// only a delegate of as many fits it.
     Lambda(u8),
+    /// A Java character literal (`'x'`): a `char`, boxed to `Character`, never
+    /// a `String` (a string literal is `Str`).
+    Char,
 }
 
 /// An argument: the name it is passed under, if any, and what it is.

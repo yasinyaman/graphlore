@@ -146,14 +146,15 @@ of an extension, an indexer's `Count` for `l[^1]`), and a name a property
 pattern or attribute argument writes.
 
 The other five languages with an indexer here lose nothing: TypeScript 58 of
-58, JavaScript 31 of 31, Rust 75 of 75, Java 62 of 62, Ruby 35 of 35 in
-precise mode as with the engine alone — 936 of the 976 cases of the seven.
+58, JavaScript 31 of 31, Rust 75 of 75, Java 71 of 71, Ruby 35 of 35 in
+precise mode as with the engine alone — 945 of the 985 cases of the seven.
+Nine of the Java cases came from what scip-java contradicted on gson
+(overloads told apart by a library type), and the engine follows them.
 `results-conformance-scip.json` holds the state. C and C++, PHP, Kotlin,
 Scala and Swift have no indexer that could run here
 ([concepts](concepts.md#what-could-not-be-measured-here)).
 
 ## The rules
-
 
 ### python (52 of 52)
 
@@ -650,11 +651,11 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | a package type named any hides the universe's any: x.Run() on a parameter of type any is the package interface's method | `package-type-hides-the-predeclared-any` | 1.18– | yes |
 | a local's value names what is in scope where the local is declared: `in := in.B` in a later block is the receiver's field, not the earlier block's `in` | `local-value-is-read-where-it-is-declared` | – | yes |
 
-### java (62 of 62)
+### java (71 of 71)
 
 The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method Invocation Expressions'.
 
-Found by: the specification 41, a compiler 3, comparison 0, the grammar 4, the language's own tools 14. With the place it was read in the language's own tools: 14.
+Found by: the specification 41, a compiler 12, comparison 0, the grammar 4, the language's own tools 14. With the place it was read in the language's own tools: 23.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -720,6 +721,15 @@ Found by: the specification 41, a compiler 3, comparison 0, the grammar 4, the l
 | an overload applicable without variable arity is chosen before a varargs one | `fixed-arity-before-varargs` | – | yes |
 | an overload applicable without boxing is chosen before one that needs it | `no-boxing-before-boxing` | – | yes |
 | a class declared in a block is a name of the block | `local-class` | – | yes |
+| a class literal `Foo.class` is a `Class`: of `from(String, Class<T>)` and `from(String, Type)` it is the first, the more specific | `class-literal-picks-class` | – | yes |
+| a string literal is a `String`, never a `char` or a `Character`; a character literal is a `char`, boxed to `Character` | `string-literal-is-no-char` | – | yes |
+| `(String) null` is a `String`: of `add(String)`, `add(Number)` and `add(Character)` the first | `cast-to-a-library-type` | – | yes |
+| an object of a library's class (`new StringReader(s)`) is no instance of a class of the project: of `parse(Reader)` and `parse(JsonReader)` it is the first | `library-object-is-no-project-type` | – | yes |
+| a local declared with a primitive type (`boolean b`, `int i`) is that type as an argument: `add(b)` is `add(Boolean)`, `add(i)` is `add(Number)`, never `add(Character)` | `primitive-local-argument` | – | yes |
+| `c ? null : s.toString()` is a `String`: `null` takes the type of the other branch | `conditional-argument` | – | yes |
+| a local declared with a primitive type hides the field of its name: `count++` after `int count = 0;` writes no field | `primitive-local-hides-field` | – | yes |
+| a string literal is a `String`, a final class: no `Throwable` parameter takes it, so `error(m, "x", arg)` is `error(Method, String, Object...)`, not `error(Method, Throwable, String, Object...)` | `string-literal-is-no-other-class` | – | yes |
+| a field declared with a primitive type, passed by name, is the field, not a reference to a method of its name | `primitive-field-argument` | – | yes |
 
 ### kotlin (55 of 55)
 
@@ -1553,4 +1563,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1157 of 1272 rules hold
+1166 of 1281 rules hold

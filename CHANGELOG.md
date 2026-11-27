@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Java overloads that differ in a library type** (nine conformance cases,
+  found by scip-java on gson; `engine/src/resolve/mod.rs` `arg_fits`,
+  `java_library_arg`). A class literal is a `Class`, more specific than
+  `Type`; a string literal is a `String` (a final class: no `Character`, no
+  `Throwable`) and a character literal (`Arg::Char`) a `char`; a cast, a
+  local declared with a primitive (now a local, which hides a field of its
+  name), both branches of `?:` and `new StringReader(s)` name their type,
+  and an object of a library's class is no instance of a class of the
+  project. On gson the edges scip-java contradicts fall from 1,090 to 385
+  (93.3% of the edges it has an answer for go where it says, from 89.1%);
+  of the 45 audit repositories only gson's and retrofit's graphs change.
 - **Precise mode reads scip-java and scip-ruby indexes** (`docs/concepts.md`,
   "Java", "Ruby"): a Java constructor `` `<init>` `` is named as its class; a
   Ruby `X.new` names `initialize`, and a writer `x=` is written `x`. gson

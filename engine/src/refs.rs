@@ -2007,7 +2007,9 @@ fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
     if let Some(name) = implicit {
         return Arg::Implicit(name);
     }
-    if k.contains("string") || k.contains("char_literal") || k == "character_literal" {
+    if k == "character_literal" && crate::parse::current() == Some(crate::lang::Lang::Java) {
+        Arg::Char
+    } else if k.contains("string") || k.contains("char_literal") || k == "character_literal" {
         Arg::Str
     } else if k.contains("integer")
         || k.contains("number")
@@ -2088,6 +2090,18 @@ fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
             Arg::Num
         } else {
             Arg::Unknown
+        }
+    } else if k == "ternary_expression" && crate::parse::current() == Some(crate::lang::Lang::Java)
+    {
+        // `c ? a : b`: what both branches are; `null` takes the other's type
+        let (Some(a), Some(b)) = (v.by_field("consequence"), v.by_field("alternative")) else {
+            return Arg::Unknown;
+        };
+        match (arg_kind(a, src), arg_kind(b, src)) {
+            (Arg::Null, x) | (x, Arg::Null) => x,
+            (x, y) if x == y => x,
+            (Arg::Int | Arg::Num, Arg::Int | Arg::Num) => Arg::Num,
+            _ => Arg::Unknown,
         }
     } else if matches!(k, "cast_expression" | "as_expression") {
         // `(Foo) x`, `x as Foo`: the type it is cast to
@@ -3048,6 +3062,16 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                         // which hides the outer name
                         _ if k == "property_declaration" && !field => {
                             out.push((name, Vec::new(), false, false));
+                        }
+                        // Java `boolean b = true;`, `int i` in a body: declared
+                        // with a primitive, which no path names (it hides a
+                        // field of its name all the same; a field is a state
+                        // definition of its own)
+                        _ if crate::parse::current() == Some(crate::lang::Lang::Java)
+                            && !field
+                            && java_primitive_type(n, src).is_some() =>
+                        {
+                            out.push((name, Vec::new(), true, field));
                         }
                         _ => {}
                     }
@@ -4423,13 +4447,17 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     targs: if declared { written_targs(n, src) } else { Vec::new() },
                     targ_elems: if declared { written_targ_elems(n, src) } else { Vec::new() },
                     key: if declared { written_key(n, src) } else { None },
-                    written_head: (declared
-                        && matches!(
-                            facts.lang,
-                            Some(crate::lang::Lang::C | crate::lang::Lang::Cpp)
-                        ))
-                    .then(|| written_head(n, src))
-                    .flatten(),
+                    // (C / C++: `std` of `std::x`; Java: a primitive, which
+                    // the path of a written type leaves empty, `boolean b`)
+                    written_head: if declared
+                        && matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp))
+                    {
+                        written_head(n, src)
+                    } else if facts.lang == Some(crate::lang::Lang::Java) {
+                        java_primitive_type(n, src)
+                    } else {
+                        None
+                    },
                     from_def: None,
                     byte: declared_at,
                     until: 0,
@@ -7970,6 +7998,16 @@ fn written_type(node: Node, src: &[u8]) -> Option<Vec<String>> {
                 .and_then(|t| first_type(t, src))
         })
     })
+}
+
+/// The primitive type a Java declaration writes (`boolean`, `int`, `double`):
+/// the path of a written type leaves it empty.
+fn java_primitive_type(node: Node, src: &[u8]) -> Option<String> {
+    node.by_field("type")
+        .filter(|t| {
+            matches!(t.kind_str(), "integral_type" | "floating_point_type" | "boolean_type")
+        })
+        .map(|t| text(t, src))
 }
 
 /// The first name of the outer type a declaration writes (see

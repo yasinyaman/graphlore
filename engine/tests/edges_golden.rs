@@ -4092,3 +4092,37 @@ fn go_scopes_identifiers_and_anonymous_struct_fields() {
     assert!(has("Walk()", "a_step"), "{got:?}");
     assert!(has("Shut()", "a_pool_close"), "{got:?}");
 }
+
+// Java overloads by the argument's type where the type is a library's
+// (conformance's cases found by scip-java on gson): a class literal is a
+// `Class`, more specific than `Type`; a string literal is no `Character`, a
+// character literal is one; a cast, a primitive local and both branches of
+// `?:` name their type; an object of a library's class is no instance of a
+// class of the project.
+#[test]
+fn java_overloads_by_library_argument_types() {
+    let got = call_ids("java-library-args", &[
+        ("app/JsonReader.java", "package app;\n\npublic class JsonReader {\n}\n"),
+        (
+            "app/A.java",
+            "package app;\n\nimport java.io.Reader;\nimport java.io.StringReader;\nimport java.lang.reflect.Type;\n\npublic class A {\n    <T> T from(String s, Class<T> c) { return null; }\n    <T> T from(String s, Type t) { return null; }\n    void add(Character c) {}\n    void add(String s) {}\n    void add(Boolean b) {}\n    void add(Number n) {}\n    static Object parse(Reader r) { return null; }\n    static Object parse(JsonReader r) { return null; }\n    void literal() { from(\"x\", A.class); }\n    void typed(Type t) { from(\"x\", t); }\n    void text() { add(\"x\"); }\n    void letter() { add('x'); }\n    void cast() { add((String) null); }\n    void flag() { boolean b = true; add(b); }\n    void count() { for (int i = 0; i < 3; i++) { add(i); } }\n    void cond(Object o) { add(o == null ? null : o.toString()); }\n    Object reader(String s) { return parse(new StringReader(s)); }\n}\n",
+        ),
+    ]);
+    let only = |from: &str, to: &str| {
+        let theirs: Vec<&String> = got
+            .iter()
+            .filter(|(s, t)| s == from && t.starts_with("app_a_a_"))
+            .map(|(_, t)| t)
+            .collect();
+        assert_eq!(theirs, vec![&to.to_string()], "{from}: {got:?}");
+    };
+    only(".literal()", "app_a_a_from");
+    only(".typed()", "app_a_a_from_2");
+    only(".text()", "app_a_a_add_2");
+    only(".letter()", "app_a_a_add");
+    only(".cast()", "app_a_a_add_2");
+    only(".flag()", "app_a_a_add_3");
+    only(".count()", "app_a_a_add_4");
+    only(".cond()", "app_a_a_add_2");
+    only(".reader()", "app_a_a_parse");
+}

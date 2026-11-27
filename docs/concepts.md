@@ -266,15 +266,21 @@ class.
 
 | Repository | Confirmed | Added | Contradicted |
 |---|---:|---:|---:|
-| gson | 15,929 | 3,003 | 1,090 |
+| gson | 16,002 | 3,001 | 385 |
 | spring-petclinic | 655 | 157 | 1 |
 
-89.1% of the edges the index has an answer for go where it says, and most of
-the rest are the engine's overload choices, which the compiler settles:
-`fromJson("{}", CustomClass3.class)` is `fromJson(String, Class)`, not
-`(String, Type)`, and `out.value(… ? null : value.getHostAddress())` is
-`value(String)`, not `value(float)`. The 62 Java conformance cases hold in
-precise mode.
+93.3% of the edges the index has an answer for go where it says. The index
+first contradicted 1,090 of gson's edges, most of them the engine's choice
+between overloads that differ in a library type: `fromJson("{}",
+Foo.class)` is `fromJson(String, Class)`, not `(String, Type)`;
+`addProperty("x", "1")` is the `String` one, not the `Character` one;
+`value(o == null ? null : o.toString())` is `value(String)`. Those became
+conformance cases and the engine follows them (engine 0.5.80: a class
+literal, a string and a character literal, a cast, a primitive local, both
+branches of `?:` and an object of a library's class each name their type);
+what is left are mostly results of library methods (`value(x.getName())`),
+whose types only the platform's own classes say. The 71 Java conformance
+cases hold in precise mode.
 
 ### Ruby
 
