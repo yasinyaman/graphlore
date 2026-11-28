@@ -4238,3 +4238,19 @@ fn rust_operators_call_their_traits_methods() {
     let has = |from: &str, to: &str| calls.contains(&(from.to_string(), to.to_string()));
     assert!(has("sum()", "src_lib_v_add") && has("flip()", "src_lib_v_neg"), "{calls:?}");
 }
+
+// Rust `type Cfg = Config;`: a value typed by the alias is a value of the
+// type it names (ripgrep's `type Range = Match;`).
+#[test]
+fn rust_type_alias_is_its_type() {
+    let calls = call_ids("rust-alias", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        (
+            "src/lib.rs",
+            "pub struct Config;\nimpl Config {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\nimpl Other {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\npub type Cfg = Config;\n\npub fn through_alias(c: Cfg) -> i32 {\n    c.show()\n}\n",
+        ),
+    ]);
+    let has = |from: &str, to: &str| calls.contains(&(from.to_string(), to.to_string()));
+    assert!(has("through_alias()", "src_lib_config_show"), "{calls:?}");
+    assert!(!has("through_alias()", "src_lib_other_show"), "{calls:?}");
+}

@@ -5424,13 +5424,25 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // the alias names
         // Kotlin / Swift `typealias Store = Repo`: another name for one type
         // (a function type, a tuple or a union names no type of its own)
-        if matches!(n.kind_str(), "type_alias" | "typealias_declaration")
-            && matches!(facts.lang, Some(crate::lang::Lang::Kotlin | crate::lang::Lang::Swift))
+        // (Rust `type Cfg = Config;`, `type Wide = m::Wide<u8>;`: the type named)
+        if (matches!(n.kind_str(), "type_alias" | "typealias_declaration")
+            && matches!(facts.lang, Some(crate::lang::Lang::Kotlin | crate::lang::Lang::Swift)))
+            || (n.kind_str() == "type_item" && facts.lang == Some(crate::lang::Lang::Rust))
         {
             let named = n
                 .by_field("value")
+                .or_else(|| n.by_field("type").filter(|_| n.kind_str() == "type_item"))
                 .or_else(|| kids(n).into_iter().rev().find(|c| !is_comment(c)))
-                .filter(|t| matches!(t.kind_str(), "user_type" | "type_identifier"));
+                .map(|t| match t.kind_str() {
+                    "generic_type" => t.by_field("type").unwrap_or(t),
+                    _ => t,
+                })
+                .filter(|t| {
+                    matches!(
+                        t.kind_str(),
+                        "user_type" | "type_identifier" | "scoped_type_identifier"
+                    )
+                });
             if let Some(ty) = named.and_then(|t| path_of(t, src)) {
                 let (lo, hi) = (n.start_byte(), n.end_byte());
                 for d in facts.defs.iter_mut() {

@@ -2245,7 +2245,8 @@ impl<'a> Project<'a> {
                 // (and Go `type A = T`, the one alias form it has)
                 let c_alias = k == DefKind::TypeAlias
                     && (matches!(self.family[r.0], Some(Family::C | Family::Jvm | Family::Swift))
-                        || (self.family[r.0] == Some(Family::Go) && def.declared_type.is_some()));
+                        || (matches!(self.family[r.0], Some(Family::Go | Family::Rust))
+                            && def.declared_type.is_some()));
                 // `typedef struct reader { … } reader;`: the struct written
                 // inside the alias, which holds the members
                 let inside = c_alias

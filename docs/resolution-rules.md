@@ -148,7 +148,7 @@ pattern or attribute argument writes.
 The other five languages with an indexer here lose nothing: TypeScript 60 of
 60, JavaScript 31 of 31, Java 71 of 71, Ruby 37 of 37 in precise mode. Rust
 was 75 of 75 before its sweep; of the 285 cases after it, precise mode holds
-253 and the engine alone 194 (rust-analyzer settles the ones that need a
+253 and the engine alone 197 (rust-analyzer settles the ones that need a
 type: patterns, operators, `Deref`, aliases) — 1127 of the 1199 cases of the
 seven. Ruby's
 `module-method-is-no-bare-call` holds only there: the engine still guesses a
@@ -1254,7 +1254,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | a namespace-qualified attribute name finds the suffixed class in that namespace only | `attribute-qualified-name` | – | **no**: no B -references-> Two.MarkAttribute |
 | a generic attribute's type arguments choose the class of that arity, not the non-generic class of the same name | `attribute-generic-arity` | 11– | **no**: no Target -references-> MarkAttribute<T> has Target -references-> MarkAttribute |
 
-### rust (194 of 285)
+### rust (197 of 285)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
@@ -1398,8 +1398,8 @@ Found by: the specification 37, a compiler 17, comparison 6, the grammar 2, the 
 | `Cookie` and `Cookie {}` written as values are uses of the unit struct | `unit-struct-value` | – | **no**: no jar -references-> Cookie |
 | a unit variant named bare after a glob import of its enum is a use of the enum | `glob-variant-value` | – | **no**: no globbed -references-> Examples |
 | a field read on a union value is the union's field | `union-field` | – | **no**: no read -reads-> Bits.f1 |
-| a parameter typed by an alias calls the aliased type's methods | `type-alias-is-its-type` | – | **no**: no through_alias -calls-> Config.show |
-| `Cfg { .. }` builds a Config, so its methods are Config's | `struct-expression-through-an-alias` | – | **no**: no build -calls-> Config.show |
+| a parameter typed by an alias calls the aliased type's methods | `type-alias-is-its-type` | – | yes |
+| `Cfg { .. }` builds a Config, so its methods are Config's | `struct-expression-through-an-alias` | – | yes |
 | a tuple struct re-exported under another name by `use ... as` is called as its constructor | `alias-by-use-constructor` | – | **no**: no make -calls-> Pair |
 | a const or static declared in a function is that function's name; the module's is read only outside | `const-in-a-block` | – | **no**: has local -reads-> src/lib.rs:LIMIT; local -reads-> src/lib.rs:COUNT |
 | an `extern` block inside a function declares a name of that block, hiding the module's function | `extern-fn-in-a-block` | – | yes |
@@ -1422,7 +1422,7 @@ Found by: the specification 37, a compiler 17, comparison 6, the grammar 2, the 
 | `go()` written before `fn go` in the same block is the block's go, not the module's go or a method | `block-item-is-visible-before-its-declaration` | – | yes |
 | `let r: Repo = make();` makes r a Repo although make is generic | `let-annotation-types-the-variable` | – | yes |
 | an associated function called by a path that starts at a type alias is the aliased type's function | `alias-path-associated-function` | – | **no**: no build -calls-> Wide.make |
-| a value typed by a generic alias has the aliased generic type's fields typed by the alias's arguments | `generic-alias-keeps-its-arguments` | – | **no**: no get -calls-> Repo.show |
+| a value typed by a generic alias has the aliased generic type's fields typed by the alias's arguments | `generic-alias-keeps-its-arguments` | – | yes |
 | a variant written through a type alias of its enum is a use of that enum | `alias-path-enum-variant` | – | yes |
 | a `use` in a block binds in the block only and shadows an item of the module there | `use-declaration-in-a-block` | – | yes |
 | a struct (and its impl) written in a block is the type named there, hiding the module's struct of that name | `struct-in-a-block-hides-the-modules` | – | **no**: no run -calls-> run.Item.show |
@@ -1782,4 +1782,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1288 of 1495 rules hold
+1291 of 1495 rules hold

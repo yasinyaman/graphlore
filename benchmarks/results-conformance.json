@@ -1,5 +1,5 @@
 {
- "passed": 1288,
+ "passed": 1291,
  "total": 1495,
  "cases": [
   {
@@ -9280,26 +9280,14 @@
   },
   {
    "id": "rust/type-alias-is-its-type",
-   "ok": false,
-   "missing": [
-    [
-     "through_alias",
-     "calls",
-     "Config.show"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "rust/struct-expression-through-an-alias",
-   "ok": false,
-   "missing": [
-    [
-     "build",
-     "calls",
-     "Config.show"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -9494,14 +9482,8 @@
   },
   {
    "id": "rust/generic-alias-keeps-its-arguments",
-   "ok": false,
-   "missing": [
-    [
-     "get",
-     "calls",
-     "Repo.show"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {

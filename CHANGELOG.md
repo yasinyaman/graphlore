@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **A Rust type alias is the type it names** (three of the sweep's cases):
+  `type Cfg = Config;` has `Config` as its declared type, and a value, a
+  struct expression or a path through the alias is the type's. On ripgrep
+  (`type Range = Match;`) rust-analyzer finds 15 more edges right and no
+  more wrong (9,343 of 9,380).
 - **Rust operators are calls of their traits' methods** (seven of the
   sweep's cases): `a + b` is `add` of a's type, `a += b` `add_assign`, `-a`
   `neg`, `!a` `not`, `*a` `deref`, `a[i]` `index`, `==` `eq`, `<`
