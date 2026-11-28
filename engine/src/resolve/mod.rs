@@ -4802,6 +4802,15 @@ impl<'a> Project<'a> {
                 found.retain(outer);
             }
         }
+        // JS / TS: a method of an object literal (`{ array() { … } }`) is a
+        // property, no binding of the module: the module's function or class
+        // of the name is (ECMAScript 15.2)
+        if found.len() > 1 && found.iter().all(|r| self.family[r.0] == Some(Family::Ecma)) {
+            let binding = |r: &DefRef| self.def(*r).kind != DefKind::Method;
+            if found.iter().any(binding) {
+                found.retain(binding);
+            }
+        }
         self.best(found)
     }
 
@@ -8584,6 +8593,16 @@ impl<'a> Project<'a> {
                             && self.files.decl(r.0).package().is_none()
                             && self.def(*r).kind.is_class_like())
                     })
+                    // JS / TS: a module's declarations are its own (an
+                    // import names what another module exports, the scopes'
+                    // work); only a script's top level is global
+                    .filter(|r| {
+                        fam != Family::Ecma
+                            || !pre.is_empty()
+                            || r.0 == f
+                            || !self.ecma_module(r.0)
+                            || self.imports_name(f, &path[0])
+                    })
                     // Ruby: a method at another file's top level is there
                     // only for the files that require it
                     .filter(|r| {
@@ -8665,6 +8684,16 @@ impl<'a> Project<'a> {
         self.files.decl(f).lang().is_some_and(|l| l.module().builtins().contains(&name))
     }
 
+    /// Whether a JS / TS file is a module (it imports or exports something,
+    /// ES or CommonJS): its top-level declarations are its own, where a
+    /// script's are global. (A file whose only exports are `export`
+    /// declarations, with no import, reads as a script: the facts do not
+    /// list such exports.)
+    fn ecma_module(&self, g: usize) -> bool {
+        let d = self.files.decl(g);
+        !d.imports().is_empty() || !d.exports().is_empty()
+    }
+
     /// Whether an import of file `f` binds `name`, resolved or not.
     fn imports_name(&self, f: usize, name: &str) -> bool {
         self.scopes[f].bindings.contains_key(name)
@@ -8703,6 +8732,19 @@ impl<'a> Project<'a> {
             return r.0 == f
                 || self.scopes[f].imported.contains(&r.0)
                 || self.imports_name(f, &self.def(r).name);
+        }
+        // (Ruby: a bare constant is the lexical scope's, its ancestors' or the
+        // top level's: a class or module nested in another is no bare name
+        // outside it, which the scopes have looked in. A method is still
+        // guessed by name: an `include M` at the top level mixes M into
+        // every object, and the facts do not hold such an include.)
+        if self.family[f] == Some(Family::Ruby) {
+            return !self.def(r).kind.is_class_like() || self.def(r).parent.is_none();
+        }
+        // (JS / TS: a declaration of another module is no global; a script's
+        // top level is)
+        if self.family[f] == Some(Family::Ecma) {
+            return r.0 == f || !self.ecma_module(r.0) || self.imports_name(f, &self.def(r).name);
         }
         if !matches!(self.family[f], Some(Family::Jvm | Family::Php)) {
             return true;

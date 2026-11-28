@@ -5533,6 +5533,41 @@ case("java", "primitive-field-argument", "a field declared with a primitive type
      [], [("A.copy", "indirect_call", "A.lenient")],
      source="JLS 6.5.6.1 (a simple expression name is a variable: the field), 15.12.1 (a method is named only with an argument list); retrofit MoshiConverterFactory")
 
+# Found by precise mode: scip-typescript on got, zod, scip-rust on ureq and
+# ripgrep, scip-ruby on faraday contradicted these.
+TS_MODULES = "The TypeScript Handbook, 'Modules' (a module's declarations are its own: only what it exports, and an importer imports, is in another's scope)"
+case("typescript", "module-declaration-is-no-global", "a declaration of a module that does not export it (`type Error = …` in errors.ts) is no name of another file: `new Error()` there is the global `Error`",
+     TS_MODULES, {"package.json": "{}\n",
+                  "src/is.ts": "export const is = (x: unknown) => x !== undefined;\n",
+                  "src/errors.ts": "import {is} from './is.js';\n\ntype Error = { code: string };\n\nexport const normalize = (e: unknown): Error => (is(e) ? e : e) as Error;\n",
+                  "test/a.ts": "import {normalize} from '../src/errors.js';\n\nexport function run() {\n  normalize(1);\n  throw new Error('x');\n}\n"},
+     [("run", "calls", "normalize")], [("run", "calls", "src/errors.ts:Error")],
+     source="TypeScript Handbook, Modules ('Modules are executed within their own scope, not in the global scope'); got source/core/errors.ts")
+
+case("typescript", "object-literal-method-is-no-module-name", "a method of an object literal (`{ array() { return array(this); } }`) is no name of the module: `array(…)` and `z.array(…)` through a namespace import are the module's function `array`",
+     TS_MODULES, {"package.json": "{}\n",
+                  "schemas.ts": "export interface ZodType {\n  array(): ZodType;\n}\n\nexport const proto = {\n  array(this: ZodType): ZodType {\n    return array(this);\n  },\n};\n\n"
+                                "export function array(t: ZodType): ZodType {\n  return t;\n}\n",
+                  "ext.ts": "export * from './schemas.js';\n",
+                  "use.ts": "import * as z from './ext.js';\n\nexport function run(t: z.ZodType) {\n  return z.array(t);\n}\n"},
+     [("run", "calls", "schemas.ts:array@11")], [("run", "calls", "schemas.ts:array@6")],
+     source="ECMAScript 15.2 (a module's top-level declarations are its exports' bindings; an object literal's method is a property, no binding); zod v4/classic/schemas.ts")
+
+case("ruby", "nested-constant-is-no-bare-name", "a constant nested in a module (`Faraday::Response::Logger`) is no bare name outside it: in a block at the top level `Logger` is the top level's (the standard library's)",
+     "The Ruby documentation, 'Modules and Classes' (constant lookup: the lexical scope, its ancestors, then Object)",
+     {"lib/faraday.rb": "module Faraday\n  module Response\n    class Logger\n      def initialize(io)\n        @io = io\n      end\n    end\n  end\nend\n",
+      "spec/logger_spec.rb": "require 'logger'\n\nRSpec.describe Faraday::Response::Logger do\n  let(:logger) { Logger.new(1) }\nend\n"},
+     [("logger_spec.rb", "references", "Faraday.Response.Logger")],
+     [("logger", "calls", "Faraday.Response.Logger"), ("logger", "calls", "Faraday.Response.Logger.initialize")],
+     source="Ruby's vm_get_ev_const (cref, then the ancestors of the cref's class, then Object; a block does not change the cref); faraday spec/faraday/response/logger_spec.rb")
+case("ruby", "module-method-is-no-bare-call", "a bare call is a method of `self`: `URI(url)` in a spec is `Kernel#URI`, not `Faraday::Utils.URI`, a method of a module the spec neither is in nor includes (a top-level `include M` would make it M's)",
+     "The Ruby documentation, 'Calling Methods' (a call without a receiver is sent to self)",
+     {"lib/faraday.rb": "module Faraday\n  module Utils\n    module_function\n\n    def URI(url)\n      url\n    end\n  end\nend\n",
+      "spec/ip_spec.rb": "RSpec.describe 'ip' do\n  def ip_of(url)\n    URI(url).host\n  end\nend\n"},
+     [], [("ip_of", "calls", "Faraday.Utils.URI")],
+     source="faraday spec/integration/options/proxy_options_integration_spec.rb; the facts hold no top-level `include`, which the rule needs to tell this from rakefile.rb's `include RakefileHelpers`")
+
+
 
 def run_case(c: dict[str, Any]) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as tmp:

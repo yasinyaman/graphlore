@@ -209,19 +209,22 @@ in Python.
 
 | Repository | Confirmed | Added | Contradicted |
 |---|---:|---:|---:|
-| zod | 14,215 | 3,511 | 301 |
-| got | 3,177 | 597 | 161 |
+| zod | 14,472 | 3,263 | 33 |
+| got | 3,177 | 597 | 14 |
 | commander | 515 | 117 | 0 |
 | nestjs-realworld | 242 | 59 | 0 |
 | express | 174 | 104 | 0 |
 | express-mongoose-demo | 41 | 8 | 1 |
 
-Over the six, 95.9% of the edges the index has an answer for go where it says
-(`oracle_scip.py`). The contradictions read are the engine's: on zod a call
-through a namespace import (`z.array(…)`) linked to a method of the same name
-(`ZodType.array`) where it is the module's function, on got `new Error(…)`
-linked to a type alias `Error` of the project where it is the built-in. The
-89 TypeScript and JavaScript conformance cases all hold in precise mode too.
+Over the six, 98.5% of the edges the index has an answer for go where it says
+(`oracle_scip.py`). It was 95.9%: zod's contradicted edges were 301 and got's
+161, the engine's errors of two kinds, which are conformance cases now and
+which it follows. On zod a call through a namespace import (`z.array(…)`)
+went to a method of an object literal named like the module's function
+`array` (a property, no binding of the module); on got `new Error(…)` went to
+a `type Error` that another module declares and does not export (a module's
+declarations are its own: only a script's top level is global). The 91
+TypeScript and JavaScript conformance cases hold in precise mode too.
 
 ### Rust
 
@@ -296,16 +299,19 @@ anywhere. scip-ruby is Sorbet: `X.new(…)` names `initialize`, a writer
 | Repository | Confirmed | Added | Contradicted |
 |---|---:|---:|---:|
 | thor | 977 | 160 | 3 |
-| faraday | 881 | 243 | 51 |
+| faraday | 881 | 243 | 46 |
 | rails-realworld | 42 | 15 | 0 |
 | sinatra-warden | 4 | 0 | 0 |
 
-96.4% of the edges the index has an answer for go where it says. Sorbet does
-not know RSpec: 30 of faraday's 51 contradicted edges are a `let` the engine
+96.7% of the edges the index has an answer for go where it says. Sorbet does
+not know RSpec: 30 of faraday's 46 contradicted edges are a `let` the engine
 scopes to its `describe` and the index binds to a method of the name in
-another spec; the other 21 are the engine's (`Logger.new` and `URI(url)` in a
-spec are the standard library's). The 35 Ruby conformance cases hold in
-precise mode.
+another spec. Of the engine's own, `Logger.new` in a spec (the standard
+library's, not `Faraday::Response::Logger`: a nested constant is no bare name
+outside its nesting) is a conformance case it follows now; `URI(url)`
+(`Kernel#URI`, not `Faraday::Utils.URI`) is a case it does not, because a
+top-level `include M` makes M's methods bare names everywhere and the facts
+hold no such include. The 37 Ruby conformance cases hold in precise mode.
 
 ### What could not be measured here
 

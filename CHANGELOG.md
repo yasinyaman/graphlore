@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **JS / TS and Ruby names read as their languages scope them** (three
+  conformance cases, found by scip-typescript on zod and got and by
+  scip-ruby on faraday). A declaration of a JS / TS module (a file that
+  imports or exports) is no name of another file unless imported: only a
+  script's top level is global (`new Error()` is the built-in, not another
+  module's unexported `type Error`). A method of an object literal is no
+  binding of the module (`z.array(…)` through a namespace import is the
+  module's function `array`, not `{ array() { … } }`). A Ruby class or module
+  nested in another is no bare name outside its nesting (`Logger.new` in a
+  spec is the standard library's). On zod the edges scip-typescript
+  contradicts fall from 301 to 33, on got from 161 to 14 (98.5% of the edges
+  it has an answer for go where it says, from 95.9%). A module's method
+  called bare (`URI(url)`) is still guessed by name: a case, open.
 - **Java overloads that differ in a library type** (nine conformance cases,
   found by scip-java on gson; `engine/src/resolve/mod.rs` `arg_fits`,
   `java_library_arg`). A class literal is a `Class`, more specific than

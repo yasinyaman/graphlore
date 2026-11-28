@@ -1,6 +1,6 @@
 {
- "passed": 945,
- "total": 985,
+ "passed": 949,
+ "total": 989,
  "cases": [
   {
    "id": "go/package-scope",
@@ -6192,6 +6192,30 @@
   },
   {
    "id": "java/primitive-field-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/module-declaration-is-no-global",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/object-literal-method-is-no-module-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/nested-constant-is-no-bare-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/module-method-is-no-bare-call",
    "ok": true,
    "missing": [],
    "unwanted": []

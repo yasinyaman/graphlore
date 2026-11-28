@@ -145,9 +145,11 @@ implicit call it records no occurrence of (a base constructor, `GetAwaiter`
 of an extension, an indexer's `Count` for `l[^1]`), and a name a property
 pattern or attribute argument writes.
 
-The other five languages with an indexer here lose nothing: TypeScript 58 of
-58, JavaScript 31 of 31, Rust 75 of 75, Java 71 of 71, Ruby 35 of 35 in
-precise mode as with the engine alone — 945 of the 985 cases of the seven.
+The other five languages with an indexer here lose nothing: TypeScript 60 of
+60, JavaScript 31 of 31, Rust 75 of 75, Java 71 of 71, Ruby 37 of 37 in
+precise mode — 949 of the 989 cases of the seven. Ruby's
+`module-method-is-no-bare-call` holds only there: the engine still guesses a
+module's method by name, because the facts hold no top-level `include`.
 Nine of the Java cases came from what scip-java contradicted on gson
 (overloads told apart by a library type), and the engine follows them.
 `results-conformance-scip.json` holds the state. C and C++, PHP, Kotlin,
@@ -257,11 +259,11 @@ Found by: the specification 29, a compiler 0, comparison 0, the grammar 0, the l
 | a `var` declared in a block is a name of the whole function | `var-is-the-functions` | – | yes |
 | the name of a function expression is a name of its own body only | `named-function-expression` | – | yes |
 
-### typescript (58 of 58)
+### typescript (60 of 60)
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
-Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the language's own tools 7. With the place it was read in the language's own tools: 7.
+Found by: the specification 30, a compiler 21, comparison 0, the grammar 2, the language's own tools 7. With the place it was read in the language's own tools: 9.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -323,6 +325,8 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the 
 | an import through a `paths` mapping of `tsconfig.json` is the file it maps to | `tsconfig-paths` | – | yes |
 | an import of a directory is the file its `package.json` names | `package-json-types-entry` | – | yes |
 | where a type is written, a value of the name does not hide the type around it | `type-meaning-skips-values` | – | yes |
+| a declaration of a module that does not export it (`type Error = …` in errors.ts) is no name of another file: `new Error()` there is the global `Error` | `module-declaration-is-no-global` | – | yes |
+| a method of an object literal (`{ array() { return array(this); } }`) is no name of the module: `array(…)` and `z.array(…)` through a namespace import are the module's function `array` | `object-literal-method-is-no-module-name` | – | yes |
 
 ### go (306 of 318)
 
@@ -1473,11 +1477,11 @@ Found by: the specification 32, a compiler 0, comparison 0, the grammar 4, the l
 | a member of an inline namespace is a member of the namespace around | `inline-namespace` | – | yes |
 | `T::f()` in a member of T: the name before `::` is the class, not the constructor of its name | `class-before-its-constructor` | – | yes |
 
-### ruby (35 of 35)
+### ruby (36 of 37)
 
 Ruby documentation, 'Calling Methods' and Module#ancestors (method lookup), 'Modules and Classes' (constant lookup).
 
-Found by: the specification 29, a compiler 0, comparison 1, the grammar 0, the language's own tools 5. With the place it was read in the language's own tools: 6.
+Found by: the specification 29, a compiler 2, comparison 1, the grammar 0, the language's own tools 5. With the place it was read in the language's own tools: 8.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -1516,6 +1520,8 @@ Found by: the specification 29, a compiler 0, comparison 1, the grammar 0, the l
 | a block's parameter is a name of the block: it hides a method of its name there | `block-parameter-hides-a-method` | – | yes |
 | a name is a local only after the assignment that makes it one: before it, it is a method call | `local-only-after-assignment` | – | yes |
 | a bare name that is no local is a method call as a hash's value too (`{ status: status }`); the key names nothing | `bare-name-as-a-hash-value` | – | yes |
+| a constant nested in a module (`Faraday::Response::Logger`) is no bare name outside it: in a block at the top level `Logger` is the top level's (the standard library's) | `nested-constant-is-no-bare-name` | – | yes |
+| a bare call is a method of `self`: `URI(url)` in a spec is `Kernel#URI`, not `Faraday::Utils.URI`, a method of a module the spec neither is in nor includes (a top-level `include M` would make it M's) | `module-method-is-no-bare-call` | – | **no**: has ip_of -calls-> Faraday.Utils.URI |
 
 ### php (37 of 37)
 
@@ -1563,4 +1569,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1166 of 1281 rules hold
+1169 of 1285 rules hold

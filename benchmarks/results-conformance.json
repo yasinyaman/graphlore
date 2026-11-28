@@ -1,6 +1,6 @@
 {
- "passed": 1166,
- "total": 1281,
+ "passed": 1169,
+ "total": 1285,
  "cases": [
   {
    "id": "python/module-function",
@@ -8630,6 +8630,36 @@
    "ok": true,
    "missing": [],
    "unwanted": []
+  },
+  {
+   "id": "typescript/module-declaration-is-no-global",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/object-literal-method-is-no-module-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/nested-constant-is-no-bare-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/module-method-is-no-bare-call",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "ip_of",
+     "calls",
+     "Faraday.Utils.URI"
+    ]
+   ]
   }
  ]
 }

@@ -4126,3 +4126,47 @@ fn java_overloads_by_library_argument_types() {
     only(".cond()", "app_a_a_add_2");
     only(".reader()", "app_a_a_parse");
 }
+
+// JS / TS: a module's declarations are its own (a non-exported `type Error`
+// is no name of another file: `new Error()` there is the global one), and a
+// method of an object literal is no binding of the module (`z.array(…)`
+// through a namespace import is the module's function). Ruby: a constant
+// nested in a module is no bare name outside it.
+#[test]
+fn module_scopes_of_ecma_and_ruby() {
+    let ts = call_ids("ecma-module-scope", &[
+        ("package.json", "{}\n"),
+        ("src/is.ts", "export const is = (x: unknown) => x !== undefined;\n"),
+        (
+            "src/errors.ts",
+            "import {is} from './is.js';\n\ntype Error = { code: string };\n\nexport const normalize = (e: unknown): Error => (is(e) ? e : e) as Error;\n",
+        ),
+        (
+            "test/a.ts",
+            "import {normalize} from '../src/errors.js';\n\nexport function run() {\n  normalize(1);\n  throw new Error('x');\n}\n",
+        ),
+        (
+            "schemas.ts",
+            "export interface ZodType {\n  array(): ZodType;\n}\n\nexport const proto = {\n  array(this: ZodType): ZodType {\n    return array(this);\n  },\n};\n\nexport function array(t: ZodType): ZodType {\n  return t;\n}\n",
+        ),
+        ("ext.ts", "export * from './schemas.js';\n"),
+        (
+            "use.ts",
+            "import * as z from './ext.js';\n\nexport function use(t: z.ZodType) {\n  return z.array(t);\n}\n",
+        ),
+    ]);
+    let has = |from: &str, to: &str| ts.contains(&(from.to_string(), to.to_string()));
+    assert!(has("run()", "src_errors_normalize") && !has("run()", "src_errors_error"), "{ts:?}");
+    assert!(has("use()", "schemas_array_2") && !has("use()", "schemas_array"), "{ts:?}");
+    let rb = call_ids("ruby-nested-constant", &[
+        (
+            "lib/faraday.rb",
+            "module Faraday\n  module Response\n    class Logger\n      def initialize(io)\n        @io = io\n      end\n    end\n  end\nend\n",
+        ),
+        (
+            "spec/logger_spec.rb",
+            "require 'logger'\n\nRSpec.describe Faraday::Response::Logger do\n  let(:logger) { Logger.new(1) }\nend\n",
+        ),
+    ]);
+    assert!(!rb.iter().any(|(_, t)| t.starts_with("lib_faraday")), "{rb:?}");
+}
