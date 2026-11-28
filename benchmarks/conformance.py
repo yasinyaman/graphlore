@@ -5581,6 +5581,844 @@ case("rust", "blanket-impl-is-no-method-of-a-library-type", "a method of an impl
      source="ripgrep crates/regex/src/matcher.rs `self.regex.find(input)` beside grep-matcher's `impl<'a, M: Matcher> Matcher for &'a M`")
 
 
+# Rust, the sweep (docs/rule-sources.md, 'Phase 2b: the sweep'): the Reference
+# and rustc's resolver read file by file by a smaller model, each case then
+# given to cargo, to rust-analyzer (`verify_cases.py --binding`) and to the
+# engine before it was written here. A failing one is an open defect.
+found_by("sweep")
+case('rust', 'item-before-its-declaration', "a function declared in a block is a name of the block from its start: a call written before the declaration is the block's function, not the module's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn helper() -> i32 {\n    1\n}\n\npub fn run() -> i32 {\n    let a = helper();\n    fn helper() -> i32 {\n        2\n    }\n    a\n}\n'},
+     [('run', 'calls', 'run.helper')], [('run', 'calls', 'src/lib.rs:helper')],
+     source="names/scopes.md r[names.scopes.items.statement]; rustc_resolve/src/ident.rs resolve_ident_in_lexical_scope (a block's items are above its local variables regardless of where they are defined)")
+case('rust', 'module-shadows-the-prelude', "a project type named like a prelude type is the name in its own module; a module that does not import it still has the prelude's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Box;\n\nimpl Box {\n    pub fn new() -> i32 {\n        1\n    }\n}\n\npub fn own() -> i32 {\n    Box::new()\n}\n\npub mod other {\n    pub fn std_box() -> Box<i32> {\n        Box::new(1)\n    }\n}\n'},
+     [('own', 'calls', 'Box.new')], [('other.std_box', 'calls', 'Box.new'), ('other.std_box', 'references', 'Box')],
+     source='names/scopes.md r[names.scopes.items.shadow-prelude]; rustc_resolve/src/ident.rs visit_scopes (names in modules, then the extern prelude, then the std prelude)')
+case('rust', 'module-shadows-the-extern-prelude', "a `mod std` of the project is what `std::helper()` means in its parent module, before the extern prelude's std",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod std {\n    pub fn helper() -> i32 {\n        1\n    }\n}\n\npub fn run() -> i32 {\n    std::helper()\n}\n'},
+     [('run', 'calls', 'std.helper')], [],
+     source='names/preludes.md r[names.preludes.extern]; names/scopes.md r[names.scopes.prelude.layers]; rustc_resolve/src/ident.rs visit_scopes (modules before ExternPrelude)')
+case('rust', 'binding-hides-a-function', 'a parameter, a closure parameter, a `for` variable and an `if let` binding of the name of a function hide it in their body: the call is of the binding, and the function is still the name elsewhere',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn size() -> i32 {\n    1\n}\n\npub fn plain() -> i32 {\n    size()\n}\n\npub fn param(size: fn() -> i32) -> i32 {\n    size()\n}\n\npub fn closure() -> i32 {\n    let run = |size: fn() -> i32| size();\n    run(plain_fn)\n}\n\nfn plain_fn() -> i32 {\n    0\n}\n\npub fn looped(fns: Vec<fn() -> i32>) -> i32 {\n    let mut t = 0;\n    for size in fns {\n        t += size();\n    }\n    t\n}\n\npub fn iflet(o: Option<fn() -> i32>) -> i32 {\n    if let Some(size) = o {\n        size()\n    } else {\n        0\n    }\n}\n'},
+     [('plain', 'calls', 'size')], [('param', 'calls', 'size'), ('closure', 'calls', 'size'), ('looped', 'calls', 'size'), ('iflet', 'calls', 'size')],
+     source='names/scopes.md r[names.scopes.pattern-bindings.parameter], .closure, .loop, .let-chains')
+case('rust', 'local-declared-after-the-item', "a nested function's call of `foo` is the module's function, whatever local `foo` the enclosing function declares (after the item); the enclosing function's own `foo()` is the local",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn foo() -> i32 {\n    1\n}\n\npub fn outer() -> i32 {\n    fn inner() -> i32 {\n        foo()\n    }\n    let foo = || 2;\n    foo() + inner()\n}\n'},
+     [('outer.inner', 'calls', 'foo'), ('outer', 'calls', 'outer.inner')], [('outer', 'calls', 'foo')],
+     source='names/scopes.md r[names.scopes.pattern-bindings.items]; rustc_resolve/src/late.rs (ItemRibKind: locals of ribs outside an item are not found from inside it)')
+case('rust', 'generic-fn-item-shadows-param', "a struct declared in a generic function named like the function's type parameter (and like a module type) is the name in the body: `Item::show()` is the local struct's method",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Item;\n\nimpl Item {\n    pub fn show() -> i32 {\n        1\n    }\n}\n\npub fn run<Item: Default>() -> i32 {\n    struct Item;\n    impl Item {\n        fn show() -> i32 {\n            2\n        }\n    }\n    Item::show()\n}\n'},
+     [('run', 'calls', 'run.Item.show')], [('run', 'calls', 'src/lib.rs:Item.show')],
+     source='names/scopes.md r[names.scopes.generic-parameters.shadow]')
+case('rust', 'use-imports-every-namespace', 'one `use m::foo;` binds the module foo (type namespace) and the function foo (value namespace): `foo()` and `foo::g()` are each the one of their namespace',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod m {\n    pub mod foo {\n        pub fn g() -> i32 {\n            1\n        }\n    }\n\n    pub fn foo() -> i32 {\n        2\n    }\n}\n\nuse m::foo;\n\npub fn run() -> i32 {\n    foo() + foo::g()\n}\n'},
+     [('run', 'calls', 'm.foo'), ('run', 'calls', 'm.foo.g')], [],
+     source='names/namespaces.md r[names.namespaces.without.use]')
+case('rust', 'use-in-an-inner-block', "a `use` written in a nested block binds its name in that block only; a call after the block is the module's import",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod m1;\npub mod m2;\n\nuse m1::make;\n\npub fn run() -> i32 {\n    let a = {\n        use m2::make;\n        make()\n    };\n    a + make()\n}\n', 'src/m1.rs': 'pub fn make() -> i32 {\n    1\n}\n', 'src/m2.rs': 'pub fn make() -> i32 {\n    2\n}\n'},
+     [('run', 'calls', 'src/m1.rs:make'), ('run', 'calls', 'src/m2.rs:make')], [],
+     source='names/name-resolution.md r[names.resolution.expansion.imports.shadowing]; names/scopes.md r[names.scopes.items.statement]')
+case('rust', 'glob-same-item-twice', "`use m1::*; use m2::*;` where m2 re-exports m1's Thing: `Thing` is that one type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod m1 {\n    pub struct Thing;\n}\n\npub mod m2 {\n    pub use super::m1::Thing;\n}\n\npub mod user {\n    use crate::m1::*;\n    use crate::m2::*;\n\n    pub fn make() -> Thing {\n        Thing\n    }\n}\n'},
+     [('user.make', 'references', 'm1.Thing')], [],
+     source='names/name-resolution.md r[names.resolution.expansion.imports.ambiguity.glob-vs-glob]')
+case('rust', 'glob-in-a-block-beats-an-outer-use', "in a block, `use glob::*;` brings a name that is closer than the module's `use outer::amb;`: `amb()` there is the glob's, and outside the block the outer import",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod glob {\n    pub fn amb() -> i32 {\n        1\n    }\n}\n\npub mod outer {\n    pub fn amb() -> i32 {\n        2\n    }\n}\n\nuse outer::amb;\n\npub fn top() -> i32 {\n    amb()\n}\n\npub fn run() -> i32 {\n    use glob::*;\n    amb()\n}\n'},
+     [('top', 'calls', 'outer.amb'), ('run', 'calls', 'glob.amb')], [('run', 'calls', 'outer.amb')],
+     source='names/name-resolution.md r[names.resolution.expansion.imports.ambiguity.glob-vs-outer] (the note that primary resolution finds a single closest resolution)')
+case('rust', 'edition-2015-global-path', "edition 2015: `::foo()` in a module is the crate root's foo, never the module's own foo",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2015"\n', 'src/lib.rs': 'pub fn foo() -> i32 {\n    1\n}\n\npub mod b {\n    pub fn foo() -> i32 {\n        2\n    }\n\n    pub fn run() -> i32 {\n        ::foo()\n    }\n}\n'},
+     [('b.run', 'calls', 'src/lib.rs:foo')], [('b.run', 'calls', 'b.foo')],
+     source='paths.md r[paths.qualifiers.global-root.edition2018]; rustc_resolve/src/ident.rs path_root_is_crate_root')
+case('rust', 'self-path-in-a-method', "`self::make()` inside an impl is the module's function make, not the associated function `S::make` of the impl's type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn make() -> i32 {\n    1\n}\n\npub struct S;\n\nimpl S {\n    pub fn make() -> i32 {\n        2\n    }\n\n    pub fn run(&self) -> i32 {\n        self::make()\n    }\n}\n'},
+     [('S.run', 'calls', 'src/lib.rs:make')], [('S.run', 'calls', 'S.make')],
+     source='paths.md r[paths.qualifiers.mod-self.intro], r[paths.qualifiers.self-pat]')
+case('rust', 'super-twice', "`super::super::foo()` and `self::super::super::foo()` from a module two levels down are the foo of the grandparent module, not the parent's or the root's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn foo() -> i32 {\n    1\n}\n\npub mod a {\n    pub fn foo() -> i32 {\n        2\n    }\n\n    pub mod b {\n        pub fn foo() -> i32 {\n            3\n        }\n\n        pub mod c {\n            pub fn run() -> i32 {\n                super::super::foo() + self::super::super::foo()\n            }\n        }\n    }\n}\n'},
+     [('a.b.c.run', 'calls', 'a.foo')], [('a.b.c.run', 'calls', 'a.b.foo'), ('a.b.c.run', 'calls', 'src/lib.rs:foo')],
+     source='paths.md r[paths.qualifiers.super.repetition]; rustc_resolve/src/ident.rs resolve_super_in_module')
+case('rust', 'turbofish-type-path', "`Buf::<u8>::make()` is the associated function of Buf, not the module's `make`",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Buf<T>(pub Vec<T>);\n\nimpl<T> Buf<T> {\n    pub fn make() -> i32 {\n        1\n    }\n}\n\npub fn make() -> i32 {\n    2\n}\n\npub fn run() -> i32 {\n    Buf::<u8>::make()\n}\n'},
+     [('run', 'calls', 'Buf.make')], [('run', 'calls', 'src/lib.rs:make')],
+     source='paths.md r[paths.expr.turbofish]')
+case('rust', 'qualified-trait-path', "`<S as T1>::f()` is the function of `impl T1 for S`; `S::f()` is the inherent one; `<S as T2>::f` would be the other trait's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct S;\n\nimpl S {\n    pub fn f() -> i32 {\n        0\n    }\n}\n\npub trait T1 {\n    fn f() -> i32;\n}\n\nimpl T1 for S {\n    fn f() -> i32 {\n        1\n    }\n}\n\npub trait T2 {\n    fn f() -> i32;\n}\n\nimpl T2 for S {\n    fn f() -> i32 {\n        2\n    }\n}\n\npub fn run() -> i32 {\n    <S as T1>::f()\n}\n\npub fn inherent() -> i32 {\n    S::f()\n}\n'},
+     [('run', 'calls', 'src/lib.rs:S.f@14'), ('inherent', 'calls', 'src/lib.rs:S.f@4')], [('run', 'calls', 'src/lib.rs:S.f@24'), ('run', 'calls', 'src/lib.rs:S.f@4'), ('inherent', 'calls', 'src/lib.rs:S.f@14')],
+     source='paths.md r[paths.qualified.intro]; rustc_resolve/src/late.rs resolve_qpath (the trait is named, the rest is type-relative)')
+case('rust', 'glob-skips-private', "`use a::*;` does not bring a's private `Thing`: with `use b::*;` bringing a public `Thing`, the name is b's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod a {\n    #[allow(dead_code)]\n    struct Thing;\n\n    pub fn touch() {\n        let _ = Thing;\n    }\n}\n\npub mod b {\n    pub struct Thing;\n}\n\nuse a::*;\nuse b::*;\n\npub fn make() -> usize {\n    let _t = Thing;\n    0\n}\n'},
+     [('make', 'references', 'b.Thing'), ('a.touch', 'references', 'a.Thing')], [('make', 'references', 'a.Thing')],
+     source='visibility-and-privacy.md r[vis.access]; items/use-declarations.md (a glob imports the names visible from the importing module); rustc_resolve/src/ident.rs resolve_ident_in_module_globs_unadjusted (a glob binding is used only if visible from the module)')
+case('rust', 'raw-identifier', '`r#foo()` is a call of the function named `foo` (the `r#` is no part of the name)',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod other {\n    pub fn foo() -> i32 {\n        2\n    }\n}\n\npub fn foo() -> i32 {\n    1\n}\n\npub fn run() -> i32 {\n    r#foo()\n}\n'},
+     [('run', 'calls', 'src/lib.rs:foo')], [('run', 'calls', 'other.foo')],
+     source='identifiers.md r[ident.raw.intro]')
+case('rust', 'pattern-constant', '`ZERO =>` in a match arm, where ZERO is a constant in scope, is a read of that constant and not a binding; a constant of another module of the name is not in scope',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub const ZERO: i32 = 0;\n\npub mod other {\n    pub const ZERO: i32 = 5;\n}\n\npub fn classify(n: i32) -> i32 {\n    match n {\n        ZERO => 1,\n        rest => rest,\n    }\n}\n'},
+     [('classify', 'reads', 'src/lib.rs:ZERO')], [('classify', 'reads', 'other.ZERO')],
+     source='rustc_resolve/src/late.rs try_resolve_as_non_binding')
+case('rust', 'named-struct-has-no-constructor', 'a struct with named fields has no constructor in the value namespace: `Shape()` is the function of that name',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Shape {\n    pub side: i32,\n}\n\n#[allow(non_snake_case)]\npub fn Shape() -> i32 {\n    1\n}\n\npub fn run() -> i32 {\n    Shape()\n}\n'},
+     [('run', 'calls', 'src/lib.rs:Shape@6')], [('run', 'calls', 'src/lib.rs:Shape@1')],
+     source='reference names/namespaces.md r[names.namespaces.kinds]')
+case('rust', 'const-generic-parameter-hides-a-constant', 'a const generic parameter hides a constant of its name in the item it is declared on',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub const N: usize = 4;\n\npub fn each<const N: usize>() -> usize {\n    N\n}\n\npub fn total() -> usize {\n    N\n}\n'},
+     [('total', 'reads', 'N')], [('each', 'reads', 'N')],
+     source='reference names/namespaces.md r[names.namespaces.kinds]')
+case('rust', 'captured-local-hides-a-function', 'a closure that calls a captured local calls the local, not the function of its name',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn helper() -> i32 {\n    1\n}\n\npub fn run() -> i32 {\n    let helper = || 2;\n    let again = || helper();\n    again()\n}\n\npub fn plain() -> i32 {\n    helper()\n}\n'},
+     [('plain', 'calls', 'helper')], [('run', 'calls', 'helper')],
+     source='reference names/namespaces.md r[names.namespaces.kinds]')
+case('rust', 'associated-const-is-not-scoped', "`Self::LIMIT` is the associated const of the impl, a bare `LIMIT` in its methods the module's constant",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub const LIMIT: usize = 1;\n\npub struct S;\n\nimpl S {\n    pub const LIMIT: usize = 2;\n\n    pub fn own() -> usize {\n        Self::LIMIT\n    }\n\n    pub fn bare() -> usize {\n        LIMIT\n    }\n}\n'},
+     [('S.own', 'reads', 'src/lib.rs:LIMIT@6'), ('S.bare', 'reads', 'src/lib.rs:LIMIT@1')], [('S.own', 'reads', 'src/lib.rs:LIMIT@1'), ('S.bare', 'reads', 'src/lib.rs:LIMIT@6')],
+     source='reference names/namespaces.md r[names.namespaces.kinds]')
+case('rust', 'glob-import-of-an-enums-variants', '`use a::Shape::*;` makes the variants of that enum names of the module',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod a {\n    pub enum Shape {\n        Circle(i32),\n    }\n}\n\npub mod b {\n    pub enum Other {\n        Circle(i32),\n    }\n    pub fn build() -> Other {\n        Other::Circle(2)\n    }\n}\n\nuse a::Shape::*;\n\npub fn make() -> a::Shape {\n    Circle(1)\n}\n'},
+     [('make', 'references', 'a.Shape')], [('make', 'references', 'b.Other')],
+     source='reference names/name-resolution.md r[names.resolution.expansion.imports.intro]')
+case('rust', 'variant-through-a-type-alias', '`Alias::Circle(1)` with `type Alias = Shape;` is a variant of Shape',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub enum Shape {\n    Circle(i32),\n}\n\npub enum Other {\n    Circle(i32),\n}\n\npub type Alias = Shape;\n\npub fn make() -> Shape {\n    Alias::Circle(1)\n}\n\npub fn other() -> Other {\n    Other::Circle(1)\n}\n'},
+     [('make', 'references', 'Shape')], [('make', 'references', 'Other')],
+     source='reference names/name-resolution.md r[names.resolution.expansion.imports.intro]')
+case('rust', 'extern-crate-self-alias', "`extern crate self as demo;` names the crate root: `demo::f()` is the root's `f`",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'extern crate self as demo;\n\npub mod m {\n    pub fn f() -> i32 {\n        2\n    }\n}\n\npub fn f() -> i32 {\n    1\n}\n\npub fn g() -> i32 {\n    demo::f()\n}\n'},
+     [('g', 'calls', 'src/lib.rs:f')], [('g', 'calls', 'm.f')],
+     source='reference names.md r[names.explicit.item-decl]')
+case('rust', 'super-from-a-module-in-a-block', "`super::helper()` in a module written inside a function is the enclosing module's `helper`, not an item of the block",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn helper() -> i32 {\n    1\n}\n\npub fn run() -> i32 {\n    fn helper() -> i32 {\n        2\n    }\n    mod inner {\n        pub fn call() -> i32 {\n            super::helper()\n        }\n    }\n    inner::call() + helper()\n}\n'},
+     [('run.inner.call', 'calls', 'src/lib.rs:helper'), ('run', 'calls', 'run.helper')], [('run.inner.call', 'calls', 'run.helper')],
+     source='reference paths.md r[paths.qualifiers.super]; rustc rustc_resolve/src/ident.rs resolve_super_in_module (nearest normal module)')
+case('rust', 'struct-pattern-shorthand-binds-a-local', '`let Cfg { helper } = c;` binds the local `helper`: calling it is not a call of the function `helper`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Cfg {\n    pub helper: fn() -> i32,\n}\n\npub fn helper() -> i32 {\n    1\n}\n\npub fn take(c: Cfg) -> i32 {\n    let Cfg { helper } = c;\n    helper()\n}\n\npub fn build() -> Cfg {\n    let helper: fn() -> i32 = || 2;\n    Cfg { helper }\n}\n\npub fn plain() -> i32 {\n    helper()\n}\n'},
+     [('take', 'references', 'Cfg'), ('plain', 'calls', 'helper')], [('take', 'calls', 'src/lib.rs:helper@5'), ('build', 'references', 'src/lib.rs:helper@5')],
+     source='rustc rustc_resolve/src/late.rs resolve_pattern_inner (struct pattern shorthand fields)')
+case('rust', 'rust-nested-file-module-is-in-the-parents-directory', '`mod config;` written in util.rs is the file util/config.rs, not src/config.rs',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod util;\n\npub fn run() -> i32 {\n    util::config::f()\n}\n', 'src/util.rs': 'pub mod config;\n', 'src/util/config.rs': 'pub fn f() -> i32 {\n    1\n}\n', 'src/config.rs': 'pub fn f() -> i32 {\n    2\n}\n'},
+     [('run', 'calls', 'src/util/config.rs:f')], [('run', 'calls', 'src/config.rs:f')],
+     source='reference items/modules.md r[items.mod.outlined.search] (cargo check passes; the engine already agrees)')
+case('rust', 'rust-path-attribute-names-the-module-file', '`#[path = "other.rs"] mod c;` is the file src/other.rs, never src/c.rs',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': '#[path = "other.rs"]\npub mod c;\n\npub fn run() -> i32 {\n    c::f()\n}\n', 'src/other.rs': 'pub fn f() -> i32 {\n    1\n}\n', 'src/c.rs': 'pub fn f() -> i32 {\n    2\n}\n'},
+     [('run', 'calls', 'src/other.rs:f')], [('run', 'calls', 'src/c.rs:f')],
+     source='reference items/modules.md r[items.mod.outlined.path.search]; engine today picks src/c.rs (open)')
+case('rust', 'rust-path-attribute-in-an-inline-module', '`mod inline { #[path = "other.rs"] mod inner; }` in lib.rs is src/inline/other.rs',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod inline {\n    #[path = "other.rs"]\n    pub mod inner;\n}\n\npub mod inner;\n\npub fn run() -> i32 {\n    inline::inner::f()\n}\n', 'src/inline/other.rs': 'pub fn f() -> i32 {\n    1\n}\n', 'src/inner.rs': 'pub fn f() -> i32 {\n    2\n}\n'},
+     [('run', 'calls', 'src/inline/other.rs:f')], [('run', 'calls', 'src/inner.rs:f')],
+     source='reference items/modules.md r[items.mod.outlined.path.search-nested]; engine today gives no edge (open)')
+case('rust', 'rust-nested-use-groups', '`use a::{b::{self, f}, g};` binds b (module), f of b and g of a, not the f of a',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'mod a {\n    pub mod b {\n        pub fn f() -> i32 {\n            1\n        }\n        pub fn h() -> i32 {\n            3\n        }\n    }\n    pub fn f() -> i32 {\n        4\n    }\n    pub fn g() -> i32 {\n        2\n    }\n}\n\nuse a::{b::{self, f}, g};\n\npub fn run() -> i32 {\n    f() + g() + b::h()\n}\n'},
+     [('run', 'calls', 'a.b.f'), ('run', 'calls', 'a.g'), ('run', 'calls', 'a.b.h')], [('run', 'calls', 'src/lib.rs:a.f')],
+     source='reference items/use-declarations.md r[items.use.multiple-syntax.intro]; rustc build_reduced_graph_for_use_tree (UseTreeKind::Nested); cargo check passes, engine agrees')
+case('rust', 'rust-use-alias-of-a-module', '`use a::deep as d;` makes `d::f()` the f of a::deep, not of the other module named deep',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'mod a {\n    pub mod deep {\n        pub fn f() -> i32 {\n            1\n        }\n    }\n}\n\npub mod b {\n    pub mod deep {\n        pub fn f() -> i32 {\n            2\n        }\n    }\n}\n\nuse a::deep as d;\n\npub fn run() -> i32 {\n    d::f()\n}\n'},
+     [('run', 'calls', 'a.deep.f')], [('run', 'calls', 'b.deep.f')],
+     source='reference items/use-declarations.md r[items.use.as]; engine agrees')
+case('rust', 'rust-glob-skips-private-names', "`use a::*;` does not bring a's private `helper`: with `use b::*;` beside it, `helper()` is b's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'mod a {\n    fn helper() -> i32 {\n        1\n    }\n    pub fn other() -> i32 {\n        helper()\n    }\n}\n\nmod b {\n    pub fn helper() -> i32 {\n        2\n    }\n}\n\nuse a::*;\nuse b::*;\n\npub fn run() -> i32 {\n    helper() + other()\n}\n'},
+     [('run', 'calls', 'b.helper'), ('run', 'calls', 'a.other'), ('a.other', 'calls', 'a.helper')], [('run', 'calls', 'a.helper')],
+     source='reference items/use-declarations.md r[items.use.glob.intro]; rustc imports.rs resolve_glob_import (is_accessible_from filter); engine today gives run -> a.helper (open)')
+case('rust', 'rust-glob-import-shadows-the-prelude', "`use shapes::*;` with a project `Vec` makes `Vec::new()` the project's, not std's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'mod shapes {\n    pub struct Vec;\n\n    impl Vec {\n        pub fn new() -> Vec {\n            Vec\n        }\n    }\n}\n\nuse shapes::*;\n\npub fn run() -> Vec {\n    Vec::new()\n}\n'},
+     [('run', 'calls', 'shapes.Vec.new'), ('run', 'references', 'shapes.Vec')], [],
+     source="reference names/preludes.md and items/use-declarations.md r[items.use.glob.shadowing] (std's Vec is an external node, so no absent edge can name it); cargo check passes, engine agrees")
+case('rust', 'rust-glob-of-a-glob-re-export', "`use a::*;` where a has `pub use crate::b::*;` brings b's f, not the other module's f",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'mod b {\n    pub fn f() -> i32 {\n        1\n    }\n}\n\npub mod c {\n    pub fn f() -> i32 {\n        2\n    }\n}\n\nmod a {\n    pub use crate::b::*;\n}\n\nuse a::*;\n\npub fn run() -> i32 {\n    f()\n}\n'},
+     [('run', 'calls', 'b.f')], [('run', 'calls', 'c.f')],
+     source="reference items/use-declarations.md r[items.use.visibility.intro]; rustc imports.rs resolve_glob_import over a module's resolutions, re-exports included; engine agrees")
+case('rust', 'rust-2015-use-paths-start-at-the-crate-root', 'edition 2015: `use foo::f;` in `mod bar` is the f of the crate-root `foo`, not of `bar::foo`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2015"\n', 'src/lib.rs': 'pub mod foo {\n    pub fn f() -> i32 {\n        1\n    }\n}\n\npub mod bar {\n    pub mod foo {\n        pub fn f() -> i32 {\n            2\n        }\n    }\n\n    use foo::f;\n\n    pub fn run() -> i32 {\n        f()\n    }\n}\n'},
+     [('bar.run', 'calls', 'src/lib.rs:foo.f')], [('bar.run', 'calls', 'src/lib.rs:bar.foo.f')],
+     source='reference items/use-declarations.md r[items.use.path.edition2018] (2015 note); rustc build_reduced_graph_for_use_tree (crate_root prepended on 2015 prefixes); cargo check passes with edition 2015; engine today gives bar.foo.f (open)')
+case('rust', 'rust-glob-of-an-enum-binds-its-variants', '`use Example::*;` in a function makes `V1` / `V2` variants of Example, not of Other',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub enum Example {\n    V1,\n    V2,\n}\n\npub enum Other {\n    V1,\n    V2,\n}\n\npub fn run() -> u8 {\n    use Example::*;\n    match V1 {\n        V1 => 1,\n        V2 => 2,\n    }\n}\n'},
+     [('run', 'references', 'Example')], [('run', 'references', 'Other')],
+     source='reference items/use-declarations.md r[items.use.glob.intro] example; engine today writes no edge (open)')
+case('rust', 'rust-block-use-shadows-a-module-item', "`use inner::helper;` in a function body makes `helper()` there inner's, before the module's own `helper`",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'mod inner {\n    pub fn helper() -> i32 {\n        2\n    }\n}\n\npub fn helper() -> i32 {\n    1\n}\n\npub fn run() -> i32 {\n    use inner::helper;\n    helper()\n}\n'},
+     [('run', 'calls', 'inner.helper')], [('run', 'calls', 'src/lib.rs:helper')],
+     source='reference items/use-declarations.md r[items.use.intro] and names/scopes.md; rustc build_reduced_graph_for_block (block module); engine agrees')
+case('rust', 'rust-self-import-is-the-type-namespace', "after `use bar::foo::{self};` and a local `fn foo`, `foo()` is the local function and `foo::g()` the module's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'mod bar {\n    pub mod foo {\n        pub fn g() -> i32 {\n            1\n        }\n    }\n    pub fn foo() -> i32 {\n        2\n    }\n}\n\nuse bar::foo::{self};\n\npub fn foo() -> i32 {\n    3\n}\n\npub fn run() -> i32 {\n    foo() + foo::g()\n}\n'},
+     [('run', 'calls', 'src/lib.rs:foo'), ('run', 'calls', 'bar.foo.g')], [('run', 'calls', 'src/lib.rs:bar.foo')],
+     source='reference items/use-declarations.md r[items.use.self.namespace]; rustc build_reduced_graph_for_use_tree (self import takes the parent ident); engine today calls bar.foo (open)')
+case('rust', 'rust-use-as-underscore-brings-a-traits-methods', "`use foo::Zoo as _;` puts Zoo's methods in scope: `z.zoo()` is foo::Zoo::zoo, not the method of another trait of the project that is not imported",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'mod foo {\n    pub trait Zoo {\n        fn zoo(&self) -> i32 {\n            1\n        }\n    }\n    impl<T> Zoo for T {}\n}\n\nmod bar {\n    pub trait Other {\n        fn zoo(&self) -> i32 {\n            2\n        }\n    }\n    impl<T> Other for T {}\n}\n\nuse self::foo::Zoo as _;\n\npub struct Zoo;\n\npub fn run() -> i32 {\n    let z = Zoo;\n    z.zoo()\n}\n'},
+     [('run', 'calls', 'foo.Zoo.zoo')], [('run', 'calls', 'bar.Other.zoo')],
+     source='reference items/use-declarations.md r[items.use.as-underscore.intro] example; rustc build_reduced_graph add_import (an underscore import is not a single import: no name defined); engine today writes no call edge (open)')
+case('rust', 'rust-use-crate-as-alias', "`use crate as root;` makes `root::f()` the crate root's f, not the f of the module around",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn f() -> i32 {\n    1\n}\n\npub mod m {\n    pub fn f() -> i32 {\n        2\n    }\n\n    use crate as root;\n\n    pub fn run() -> i32 {\n        root::f()\n    }\n}\n'},
+     [('m.run', 'calls', 'src/lib.rs:f')], [('m.run', 'calls', 'm.f')],
+     source='reference items/use-declarations.md r[items.use.restrictions.crate-alias]; rustc build_reduced_graph_for_use_tree (kw::Crate source); engine today writes the right edge only for the bare f (this form: calls f, passes)')
+case('rust', 'rust-use-super-as-alias', "`use super as parent;` makes `parent::f()` the f of the parent module, not the module's own f",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn f() -> i32 {\n    1\n}\n\npub mod m {\n    pub fn f() -> i32 {\n        2\n    }\n\n    pub mod n {\n        use super as parent;\n\n        pub fn f() -> i32 {\n            3\n        }\n\n        pub fn run() -> i32 {\n            parent::f()\n        }\n    }\n}\n'},
+     [('m.n.run', 'calls', 'm.f')], [('m.n.run', 'calls', 'm.n.f'), ('m.n.run', 'calls', 'src/lib.rs:f')],
+     source='reference items/use-declarations.md r[items.use.restrictions.super-alias]; engine today writes no edge (open)')
+case('rust', 'rust-extern-crate-self-as', "`extern crate self as demo;` makes `demo::f()` the crate root's f from any module, not the f of the module around",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'extern crate self as demo;\n\npub fn f() -> i32 {\n    1\n}\n\npub mod m {\n    pub fn f() -> i32 {\n        2\n    }\n\n    pub fn run() -> i32 {\n        demo::f()\n    }\n}\n'},
+     [('m.run', 'calls', 'src/lib.rs:f')], [('m.run', 'calls', 'm.f')],
+     source='reference items/extern-crates.md r[items.extern-crate.self]; rustc build_reduced_graph_for_extern_crate (`orig_name == kw::SelfLower` is graph_root); engine today passes: calls the root f')
+case('rust', 'rust-cfg-removes-the-disabled-item', 'with no feature set, `pick()` is the `#[cfg(not(feature = "fast"))]` definition, never the `#[cfg(feature = "fast")]` one',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': '#[cfg(feature = "fast")]\npub fn pick() -> i32 {\n    1\n}\n\n#[cfg(not(feature = "fast"))]\npub fn pick() -> i32 {\n    2\n}\n\npub fn run() -> i32 {\n    pick()\n}\n'},
+     [('run', 'calls', 'src/lib.rs:pick@7')], [('run', 'calls', 'src/lib.rs:pick@2')],
+     source='reference conditional-compilation.md r[cfg.attr.effect], r[cfg.predicate-not], r[cfg.option-key-value]; cargo check passes without the feature; engine today calls the disabled pick (line 2) (open)')
+case('rust', 'rust-cfg-attr-path-selects-the-module-file', '`#[cfg_attr(not(any()), path = "first.rs")] #[cfg_attr(any(), path = "second.rs")] mod os;` is src/first.rs',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': '#[cfg_attr(not(any()), path = "first.rs")]\n#[cfg_attr(any(), path = "second.rs")]\npub mod os;\n\npub fn run() -> i32 {\n    os::f()\n}\n', 'src/first.rs': 'pub fn f() -> i32 {\n    1\n}\n', 'src/second.rs': 'pub fn f() -> i32 {\n    2\n}\n'},
+     [('run', 'calls', 'src/first.rs:f')], [('run', 'calls', 'src/second.rs:f')],
+     source='reference conditional-compilation.md r[cfg.cfg_attr.behavior], r[cfg.predicate-any] (empty any is false), r[cfg.predicate-all]; engine today writes no edge (open)')
+case('rust', 'rust-glob-import-filters-by-visibility', "a glob brings only what the importing module can see: a sibling module's private function is no name of `use sibling::*;`",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'mod a {\n    pub(crate) fn shared() -> i32 {\n        1\n    }\n    fn secret() -> i32 {\n        2\n    }\n    pub fn open() -> i32 {\n        secret()\n    }\n}\n\nfn secret() -> i32 {\n    3\n}\n\nuse a::*;\n\npub fn run() -> i32 {\n    secret() + shared() + open()\n}\n'},
+     [('run', 'calls', 'src/lib.rs:secret'), ('run', 'calls', 'a.shared'), ('run', 'calls', 'a.open')], [('run', 'calls', 'a.secret')],
+     source="rustc imports.rs resolve_glob_import (is_accessible_from); reference r[items.use.glob.intro]; cargo check needs the module's own `secret` to win only because a::secret is private: checked below with cargo check")
+case('rust', 'rust-underscore-import-defines-no-name', "`use foo::Zoo as _;` does not define the name `Zoo`: the project's own `struct Zoo` stays the only `Zoo` of the module",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'mod foo {\n    pub trait Zoo {\n        fn zoo(&self) -> i32 {\n            1\n        }\n    }\n    impl<T> Zoo for T {}\n}\n\nuse self::foo::Zoo as _;\n\npub struct Zoo;\n\npub fn make() -> Zoo {\n    Zoo\n}\n'},
+     [('make', 'references', 'src/lib.rs:Zoo')], [('make', 'references', 'foo.Zoo')],
+     source='rustc build_reduced_graph.rs add_import; reference items/use-declarations.md r[items.use.as-underscore.intro]; cargo check passes (struct and trait of one name coexist only through `as _`)')
+case('rust', 'rust-2015-glob-import-is-crate-relative', 'edition 2015: `use foo::*;` in `mod bar` is a glob of the crate-root foo, not of `bar::foo`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2015"\n', 'src/lib.rs': 'pub mod foo {\n    pub fn f() -> i32 {\n        1\n    }\n}\n\npub mod bar {\n    pub mod foo {\n        pub fn f() -> i32 {\n            2\n        }\n    }\n\n    use foo::*;\n\n    pub fn run() -> i32 {\n        f()\n    }\n}\n'},
+     [('bar.run', 'calls', 'src/lib.rs:foo.f')], [('bar.run', 'calls', 'src/lib.rs:bar.foo.f')],
+     source='rustc build_reduced_graph_for_use_tree (Glob arm: `None if let UseTreeKind::Glob(span) ... span.is_rust_2015()`); reference r[items.use.glob.edition2018]; same engine gap as the single-import 2015 case')
+case('rust', 'extern-block-function', 'a function declared in an extern block is a name of its module and the call binds to it',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod other {\n    pub fn abs(x: i32) -> i32 {\n        x\n    }\n}\n\nextern "C" {\n    pub fn abs(x: i32) -> i32;\n}\n\npub fn run() -> i32 {\n    unsafe { abs(-1) }\n}\n'},
+     [('run', 'calls', 'abs')], [('run', 'calls', 'other.abs')],
+     source='reference items.md r[items.extern-locations]')
+case('rust', 'glob-skips-a-private-import', 'a private `use` of a module is no name a glob of the module brings elsewhere',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod a {\n    pub fn f() -> i32 {\n        1\n    }\n}\n\npub mod b {\n    use crate::a::f;\n\n    pub fn g() -> i32 {\n        f()\n    }\n}\n\npub mod d {\n    pub fn f() -> i32 {\n        2\n    }\n}\n\npub mod c {\n    use crate::b::*;\n    use crate::d::*;\n\n    pub fn run() -> i32 {\n        f() + g()\n    }\n}\n'},
+     [('c.run', 'calls', 'd.f'), ('b.g', 'calls', 'a.f')], [('c.run', 'calls', 'a.f')],
+     source='reference items/use-declarations.md r[items.use.visibility.intro]; rustc imports.rs resolve_glob_import (accessible declarations only)')
+case('rust', 'super-glob-brings-the-parents-imports', '`use super::*;` in a child module binds what the parent imports privately',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod a {\n    pub fn helper() -> i32 {\n        1\n    }\n}\n\npub mod other {\n    pub fn helper() -> i32 {\n        2\n    }\n}\n\npub mod p {\n    use crate::a::helper;\n\n    pub fn own() -> i32 {\n        helper()\n    }\n\n    pub mod tests {\n        use super::*;\n\n        pub fn t() -> i32 {\n            helper()\n        }\n    }\n}\n'},
+     [('p.tests.t', 'calls', 'a.helper')], [('p.tests.t', 'calls', 'other.helper')],
+     source='reference items/use-declarations.md r[items.use.visibility.intro], r[items.use.glob.intro]')
+case('rust', 'super-repeated', '`super::super::f()` is f of the module two levels up',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn f() -> i32 {\n    0\n}\n\npub mod a {\n    pub fn f() -> i32 {\n        1\n    }\n\n    pub mod b {\n        pub fn f() -> i32 {\n            2\n        }\n\n        pub mod c {\n            pub fn run() -> i32 {\n                super::super::f()\n            }\n        }\n    }\n}\n'},
+     [('a.b.c.run', 'calls', 'a.f')], [('a.b.c.run', 'calls', 'src/lib.rs:f@1'), ('a.b.c.run', 'calls', 'a.b.f')],
+     source='reference items/use-declarations.md r[items.use.restrictions.super-alias]; paths.md super may be repeated')
+case('rust', 'cfg-on-a-use', 'a `use` under a false `#[cfg]` binds no name',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod fast {\n    pub fn pick() -> i32 {\n        1\n    }\n}\n\npub mod slow {\n    pub fn pick() -> i32 {\n        2\n    }\n}\n\n#[cfg(all())]\nuse fast::pick;\n#[cfg(any())]\nuse slow::pick;\n\npub fn run() -> i32 {\n    pick()\n}\n'},
+     [('run', 'calls', 'fast.pick')], [('run', 'calls', 'slow.pick')],
+     source='reference conditional-compilation.md r[cfg.attr.effect]')
+case('rust', 'tuple-pattern-parameter', 'a parameter written as a tuple pattern binds each name to the matching part of its type',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config {\n    pub proxy: i32,\n}\n\nimpl Config {\n    pub fn show(&self) -> i32 {\n        self.proxy\n    }\n}\n\npub struct Other {\n    pub proxy: i32,\n}\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\npub fn first((c, _o): (Config, Other)) -> i32 {\n    c.show()\n}\n'},
+     [('first', 'calls', 'Config.show')], [('first', 'calls', 'Other.show')],
+     source='reference items/functions.md r[items.fn.params.intro]; the engine picks Other.show today (wrong part of the tuple), a real defect')
+case('rust', 'tuple-struct-pattern-parameter', "a parameter written as `Wrapper(inner): Wrapper` binds inner to the field's type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Inner;\n\nimpl Inner {\n    pub fn go(&self) -> i32 {\n        1\n    }\n}\n\npub struct Decoy;\n\nimpl Decoy {\n    pub fn go(&self) -> i32 {\n        2\n    }\n}\n\npub struct Wrapper(pub Inner);\n\npub fn open(Wrapper(inner): Wrapper) -> i32 {\n    inner.go()\n}\n'},
+     [('open', 'calls', 'Inner.go')], [('open', 'calls', 'Decoy.go')],
+     source='reference items/functions.md r[items.fn.params.intro]; open today: no edge')
+case('rust', 'turbofish-type-argument', '`size::<Config>()` calls size and names Config',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config;\n\npub struct Other;\n\npub fn size<T>() -> usize {\n    std::mem::size_of::<T>()\n}\n\npub fn run() -> usize {\n    size::<Config>()\n}\n'},
+     [('run', 'calls', 'size'), ('run', 'references', 'Config')], [('run', 'references', 'Other')],
+     source='reference items/functions.md r[items.fn.generics.explicit-arguments]')
+case('rust', 'unit-struct-value', '`Cookie` and `Cookie {}` written as values are uses of the unit struct',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Cookie;\n\npub fn jar() -> i32 {\n    let _c = [Cookie, Cookie {}];\n    1\n}\n'},
+     [('jar', 'references', 'Cookie')], [],
+     source='reference items/structs.md r[items.struct.unit]; the engine gives a calls edge today, the rule says a constant: open')
+case('rust', 'glob-variant-value', 'a unit variant named bare after a glob import of its enum is a use of the enum',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub enum Examples {\n    UnitLike,\n    TupleLike(i32),\n}\n\npub fn globbed() -> i32 {\n    use Examples::*;\n    let _a = UnitLike;\n    1\n}\n'},
+     [('globbed', 'references', 'Examples')], [],
+     source='reference items/enumerations.md r[items.enum.path-expr]; open today (the tuple-like variant call is read, the unit one is not)')
+case('rust', 'union-field', "a field read on a union value is the union's field",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': '#[repr(C)]\npub union Bits {\n    pub f1: u32,\n    pub f2: f32,\n}\n\npub struct Plain {\n    pub f1: u32,\n}\n\npub fn read(u: Bits) -> u32 {\n    unsafe { u.f1 }\n}\n'},
+     [('read', 'reads', 'Bits.f1')], [('read', 'reads', 'Plain.f1')],
+     source='reference items/unions.md r[items.union.namespace]; the engine defines no node for a `union` item today')
+case('rust', 'type-alias-is-its-type', "a parameter typed by an alias calls the aliased type's methods",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config {\n    pub proxy: i32,\n}\n\nimpl Config {\n    pub fn show(&self) -> i32 {\n        self.proxy\n    }\n}\n\npub struct Other {\n    pub proxy: i32,\n}\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\npub type Cfg = Config;\n\npub fn through_alias(c: Cfg) -> i32 {\n    c.show()\n}\n'},
+     [('through_alias', 'calls', 'Config.show')], [('through_alias', 'calls', 'Other.show')],
+     source='reference items/type-aliases.md r[items.type.intro]; open today: no edge')
+case('rust', 'struct-expression-through-an-alias', "`Cfg { .. }` builds a Config, so its methods are Config's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config {\n    pub proxy: i32,\n}\n\nimpl Config {\n    pub fn show(&self) -> i32 {\n        self.proxy\n    }\n}\n\npub struct Other {\n    pub proxy: i32,\n}\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\npub type Cfg = Config;\n\npub fn build() -> i32 {\n    let c = Cfg { proxy: 1 };\n    c.show()\n}\n'},
+     [('build', 'calls', 'Config.show')], [('build', 'calls', 'Other.show')],
+     source='reference items/type-aliases.md r[items.type.intro]; open today')
+case('rust', 'alias-by-use-constructor', 'a tuple struct re-exported under another name by `use ... as` is called as its constructor',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Pair(pub i32);\n\npub struct Decoy(pub i32);\n\npub mod m {\n    pub use super::Pair as Renamed;\n}\n\npub fn make() -> Pair {\n    m::Renamed(5)\n}\n'},
+     [('make', 'calls', 'Pair')], [('make', 'calls', 'Decoy')],
+     source='reference items/type-aliases.md r[items.type.constructor-alias]; open today: no edge')
+case('rust', 'const-in-a-block', "a const or static declared in a function is that function's name; the module's is read only outside",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub const LIMIT: i32 = 1;\n\npub static COUNT: i32 = 2;\n\npub fn local() -> i32 {\n    const LIMIT: i32 = 5;\n    static COUNT: i32 = 6;\n    LIMIT + COUNT\n}\n\npub fn outer() -> i32 {\n    LIMIT + COUNT\n}\n'},
+     [('outer', 'reads', 'src/lib.rs:LIMIT'), ('outer', 'reads', 'src/lib.rs:COUNT')], [('local', 'reads', 'src/lib.rs:LIMIT'), ('local', 'reads', 'src/lib.rs:COUNT')],
+     source="reference items/constant-items.md r[items.const.namespace], static-items.md r[items.static.namespace]; open today: block consts are no nodes and the module's is read")
+case('rust', 'extern-fn-in-a-block', "an `extern` block inside a function declares a name of that block, hiding the module's function",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn abs(x: i32) -> i32 {\n    x\n}\n\npub fn plain() -> i32 {\n    abs(-3)\n}\n\npub fn foreign() -> i32 {\n    extern "C" {\n        fn abs(x: i32) -> i32;\n    }\n    unsafe { abs(-3) }\n}\n'},
+     [('plain', 'calls', 'src/lib.rs:abs'), ('foreign', 'calls', 'foreign.abs')], [('foreign', 'calls', 'src/lib.rs:abs')],
+     source='reference items/external-blocks.md r[items.extern.namespace]; passes today')
+case('rust', 'impl-in-a-block-is-visible-outside', 'an inherent impl written inside a function gives its type a method everywhere',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config;\n\npub struct Other;\n\nimpl Other {\n    pub fn extra(&self) -> i32 {\n        0\n    }\n}\n\npub fn setup() {\n    impl Config {\n        pub fn extra(&self) -> i32 {\n            1\n        }\n    }\n}\n\npub fn later(c: Config) -> i32 {\n    c.extra()\n}\n'},
+     [('later', 'calls', 'Config.extra')], [('later', 'calls', 'Other.extra')],
+     source='reference statements.md r[statement.item.associated-scope]; passes today')
+case('rust', 'let-else-binding', 'a name bound by `let Some(c) = x else { .. };` is a Config in the following statements',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config {\n    pub proxy: i32,\n}\n\nimpl Config {\n    pub fn show(&self) -> i32 {\n        self.proxy\n    }\n}\n\npub struct Other {\n    pub proxy: i32,\n}\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\npub fn pick(x: Option<Config>) -> i32 {\n    let Some(c) = x else {\n        return 0;\n    };\n    c.show()\n}\n'},
+     [('pick', 'calls', 'Config.show')], [('pick', 'calls', 'Other.show')],
+     source='reference statements.md r[statement.let.behavior]; passes today')
+case('rust', 'typed-self-parameter-is-a-method', 'a function whose first parameter is `self: &Rc<Self>` is a method of Self, found by a call on an `Rc<Self>` value',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::rc::Rc;\n\npub struct Repo;\n\nimpl Repo {\n    pub fn find(self: &Rc<Self>) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(r: Rc<Repo>) -> i32 {\n    r.find()\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='Reference, Functions (r[items.fn.params.self-pat], TypedSelf)')
+case('rust', 'mut-parameter-is-typed', "a `mut` parameter is a parameter of its declared type: a method called on it is that type's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(mut r: Repo) -> i32 {\n    let _ = &mut r;\n    r.find()\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='Reference, Variables (r[variable.param-mut]) and Functions (r[items.fn.params.intro])')
+case('rust', 'function-item-bound-to-a-local', "`let f = helper;` and `let g: fn() -> i32 = other;` are uses of the module's functions, never of a method named alike",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct A;\nimpl A {\n    pub fn helper(&self) -> i32 {\n        1\n    }\n}\n\npub fn helper() -> i32 {\n    2\n}\n\npub fn other() -> i32 {\n    3\n}\n\npub fn run() -> i32 {\n    let f = helper;\n    let g: fn() -> i32 = other;\n    f() + g()\n}\n'},
+     [('run', 'references', 'helper'), ('run', 'references', 'other')], [('run', 'references', 'A.helper'), ('run', 'calls', 'A.helper')],
+     source='Reference, Functions (r[items.fn.fn-item-type])')
+case('rust', 'self-variant-is-the-impls-enum', '`Self::Fast` / `Self::Slow(1)` in `impl Mode` name the variants of Mode, not those of Other',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub enum Mode {\n    Fast,\n    Slow(u8),\n}\n\npub enum Other {\n    Fast,\n}\n\nimpl Mode {\n    pub fn quick() -> Self {\n        Self::Fast\n    }\n    pub fn slow() -> Mode {\n        Self::Slow(1)\n    }\n}\n\npub fn other() -> Other {\n    Other::Fast\n}\n'},
+     [('Mode.quick', 'references', 'Mode'), ('Mode.slow', 'references', 'Mode')], [('Mode.quick', 'references', 'Other'), ('Mode.slow', 'references', 'Other')],
+     source='Reference, Enumerations (r[items.enum.constructor-names])')
+case('rust', 'named-variant-import-shadows-a-glob-struct', '`use super::*;` brings the struct Circle, `use crate::Shape::Circle;` the variant: the named import wins, so `Circle(1)` is the variant',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub enum Shape {\n    Circle(u8),\n}\n\npub struct Circle(pub u32);\n\npub mod inner {\n    use super::*;\n    use crate::Shape::Circle;\n\n    pub fn run() -> Shape {\n        Circle(1)\n    }\n}\n'},
+     [('inner.run', 'references', 'Shape')], [('inner.run', 'calls', 'src/lib.rs:Circle@5'), ('inner.run', 'references', 'src/lib.rs:Circle@5')],
+     source='Reference, Enumerations (r[items.enum.constructor-names]) and Use declarations (r[items.use.glob.shadowing])')
+case('rust', 'discriminant-reads-a-constant', '`Low = BASE` reads the constant BASE (the variant is where it is written), not another constant',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub const BASE: isize = 10;\npub const OTHER: isize = 20;\n\npub enum Level {\n    Low = BASE,\n    High = BASE + 5,\n}\n\npub fn v() -> isize {\n    OTHER\n}\n'},
+     [('Level.Low', 'reads', 'BASE'), ('Level.High', 'reads', 'BASE')], [('Level.Low', 'reads', 'OTHER')],
+     source='Reference, Enumerations (r[items.enum.discriminant.explicit.intro])')
+case('rust', 'union-expression-is-a-use-of-the-union', '`Bits { i: 1 }` is a use of the union Bits, never of the struct Plain that also has a field i',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub union Bits {\n    pub i: u32,\n    pub f: f32,\n}\n\npub struct Plain {\n    pub i: u32,\n}\n\npub fn make() -> Bits {\n    Bits { i: 1 }\n}\n\npub fn plain() -> Plain {\n    Plain { i: 1 }\n}\n'},
+     [('make', 'references', 'Bits'), ('plain', 'references', 'Plain')], [('make', 'references', 'Plain'), ('plain', 'references', 'Bits')],
+     source='Reference, Unions (r[items.union.init.intro])')
+case('rust', 'impl-for-a-type-alias', 'a method written in `impl Id` (an alias of Wide) is a method of Wide, found by a call on a Wide value',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Wide;\n\npub type Id = Wide;\n\nimpl Id {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(w: &Wide) -> i32 {\n    w.find()\n}\n'},
+     [('run', 'calls', 'Id.find')], [('run', 'calls', 'Other.find')],
+     source='Reference, Type aliases (r[items.type.intro]) and Implementations')
+case('rust', 'alias-of-a-collection', '`for r in rs` with `rs: Repos` and `type Repos = Vec<Repo>` makes r a Repo',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub type Repos = Vec<Repo>;\n\npub fn run(rs: Repos) -> i32 {\n    let mut n = 0;\n    for r in rs {\n        n += r.find();\n    }\n    n\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='Reference, Type aliases (r[items.type.intro])')
+case('rust', 'associated-type-of-an-impl', "`d.item()` returns `Self::Item`, which `impl Source for Db` binds to Repo: `.find()` on it is Repo's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub trait Source {\n    type Item;\n    fn item(&self) -> Self::Item;\n}\n\npub struct Db;\n\nimpl Source for Db {\n    type Item = Repo;\n    fn item(&self) -> Self::Item {\n        Repo\n    }\n}\n\npub fn run(d: &Db) -> i32 {\n    d.item().find()\n}\n'},
+     [('run', 'calls', 'Db.item'), ('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='Reference, Type aliases (r[items.type.associated-impl]) and Associated items')
+case('rust', 'constant-initializer-reads-constants', '`const BITS = [BIT1]` reads BIT1 from BITS, and BIT2, which it does not name, is not read',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub const BIT1: u32 = 1;\npub const BIT2: u32 = 2;\npub const BITS: [u32; 1] = [BIT1];\n'},
+     [('BITS', 'reads', 'BIT1')], [('BITS', 'reads', 'BIT2')],
+     source='Reference, Constant items (r[items.const.static-temporary] example)')
+case('rust', 'static-initializer-uses', '`static LIMIT: u32 = twice(BASE);` calls twice and reads BASE from LIMIT',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub const BASE: u32 = 1;\n\npub const fn twice(x: u32) -> u32 {\n    x * 2\n}\n\npub static LIMIT: u32 = twice(BASE);\n'},
+     [('LIMIT', 'calls', 'twice'), ('LIMIT', 'reads', 'BASE')], [],
+     source='Reference, Static items (r[items.static.init])')
+case('rust', 'link-name-is-no-rust-name', '`c_sqrt` is the extern declaration; the Rust function `sqrt` is not what it calls',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn sqrt(x: f64) -> f64 {\n    x\n}\n\nunsafe extern "C" {\n    #[link_name = "sqrt"]\n    fn c_sqrt(x: f64) -> f64;\n}\n\npub fn run() -> f64 {\n    unsafe { c_sqrt(4.0) }\n}\n'},
+     [('run', 'calls', 'c_sqrt')], [('run', 'calls', 'sqrt')],
+     source='Reference, External blocks (r[items.extern.attributes.link_name])', since='2024')
+case('rust', 'extern-static-is-read', "a read of an extern block's static is a read of that declaration, and a module static of another name is not read",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub static COUNTER: u32 = 1;\n\nunsafe extern "C" {\n    static environ_count: u32;\n}\n\npub fn run() -> u32 {\n    unsafe { environ_count }\n}\n\npub fn other() -> u32 {\n    COUNTER\n}\n'},
+     [('run', 'reads', 'environ_count'), ('other', 'reads', 'COUNTER')], [('run', 'reads', 'COUNTER')],
+     source='Reference, External blocks (r[items.extern.static.intro])', since='2024')
+case('rust', 'block-item-is-visible-before-its-declaration', "`go()` written before `fn go` in the same block is the block's go, not the module's go or a method",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct A;\nimpl A {\n    pub fn go(&self) -> i32 {\n        1\n    }\n}\n\npub fn go() -> i32 {\n    2\n}\n\npub fn run() -> i32 {\n    let r = go();\n    fn go() -> i32 {\n        3\n    }\n    r + go()\n}\n'},
+     [('run', 'calls', 'run.go')], [('run', 'calls', 'src/lib.rs:go'), ('run', 'calls', 'A.go')],
+     source='Reference, Statements (r[statement.item.scope]) and Scopes (r[names.scopes.items.statement])')
+case('rust', 'let-annotation-types-the-variable', '`let r: Repo = make();` makes r a Repo although make is generic',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\nimpl Default for Repo {\n    fn default() -> Repo {\n        Repo\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn make<T: Default>() -> T {\n    T::default()\n}\n\npub fn run() -> i32 {\n    let r: Repo = make();\n    r.find()\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='Reference, Statements (r[statement.let.intro])')
+case('rust', 'alias-path-associated-function', "an associated function called by a path that starts at a type alias is the aliased type's function",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Wide;\npub struct Other;\n\nimpl Wide {\n    pub fn make() -> Wide {\n        Wide\n    }\n}\n\nimpl Other {\n    pub fn make() -> Other {\n        Other\n    }\n}\n\npub type Id = Wide;\n\npub fn build() -> Wide {\n    Id::make()\n}\n'},
+     [('build', 'calls', 'Wide.make')], [('build', 'calls', 'Other.make')],
+     source='reference items/type-aliases.md r[items.type.intro]; rustc_resolve late.rs (a path through a type alias resolves in the type namespace, then the associated item is probed on the aliased type)')
+case('rust', 'generic-alias-keeps-its-arguments', "a value typed by a generic alias has the aliased generic type's fields typed by the alias's arguments",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Holder<T> {\n    pub item: T,\n}\n\npub struct Repo;\npub struct Other;\n\nimpl Repo {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        2\n    }\n}\n\npub type Shared<T> = Holder<T>;\n\npub fn get(h: Shared<Repo>) -> i32 {\n    h.item.show()\n}\n'},
+     [('get', 'calls', 'Repo.show')], [('get', 'calls', 'Other.show')],
+     source='reference items/type-aliases.md r[items.type.intro]; rustc_hir_typeck method/probe.rs (the receiver type is the alias expanded, its generic arguments substituted)')
+case('rust', 'alias-path-enum-variant', 'a variant written through a type alias of its enum is a use of that enum',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub enum Mode {\n    Fast,\n}\n\npub enum Other {\n    Fast,\n}\n\npub type M = Mode;\n\npub fn pick() -> Mode {\n    M::Fast\n}\n\npub fn unused() -> Other {\n    Other::Fast\n}\n'},
+     [('pick', 'references', 'Mode')], [('pick', 'references', 'Other')],
+     source='reference items/type-aliases.md r[items.type.intro]; items/enumerations.md r[items.enum.constructor-names]')
+case('rust', 'use-declaration-in-a-block', 'a `use` in a block binds in the block only and shadows an item of the module there',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod m {\n    pub fn helper() -> i32 {\n        2\n    }\n}\n\npub fn helper() -> i32 {\n    1\n}\n\npub fn inner() -> i32 {\n    use m::helper;\n    helper()\n}\n\npub fn outer() -> i32 {\n    helper()\n}\n'},
+     [('inner', 'calls', 'm.helper'), ('outer', 'calls', 'src/lib.rs:helper')], [('inner', 'calls', 'src/lib.rs:helper'), ('outer', 'calls', 'm.helper')],
+     source='reference statements.md r[statement.item.intro], r[statement.item.scope]; rustc_resolve ident.rs (ribs of a block: ModuleRibKind::Block holds its imports)')
+case('rust', 'struct-in-a-block-hides-the-modules', "a struct (and its impl) written in a block is the type named there, hiding the module's struct of that name",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Item;\n\nimpl Item {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\npub fn run() -> i32 {\n    struct Item;\n\n    impl Item {\n        fn show(&self) -> i32 {\n            2\n        }\n    }\n\n    let x = Item;\n    x.show()\n}\n'},
+     [('run', 'calls', 'run.Item.show')], [('run', 'calls', 'src/lib.rs:Item.show@3')],
+     source='reference statements.md r[statement.item.scope]; rustc_resolve ident.rs (block ribs searched before the module)')
+case('rust', 'closure-parameter-hides-a-function', "a closure's parameter is a local of the closure and hides an item of its name there",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn helper() -> i32 {\n    1\n}\n\npub fn apply() -> i32 {\n    let f = |helper: fn() -> i32| helper();\n    f(|| 3)\n}\n'},
+     [], [('apply', 'calls', 'helper')],
+     source='reference variables.md r[variable.param-mut]; rustc_resolve late.rs (closure params bound in a rib before the body)')
+case('rust', 'static-mut-write', 'an assignment to a static is a write of the static the name means',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod m {\n    pub static mut COUNTER: i32 = 5;\n}\n\npub static mut COUNTER: i32 = 0;\n\npub fn bump() {\n    unsafe {\n        COUNTER += 1;\n    }\n}\n\npub fn read() -> i32 {\n    unsafe { COUNTER }\n}\n'},
+     [('bump', 'writes', 'src/lib.rs:COUNTER'), ('read', 'reads', 'src/lib.rs:COUNTER')], [('bump', 'writes', 'm.COUNTER'), ('read', 'reads', 'm.COUNTER')],
+     source='reference items/static-items.md r[items.static.mut.intro], r[items.static.namespace]')
+case('rust', 'await-gives-the-declared-result', '`f().await` of an async function is a value of its declared result type',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\npub struct Other;\n\nimpl Repo {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        2\n    }\n}\n\npub async fn make() -> Repo {\n    Repo\n}\n\npub async fn go() -> i32 {\n    let r = make().await;\n    r.show()\n}\n'},
+     [('go', 'calls', 'Repo.show')], [('go', 'calls', 'Other.show')],
+     source='reference items/functions.md r[items.fn.async.*]; rustc_hir_typeck (await desugars to IntoFuture::Output)', since='2018')
+case('rust', 'qualified-fn-in-a-block-hides-the-modules', "qualifiers (`const`, `unsafe`) do not change where a function's name is visible",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn helper() -> i32 {\n    1\n}\n\npub fn outer() -> i32 {\n    const unsafe fn helper() -> i32 {\n        2\n    }\n    unsafe { helper() }\n}\n'},
+     [('outer', 'calls', 'outer.helper')], [('outer', 'calls', 'src/lib.rs:helper')],
+     source='reference items/functions.md r[items.fn.namespace], r[items.fn.const], r[items.fn.safety-qualifiers]')
+case('rust', 'tuple-struct-field-by-index', '`w.0` is the first field of a tuple struct and has its declared type',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Inner;\npub struct Other;\n\nimpl Inner {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        2\n    }\n}\n\npub struct Wrap(pub Inner, pub Other);\n\npub fn go(w: Wrap) -> i32 {\n    w.0.show()\n}\n'},
+     [('go', 'calls', 'Inner.show')], [('go', 'calls', 'Other.show')],
+     source='reference items/structs.md r[items.struct.tuple]; rustc_hir_typeck (field access by index)')
+case('rust', 'struct-like-variant-expression', 'a struct expression naming a variant by a path from its enum is a use of that enum',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub enum Shape {\n    Circle { r: i32 },\n}\n\npub enum Other {\n    Circle { r: i32 },\n}\n\npub fn make() -> Shape {\n    Shape::Circle { r: 1 }\n}\n\npub fn unused() -> Other {\n    Other::Circle { r: 2 }\n}\n'},
+     [('make', 'references', 'Shape')], [('make', 'references', 'Other')],
+     source='reference items/enumerations.md r[items.enum.struct-expr]')
+case('rust', 'default-method-calls-a-required-method', "`self.f()` in a trait's default method is the trait's own declaration f",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Named {\n    fn label(&self) -> i32;\n\n    fn twice(&self) -> i32 {\n        self.label() * 2\n    }\n}\n\npub trait Other {\n    fn label(&self) -> i32;\n}\n'},
+     [('Named.twice', 'calls', 'Named.label')], [('Named.twice', 'calls', 'Other.label')],
+     source='reference items/traits.md r[items.traits.associated-item-decls]; rustc rustc_hir_typeck/src/method/probe.rs assemble_inherent_candidates_from_param (Self is a param of the trait)')
+case('rust', 'trait-method-of-a-generic-trait', "a method of a generic trait `Seq<T>` is the implementing type's method on a value of that type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Seq<T> {\n    fn first(&self) -> Option<T>;\n}\n\npub struct Bits(pub u32);\n\nimpl Seq<bool> for Bits {\n    fn first(&self) -> Option<bool> {\n        Some(self.0 & 1 == 1)\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn first(&self) -> i32 {\n        0\n    }\n}\n\npub fn run(b: &Bits) -> Option<bool> {\n    b.first()\n}\n'},
+     [('run', 'calls', 'Bits.first')], [('run', 'calls', 'Other.first')],
+     source='reference items/traits.md r[items.traits.generic]; items/implementations.md r[items.impl.generics.intro]')
+case('rust', 'supertrait-method-on-a-bound', "a `C: Circle` value has the methods of Circle's supertrait Shape",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Shape {\n    fn area(&self) -> f64;\n}\n\npub trait Circle: Shape {\n    fn radius(&self) -> f64;\n}\n\npub trait Other {\n    fn area(&self) -> f64;\n}\n\npub fn run<C: Circle>(c: &C) -> f64 {\n    c.area()\n}\n'},
+     [('run', 'calls', 'Shape.area')], [('run', 'calls', 'Other.area')],
+     source='reference items/traits.md r[items.traits.supertraits.intro]; rustc rustc_hir_typeck/src/method/probe.rs assemble_inherent_candidates_from_param (elaborated bounds)')
+case('rust', 'supertrait-method-on-a-trait-object', "a `&dyn Circle` has the methods of Circle's supertrait Shape",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Shape {\n    fn area(&self) -> f64;\n}\n\npub trait Circle: Shape {\n    fn radius(&self) -> f64;\n}\n\npub trait Other {\n    fn area(&self) -> f64;\n}\n\npub fn run(c: &dyn Circle) -> f64 {\n    c.area()\n}\n'},
+     [('run', 'calls', 'Shape.area')], [('run', 'calls', 'Other.area')],
+     source='reference items/traits.md r[items.traits.supertraits.intro]; rustc rustc_hir_typeck/src/method/probe.rs assemble_inherent_candidates_from_object')
+case('rust', 'supertrait-method-in-a-default-body', "in a trait's default method, `self.f()` is a method of a supertrait declared by `where Self: Shape`",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Shape {\n    fn area(&self) -> f64;\n}\n\npub trait Other {\n    fn area(&self) -> f64;\n}\n\npub trait Circle\nwhere\n    Self: Shape,\n{\n    fn radius(&self) -> f64 {\n        self.area() / 3.0\n    }\n}\n'},
+     [('Circle.radius', 'calls', 'Shape.area')], [('Circle.radius', 'calls', 'Other.area')],
+     source='reference items/traits.md r[items.traits.supertraits.decl]')
+case('rust', 'trait-path-and-qualified-path', "`Trait::f(x)` and `<T as Trait>::f(x)` name the trait's own function, whichever other trait has an f",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait A {\n    fn name(&self) -> i32;\n}\n\npub trait B {\n    fn name(&self) -> i32;\n}\n\npub struct Foo;\n\nimpl A for Foo {\n    fn name(&self) -> i32 {\n        1\n    }\n}\n\nimpl B for Foo {\n    fn name(&self) -> i32 {\n        2\n    }\n}\n\npub fn via_a(f: &Foo) -> i32 {\n    A::name(f)\n}\n\npub fn via_b(f: &Foo) -> i32 {\n    <Foo as B>::name(f)\n}\n'},
+     [('via_a', 'calls', 'A.name'), ('via_b', 'calls', 'B.name')], [('via_a', 'calls', 'B.name'), ('via_b', 'calls', 'A.name')],
+     source='reference items/implementations.md r[items.impl.trait.associated-item-path]; items/associated-items.md r[items.associated.fn.qualified-self]')
+case('rust', 'blanket-impl-method', "a method a blanket `impl<T: Show> Describe for T` gives is a method of every type that is Show, not another type's method of the name",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Show {\n    fn show(&self) -> i32;\n}\n\npub trait Describe {\n    fn describe(&self) -> i32;\n}\n\nimpl<T: Show> Describe for T {\n    fn describe(&self) -> i32 {\n        self.show()\n    }\n}\n\npub struct Foo;\n\nimpl Show for Foo {\n    fn show(&self) -> i32 {\n        1\n    }\n}\n\npub struct Bar;\n\nimpl Bar {\n    pub fn describe(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(f: &Foo) -> i32 {\n    f.describe()\n}\n'},
+     [('run', 'calls', 'Describe.describe')], [('run', 'calls', 'Bar.describe')],
+     source='reference items/implementations.md r[items.impl.generics.intro]; rustc rustc_hir_typeck/src/method/probe.rs assemble_extension_candidates_for_trait')
+case('rust', 'associated-type-projection', "`<Foo as Maker>::Out` is the type Foo's impl gives `Out`: a method called on a value of it is that type's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Maker {\n    type Out;\n}\n\npub struct Foo;\npub struct Widget;\npub struct Gadget;\n\nimpl Widget {\n    pub fn spin(&self) -> i32 {\n        1\n    }\n}\n\nimpl Gadget {\n    pub fn spin(&self) -> i32 {\n        2\n    }\n}\n\nimpl Maker for Foo {\n    type Out = Widget;\n}\n\npub fn run(w: <Foo as Maker>::Out) -> i32 {\n    w.spin()\n}\n'},
+     [('run', 'calls', 'Widget.spin')], [('run', 'calls', 'Gadget.spin')],
+     source='reference items/associated-items.md r[items.associated.type.alias]')
+case('rust', 'associated-constant-on-a-bound', "`T::NAME` of `T: Named` is the trait's constant, not a constant of the same name another trait has",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Named {\n    const NAME: i32;\n}\n\npub trait Other {\n    const NAME: i32;\n}\n\npub fn run<T: Named>() -> i32 {\n    T::NAME\n}\n'},
+     [('run', 'reads', 'Named.NAME')], [('run', 'reads', 'Other.NAME')],
+     source='reference items/associated-items.md r[items.associated.const.name]; trait-bounds.md r[bound.satisfaction]')
+case('rust', 'box-self-receiver', "a method with `self: Box<Self>` is called on a `Box<Foo>`: it is Foo's method, not another type's of the name",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Foo;\n\nimpl Foo {\n    pub fn consume(self: Box<Self>) -> i32 {\n        1\n    }\n}\n\npub struct Bar;\n\nimpl Bar {\n    pub fn consume(self: Box<Self>) -> i32 {\n        2\n    }\n}\n\npub fn run(b: Box<Foo>) -> i32 {\n    b.consume()\n}\n'},
+     [('run', 'calls', 'Foo.consume')], [('run', 'calls', 'Bar.consume')],
+     source='reference special-types-and-traits.md r[lang-types.box.receiver]')
+case('rust', 'deref-impl-method', "a method the type lacks is looked up on the target of its `Deref` impl; the type's own method comes first",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::ops::Deref;\n\npub struct Inner;\n\nimpl Inner {\n    pub fn inner_only(&self) -> i32 {\n        1\n    }\n\n    pub fn both(&self) -> i32 {\n        2\n    }\n}\n\npub struct Outer(Inner);\n\nimpl Outer {\n    pub fn both(&self) -> i32 {\n        3\n    }\n}\n\nimpl Deref for Outer {\n    type Target = Inner;\n\n    fn deref(&self) -> &Inner {\n        &self.0\n    }\n}\n\npub fn through(o: &Outer) -> i32 {\n    o.inner_only()\n}\n\npub fn own(o: &Outer) -> i32 {\n    o.both()\n}\n'},
+     [('through', 'calls', 'Inner.inner_only'), ('own', 'calls', 'Outer.both')], [('own', 'calls', 'Inner.both')],
+     source='reference special-types-and-traits.md r[lang-types.deref]; rustc rustc_hir_typeck/src/method/probe.rs method_autoderef_steps, pick_all_method')
+case('rust', 'method-of-a-bound-not-a-guess-by-name', "a method called on a `T: Tr` value is the trait's, whichever unrelated type has an inherent method of the name",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Tr {\n    fn go(&self) -> i32;\n}\n\npub struct Foo;\n\nimpl Foo {\n    pub fn go(&self) -> i32 {\n        1\n    }\n}\n\npub fn run<T: Tr>(t: &T) -> i32 {\n    t.go()\n}\n'},
+     [('run', 'calls', 'Tr.go')], [('run', 'calls', 'Foo.go')],
+     source='reference trait-bounds.md r[bound.satisfaction]; rustc rustc_hir_typeck/src/method/probe.rs assemble_inherent_candidates_from_param')
+case('rust', 'trait-in-scope', "a trait's method is a candidate only where the trait is in scope: of two traits with the method, the one the file imports",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod a;\npub mod b;\n\nuse a::A;\n\npub struct Foo;\n\nimpl a::A for Foo {\n    fn name(&self) -> i32 {\n        1\n    }\n}\n\nimpl b::B for Foo {\n    fn name(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(f: &Foo) -> i32 {\n    f.name()\n}\n', 'src/a.rs': 'pub trait A {\n    fn name(&self) -> i32;\n}\n', 'src/b.rs': 'pub trait B {\n    fn name(&self) -> i32;\n}\n'},
+     [('run', 'calls', 'src/lib.rs:Foo.name@9')], [('run', 'calls', 'src/lib.rs:Foo.name@15')],
+     source='rustc rustc_hir_typeck/src/method/probe.rs assemble_extension_candidates_for_traits_in_scope')
+case('rust', 'by-value-before-autoref', "of two trait methods that fit a receiver, the one whose `self` type is the receiver's type is found before one that needs an autoref",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait ByValue {\n    fn pick(self) -> i32;\n}\n\npub trait ByRef {\n    fn pick(&self) -> i32;\n}\n\npub struct Foo;\n\nimpl ByValue for Foo {\n    fn pick(self) -> i32 {\n        1\n    }\n}\n\nimpl ByRef for Foo {\n    fn pick(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(f: Foo) -> i32 {\n    f.pick()\n}\n'},
+     [('run', 'calls', 'src/lib.rs:Foo.pick@12')], [('run', 'calls', 'src/lib.rs:Foo.pick@18')],
+     source='rustc rustc_hir_typeck/src/method/probe.rs pick_all_method, pick_by_value_method, pick_autorefd_method')
+case('rust', 'associated-function-on-a-type-parameter', "`T::make()` of `T: Maker` is the trait's function, not another type's `make`",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Maker {\n    fn make() -> Self;\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn make() -> Other {\n        Other\n    }\n}\n\npub fn run<T: Maker>() -> T {\n    T::make()\n}\n'},
+     [('run', 'calls', 'Maker.make')], [('run', 'calls', 'Other.make')],
+     source='rustc rustc_hir_typeck/src/method/mod.rs resolve_fully_qualified_call; reference trait-bounds.md r[bound.satisfaction]')
+case('rust', 'impl-trait-argument', 'a parameter written `impl Trait` has the methods of the trait, not a same-named method of an unrelated type',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Named {\n    fn label(&self) -> i32;\n}\n\npub struct Foo;\n\nimpl Foo {\n    pub fn label(&self) -> i32 {\n        1\n    }\n}\n\npub fn run(n: impl Named) -> i32 {\n    n.label()\n}\n'},
+     [('run', 'calls', 'Named.label')], [('run', 'calls', 'Foo.label')],
+     source='rustc rustc_hir_typeck/src/method/confirm.rs fresh_receiver_args WhereClausePick; probe.rs assemble_inherent_candidates_from_param')
+case('rust', 'rust-private-inherent-skipped-for-trait', 'A private inherent method of another module is no candidate: the trait method of the name is picked',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod m {\n    pub struct S;\n    impl S {\n        fn show(&self) -> i32 {\n            1\n        }\n        pub fn go(&self) -> i32 {\n            self.show()\n        }\n    }\n    pub trait Tr {\n        fn show(&self) -> i32;\n    }\n    impl Tr for S {\n        fn show(&self) -> i32 {\n            2\n        }\n    }\n}\n\nuse m::Tr;\n\npub fn run(s: &m::S) -> i32 {\n    s.show()\n}\n'},
+     [('run', 'calls', 'src/lib.rs:m.S.show@15'), ('m.S.go', 'calls', 'src/lib.rs:m.S.show@4')], [('run', 'calls', 'src/lib.rs:m.S.show@4')],
+     source='rustc probe.rs, private_candidate in consider_candidates')
+case('rust', 'rust-where-bound-on-projection', "A where clause on an associated type gives a value of it the bound trait's methods",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Show {\n    fn show(&self) -> i32;\n}\n\npub trait Source {\n    type Out;\n    fn get(&self) -> Self::Out;\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\npub struct Num;\n\nimpl Show for Num {\n    fn show(&self) -> i32 {\n        1\n    }\n}\n\npub struct Src;\n\nimpl Source for Src {\n    type Out = Num;\n    fn get(&self) -> Num {\n        Num\n    }\n}\n\npub fn run<S: Source>(s: &S) -> i32\nwhere\n    S::Out: Show,\n{\n    s.get().show()\n}\n'},
+     [('run', 'calls', 'Show.show'), ('run', 'calls', 'Source.get')], [('run', 'calls', 'Other.show')],
+     source='reference trait-bounds.md; probe.rs assemble_inherent_candates_from_param (WhereClauseCandidate)')
+case('rust', 'rust-opaque-return-has-trait-methods-only', "A call on the result of `-> impl Trait` binds the trait's method, not the concrete type's inherent one",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Show {\n    fn show(&self) -> i32;\n}\n\npub struct Num;\n\nimpl Num {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\nimpl Show for Num {\n    fn show(&self) -> i32 {\n        1\n    }\n}\n\npub fn make() -> impl Show {\n    Num\n}\n\npub fn run() -> i32 {\n    make().show()\n}\n'},
+     [('run', 'calls', 'Show.show'), ('run', 'calls', 'make')], [('run', 'calls', 'src/lib.rs:Num.show@8')],
+     source='rustc probe.rs, opaque type receivers')
+case('rust', 'rust-inherent-impl-per-instantiation', 'A method of `impl W<String>` is called on a W<String>, not the same-named method of `impl W<i32>`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct W<T>(pub T);\n\nimpl W<i32> {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\nimpl W<String> {\n    pub fn show(&self) -> i32 {\n        2\n    }\n}\n\npub fn run() -> i32 {\n    let w: W<String> = W(String::new());\n    w.show()\n}\n'},
+     [('run', 'calls', 'src/lib.rs:W.show@10')], [('run', 'calls', 'src/lib.rs:W.show@4')],
+     source="rustc probe.rs, assemble_inherent_impl_probe and consider_probe (unification of the impl's self type)")
+case('rust', 'rust-path-inherent-before-trait-assoc-fn', "`S::make()` names the inherent associated function, not the trait's of the same name",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Tr {\n    fn make() -> i32;\n}\n\npub struct S;\n\nimpl S {\n    pub fn make() -> i32 {\n        1\n    }\n}\n\nimpl Tr for S {\n    fn make() -> i32 {\n        2\n    }\n}\n\npub fn run() -> i32 {\n    S::make()\n}\n'},
+     [('run', 'calls', 'src/lib.rs:S.make@8')], [('run', 'calls', 'src/lib.rs:S.make@14'), ('run', 'calls', 'Tr.make')],
+     source='rustc method/mod.rs resolve_fully_qualified_call, probe Mode::Path')
+case('rust', 'rust-method-call-ignores-field-of-same-name', 'A method call binds the method, not the same-named function-typed field',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct S {\n    pub run: fn() -> i32,\n}\n\nimpl S {\n    pub fn run(&self) -> i32 {\n        1\n    }\n}\n\nfn two() -> i32 {\n    2\n}\n\nfn make() -> S {\n    S { run: two }\n}\n\npub fn go() -> i32 {\n    let s = make();\n    s.run()\n}\n'},
+     [('go', 'calls', 'src/lib.rs:S.run@6')], [('go', 'reads', 'src/lib.rs:S.run@2'), ('go', 'calls', 'src/lib.rs:S.run@2')],
+     source='rustc probe.rs Mode::MethodCall; reference method-call expressions')
+case('rust', 'rust-trait-imported-as-underscore', "a trait imported with `as _` brings its methods into scope for a method call; the other trait's method of the name, not in scope, is no candidate",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod one {\n    pub trait Show {\n        fn show(&self) -> i32;\n    }\n    impl Show for i32 {\n        fn show(&self) -> i32 {\n            1\n        }\n    }\n}\n\npub mod two {\n    pub trait Other {\n        fn show(&self) -> i32;\n    }\n    impl Other for i32 {\n        fn show(&self) -> i32 {\n            2\n        }\n    }\n}\n\nuse one::Show as _;\n\npub fn run(x: i32) -> i32 {\n    x.show()\n}\n'},
+     [('run', 'calls', 'Show.show')], [('run', 'calls', 'Other.show')],
+     source='rustc probe.rs assemble_extension_candidates_for_traits_in_scope; reference names/use-declarations (underscore imports)')
+case('rust', 'rust-inherent-impl-on-dyn-trait', "`impl dyn Trait { fn f }` gives f to values of type dyn Trait (through Box or a reference); an implementor's own inherent f is not the callee",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Shape {\n    fn area(&self) -> i32;\n}\n\nimpl dyn Shape {\n    pub fn describe(&self) -> i32 {\n        self.area()\n    }\n}\n\npub struct Sq;\n\nimpl Sq {\n    pub fn describe(&self) -> i32 {\n        0\n    }\n}\n\nimpl Shape for Sq {\n    fn area(&self) -> i32 {\n        4\n    }\n}\n\npub fn run(s: Box<dyn Shape>) -> i32 {\n    s.describe()\n}\n'},
+     [('run', 'calls', 'dyn Shape.describe')], [('run', 'calls', 'Sq.describe')],
+     source='reference items/implementations.md (inherent impl on a trait object type); rustc probe.rs assemble_inherent_candidates_from_object')
+case('rust', 'rust-array-unsizes-to-slice-for-methods', 'a method called on an array finds the trait impl written for the slice type (the unsize step of the receiver)',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Total {\n    fn total(&self) -> i32;\n}\n\nimpl Total for [i32] {\n    fn total(&self) -> i32 {\n        0\n    }\n}\n\npub struct Bag;\n\nimpl Bag {\n    pub fn total(&self) -> i32 {\n        1\n    }\n}\n\npub fn run() -> i32 {\n    let a = [1, 2, 3];\n    a.total()\n}\n'},
+     [('run', 'calls', 'Total.total')], [('run', 'calls', 'Bag.total')],
+     source='rustc probe.rs method_autoderef_steps (array unsize step)')
+case('rust', 'rust-inherent-impl-through-type-alias', "`impl Alias { fn make }` is Foo's associated function and `Alias::make()` calls it",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Foo;\npub struct Bar;\n\npub type Alias = Foo;\n\nimpl Alias {\n    pub fn make() -> i32 {\n        1\n    }\n}\n\nimpl Bar {\n    pub fn make() -> i32 {\n        2\n    }\n}\n\npub fn run() -> i32 {\n    Alias::make()\n}\n'},
+     [('run', 'calls', 'Foo.make')], [('run', 'calls', 'Bar.make')],
+     source='reference items/implementations.md; rustc probe.rs assemble_inherent_impl_candidates_for_type (alias normalized)')
+case('rust', 'const-parameter-hides-a-const', "a const generic parameter `N` is a value name of the item and hides the module's `const N`",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub const N: usize = 4;\n\npub fn base() -> usize {\n    1\n}\n\npub fn run<const N: usize>() -> usize {\n    N + base()\n}\n'},
+     [('run', 'calls', 'base')], [('run', 'reads', 'N')],
+     source='reference items/generics.md r[items.generics.const.namespace]')
+case('rust', 'where-bound-on-a-concrete-type', "a value of a type bounded by a where clause has the bound trait's methods",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Show {\n    fn show(&self) -> i32;\n}\n\npub struct Wrapper<T>(pub T);\n\npub struct Decoy;\n\nimpl Decoy {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\npub fn run<T>(w: Wrapper<T>) -> i32\nwhere\n    Wrapper<T>: Show,\n{\n    w.show()\n}\n'},
+     [('run', 'calls', 'Show.show')], [('run', 'calls', 'Decoy.show')],
+     source='reference items/generics.md r[items.generics.where.intro]; rustc_hir_typeck method/probe.rs assemble_inherent_candidates_from_param / where-clauses')
+case('rust', 'parenthesized-dyn-with-auto-traits', "`&(dyn Show + Send + 'static)` is a trait object of `Show`: a call on it is Show's method",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': "pub trait Show {\n    fn show(&self) -> i32;\n}\n\npub struct Decoy;\n\nimpl Decoy {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\npub fn run(x: &(dyn Show + Send + 'static)) -> i32 {\n    x.show()\n}\n"},
+     [('run', 'calls', 'Show.show'), ('run', 'references', 'Show')], [('run', 'calls', 'Decoy.show')],
+     source='reference types.md r[type.name.parenthesized]; types/trait-object.md')
+case('rust', 'impl-trait-argument-is-a-bound', "a parameter written `impl Show` has Show's methods, not a same-named method of an unrelated type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Show {\n    fn show(&self) -> i32;\n}\n\npub struct Plain;\n\nimpl Plain {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\nimpl Show for i32 {\n    fn show(&self) -> i32 {\n        *self\n    }\n}\n\npub fn run(x: impl Show) -> i32 {\n    x.show()\n}\n'},
+     [('run', 'calls', 'Show.show')], [('run', 'calls', 'Plain.show')],
+     source='reference types/impl-trait.md r[type.impl-trait.param.generic]')
+case('rust', 'impl-trait-return-is-the-trait', "a call on the result of `-> impl Show` is `Show.show`, not the hidden type's inherent `show`",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Show {\n    fn show(&self) -> i32;\n}\n\npub struct Hidden;\n\nimpl Hidden {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\nimpl Show for Hidden {\n    fn show(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        2\n    }\n}\n\npub fn make() -> impl Show {\n    Hidden\n}\n\npub fn run() -> i32 {\n    let v = make();\n    v.show()\n}\n'},
+     [('run', 'calls', 'Show.show')], [('run', 'calls', 'src/lib.rs:Hidden.show@8'), ('run', 'calls', 'Other.show')],
+     source='reference types/impl-trait.md r[type.impl-trait.return.intro]')
+case('rust', 'trait-object-has-its-supertraits-methods', "a value of `&dyn Child` has the methods of Child's supertrait Base",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Base {\n    fn base(&self) -> i32;\n}\n\npub trait Child: Base {\n    fn child(&self) -> i32;\n}\n\npub struct Decoy;\n\nimpl Decoy {\n    pub fn base(&self) -> i32 {\n        0\n    }\n}\n\npub fn run(c: &dyn Child) -> i32 {\n    c.base() + c.child()\n}\n'},
+     [('run', 'calls', 'Base.base'), ('run', 'calls', 'Child.child')], [('run', 'calls', 'Decoy.base')],
+     source='reference types/trait-object.md r[type.trait-object.impls]')
+case('rust', 'typed-closure-parameter', 'a closure parameter written with a type is a value of that type inside the closure body',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run() -> i32 {\n    let f = |r: &Repo| r.find();\n    f(&Repo)\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference types/closure.md r[type.closure.intro]; names/scopes.md closure parameters')
+case('rust', 'fn-pointer-parameter-hides-a-function', "calling a parameter of type `fn() -> i32` is the parameter's call, not the module function of its name",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn step() -> i32 {\n    1\n}\n\npub fn base() -> i32 {\n    2\n}\n\npub fn run(step: fn() -> i32) -> i32 {\n    step() + base()\n}\n'},
+     [('run', 'calls', 'base')], [('run', 'calls', 'step')],
+     source='reference types/function-pointer.md; names/scopes.md pattern bindings')
+case('rust', 'fn-pointer-field-call-is-the-field', '`(h.run)()` reads the field `run` (of function pointer type); `h.run()` would be the method',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Hooks {\n    pub run: fn() -> i32,\n}\n\nimpl Hooks {\n    pub fn run(&self) -> i32 {\n        0\n    }\n}\n\npub fn go(h: &Hooks) -> i32 {\n    (h.run)()\n}\n'},
+     [('go', 'reads', 'src/lib.rs:Hooks.run@2')], [('go', 'calls', 'src/lib.rs:Hooks.run@6')],
+     source='reference expressions/field-expr + types/function-pointer.md; rustc_hir_typeck method probe vs field lookup (parenthesized callee is a field)')
+case('rust', 'tuple-pattern-types', "a name bound by a tuple pattern has the type at its position in the tuple's type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct A;\n\nimpl A {\n    pub fn go(&self) -> i32 {\n        1\n    }\n}\n\npub struct B;\n\nimpl B {\n    pub fn other(&self) -> i32 {\n        2\n    }\n}\n\npub struct C;\n\nimpl C {\n    pub fn go(&self) -> i32 {\n        3\n    }\n    pub fn other(&self) -> i32 {\n        4\n    }\n}\n\npub fn run(p: (A, B)) -> i32 {\n    let (a, b) = p;\n    a.go() + b.other()\n}\n'},
+     [('run', 'calls', 'A.go'), ('run', 'calls', 'B.other')], [('run', 'calls', 'C.go'), ('run', 'calls', 'C.other')],
+     source='reference types/tuple.md r[type.tuple.access]; patterns.md tuple patterns')
+case('rust', 'enum-variants-through-a-glob', '`use Mode::*;` makes `Fast` the variant of Mode, not the variant of another enum of that name',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub enum Mode {\n    Fast,\n    Slow,\n}\n\npub enum Other {\n    Fast,\n}\n\npub fn pick() -> u8 {\n    use Mode::*;\n    let _m = Fast;\n    1\n}\n'},
+     [('pick', 'references', 'Mode')], [('pick', 'references', 'Other')],
+     source="reference types/enum.md r[type.enum.declaration]; items/use-declarations glob imports of an enum's variants")
+case('rust', 'union-field-read', '`b.int` on a `Bits` union is the field `Bits.int`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub union Bits {\n    pub int: u32,\n    pub float: f32,\n}\n\npub struct Other {\n    pub int: u32,\n}\n\npub fn read(b: &Bits) -> u32 {\n    unsafe { b.int }\n}\n'},
+     [('read', 'reads', 'Bits.int')], [('read', 'reads', 'Other.int')],
+     source='reference types/union.md r[type.union.access]; items/unions.md')
+case('rust', 'raw-pointer-deref-method', '`(*p).find()` on a `*const Repo` is `Repo.find`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(p: *const Repo) -> i32 {\n    unsafe { (*p).find() }\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference types/pointer.md r[type.pointer.raw.safety]; rustc_hir_typeck method/probe.rs autoderef steps')
+case('rust', 'array-and-slice-element-type', "an element of `[Repo; 2]` or `&[Repo]` has Repo's methods",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn first(a: [Repo; 2]) -> i32 {\n    a[0].find()\n}\n\npub fn second(s: &[Repo]) -> i32 {\n    s[1].find()\n}\n'},
+     [('first', 'calls', 'Repo.find'), ('second', 'calls', 'Repo.find')], [('first', 'calls', 'Other.find'), ('second', 'calls', 'Other.find')],
+     source='reference types/array.md and types/slice.md r[type.array.syntax] r[type.slice.intro]')
+case('rust', 'deref-target-method-after-own', "a method call on a value of a type with a `Deref` impl finds the type's own method first and the target's after",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::ops::Deref;\n\npub struct Inner;\n\nimpl Inner {\n    pub fn only_inner(&self) -> i32 {\n        1\n    }\n    pub fn both(&self) -> i32 {\n        2\n    }\n}\n\npub struct Wrapper {\n    inner: Inner,\n}\n\nimpl Wrapper {\n    pub fn both(&self) -> i32 {\n        3\n    }\n}\n\nimpl Deref for Wrapper {\n    type Target = Inner;\n    fn deref(&self) -> &Inner {\n        &self.inner\n    }\n}\n\npub fn run(w: &Wrapper) -> i32 {\n    w.only_inner() + w.both()\n}\n'},
+     [('run', 'calls', 'Inner.only_inner'), ('run', 'calls', 'Wrapper.both')], [('run', 'calls', 'Inner.both')],
+     source='reference type-coercions.md r[coerce.types.deref]; rustc_hir_typeck method/probe.rs (autoderef steps, inherent before extension at each step)')
+case('rust', 'where-bound-on-an-associated-type', 'a value typed `T::Item` has the methods of the trait a where clause bounds `T::Item` by, not a same-named inherent method of an unrelated type',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Show {\n    fn show(&self) -> i32;\n}\n\npub trait Container {\n    type Item;\n}\n\npub struct Plain;\n\nimpl Plain {\n    pub fn show(&self) -> i32 {\n        0\n    }\n}\n\npub fn render<T>(x: T::Item) -> i32\nwhere\n    T: Container,\n    T::Item: Show,\n{\n    x.show()\n}\n'},
+     [('render', 'calls', 'Show.show'), ('render', 'references', 'Container')], [('render', 'calls', 'Plain.show')],
+     source='reference items/generics.md, r[items.generics.where.intro]; rustc_hir_typeck method probe: param-env candidates (probe.rs assemble_inherent_candidates_from_param)')
+case('rust', 'types-inside-builtin-generic-types', 'a name written inside a fn pointer, tuple, array or raw pointer type is a use of that type, and only of the one written',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config {\n    pub n: i32,\n}\n\npub struct Output {\n    pub n: i32,\n}\n\npub struct Other;\n\npub fn wire(cb: fn(Config) -> Output) -> i32 {\n    cb(Config { n: 1 }).n\n}\n\npub fn pair(p: (Config, [Output; 2])) -> usize {\n    p.1.len()\n}\n\npub fn raw(p: *const Other) -> bool {\n    p.is_null()\n}\n'},
+     [('wire', 'references', 'Config'), ('wire', 'references', 'Output'), ('pair', 'references', 'Config'), ('pair', 'references', 'Output'), ('raw', 'references', 'Other')], [('wire', 'references', 'Other'), ('raw', 'references', 'Config')],
+     source='reference items/generics.md r[items.generics.builtin-generic-types]; reference types.md r[type.name.sequence], r[type.name.pointer]')
+case('rust', 'rust-generic-param-default-type', "A generic parameter's default is the type a bare use of the generic stands for: h.v of `Holder` (= Holder<Config>) has Config's methods, not another type's same-named method",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config;\n\nimpl Config {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        2\n    }\n}\n\npub struct Holder<T = Config> {\n    pub v: T,\n}\n\npub fn run(h: Holder) -> i32 {\n    h.v.show()\n}\n\npub fn make(o: Other) -> i32 {\n    o.show()\n}\n'},
+     [('Holder', 'references', 'Config'), ('run', 'calls', 'Config.show'), ('make', 'calls', 'Other.show')], [('run', 'calls', 'Other.show')],
+     source='reference items/generics.md r[items.generics.syntax] (default type of a type parameter); rustc_resolve late.rs resolve_generics / default arguments')
+case('rust', 'bitwise-operator-calls-the-trait-impl', "an operator written on values of a project type is a call of the method its `std::ops` trait impl gives that type (`a & b` is `BitAnd::bitand` of a's type)",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::ops::BitAnd;\n\npub struct V(pub i32);\n\npub struct W(pub i32);\n\nimpl BitAnd for V {\n    type Output = V;\n\n    fn bitand(self, o: V) -> V {\n        V(self.0 & o.0)\n    }\n}\n\nimpl BitAnd for W {\n    type Output = W;\n\n    fn bitand(self, o: W) -> W {\n        W(self.0 & o.0)\n    }\n}\n\npub fn both(a: V, b: V) -> V {\n    a & b\n}\n'},
+     [('both', 'calls', 'V.bitand')], [('both', 'calls', 'W.bitand')],
+     source='The Rust Reference, expressions.md r[expr.overload]')
+case('rust', 'static-through-a-module-path', '`m::STATIC` names the static item of module m, and reading it is a read of that item',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod a {\n    pub static LIMIT: i32 = 1;\n}\n\npub mod b {\n    pub static LIMIT: i32 = 2;\n}\n\npub fn run() -> i32 {\n    a::LIMIT\n}\n'},
+     [('run', 'reads', 'a.LIMIT')], [('run', 'reads', 'b.LIMIT')],
+     source='The Rust Reference, expressions/path-expr.md r[expr.path.place]')
+case('rust', 'associated-const-path', '`Type::CONST` names the associated constant of that type, not the same-named constant of another type',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config;\n\nimpl Config {\n    pub const MAX: i32 = 1;\n}\n\npub struct Other;\n\nimpl Other {\n    pub const MAX: i32 = 2;\n}\n\npub fn run() -> i32 {\n    Config::MAX\n}\n'},
+     [('run', 'reads', 'src/lib.rs:MAX@4')], [('run', 'reads', 'src/lib.rs:MAX@10')],
+     source='The Rust Reference, expressions/path-expr.md r[expr.path.const]')
+case('rust', 'path-to-a-method-as-a-value', 'a path to an associated function or method used as a value (`Type::method`, no call) is a use of that function',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Counter;\n\nimpl Counter {\n    pub fn bump(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn bump(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(xs: &[Counter]) -> Vec<i32> {\n    xs.iter().map(Counter::bump).collect()\n}\n'},
+     [('run', 'indirect_call', 'Counter.bump')], [('run', 'indirect_call', 'Other.bump')],
+     source='The Rust Reference, expressions/path-expr.md r[expr.path.intro]')
+case('rust', 'user-deref-target', "a receiver is dereferenced through a user's `Deref` impl (`type Target`): the target's methods are found, but the wrapper's own method of the name comes first",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::ops::Deref;\n\npub struct Inner;\n\nimpl Inner {\n    pub fn get(&self) -> i32 {\n        1\n    }\n\n    pub fn only_inner(&self) -> i32 {\n        2\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn only_inner(&self) -> i32 {\n        3\n    }\n}\n\npub struct Wrapper {\n    inner: Inner,\n}\n\nimpl Wrapper {\n    pub fn get(&self) -> i32 {\n        4\n    }\n}\n\nimpl Deref for Wrapper {\n    type Target = Inner;\n\n    fn deref(&self) -> &Inner {\n        &self.inner\n    }\n}\n\npub fn run(w: &Wrapper) -> i32 {\n    w.only_inner() + w.get()\n}\n'},
+     [('run', 'calls', 'Inner.only_inner'), ('run', 'calls', 'Wrapper.get')], [('run', 'calls', 'Other.only_inner'), ('run', 'calls', 'Inner.get')],
+     source='The Rust Reference, expressions/method-call-expr.md r[expr.method.candidate-receivers]')
+case('rust', 'array-coerces-to-a-slice-receiver', 'an array receiver is finally unsized to a slice: a method of a trait implemented for `[T]` is found on an array',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Item;\n\npub trait Total {\n    fn total(&self) -> i32;\n}\n\nimpl Total for [Item] {\n    fn total(&self) -> i32 {\n        0\n    }\n}\n\npub struct Other;\n\nimpl Total for [Other] {\n    fn total(&self) -> i32 {\n        1\n    }\n}\n\npub fn run() -> i32 {\n    let a = [Item, Item];\n    a.total()\n}\n'},
+     [('run', 'calls', '[Item].total')], [('run', 'calls', '[Other].total')],
+     source='The Rust Reference, expressions/method-call-expr.md r[expr.method.candidate-receivers]')
+case('rust', 'trait-method-before-inherent-mut-self', 'candidates are tried type by type in the receiver list (`T`, `&T`, `&mut T`): a trait method taking `&self` is found before an inherent one taking `&mut self`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Foo;\n\npub trait Bar {\n    fn bar(&self) -> i32;\n}\n\nimpl Foo {\n    pub fn bar(&mut self) -> i32 {\n        1\n    }\n}\n\nimpl Bar for Foo {\n    fn bar(&self) -> i32 {\n        2\n    }\n}\n\npub fn run() -> i32 {\n    let mut f = Foo;\n    f.bar()\n}\n'},
+     [('run', 'calls', 'src/lib.rs:Foo.bar@14')], [('run', 'calls', 'src/lib.rs:Foo.bar@8')],
+     source='The Rust Reference, expressions/method-call-expr.md r[expr.method.candidate-search]')
+case('rust', 'parenthesized-field-call', '`x.f()` calls the method f, `(x.f)()` reads the field f and calls its value',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Hook {\n    pub f: fn() -> i32,\n}\n\nimpl Hook {\n    pub fn f(&self) -> i32 {\n        1\n    }\n}\n\npub fn field(h: &Hook) -> i32 {\n    (h.f)()\n}\n\npub fn method(h: &Hook) -> i32 {\n    h.f()\n}\n'},
+     [('field', 'reads', 'src/lib.rs:Hook.f@2'), ('method', 'calls', 'src/lib.rs:Hook.f@6')], [('field', 'calls', 'src/lib.rs:Hook.f@6'), ('method', 'reads', 'src/lib.rs:Hook.f@2')],
+     source='The Rust Reference, expressions/field-expr.md r[expr.field.not-method-call]')
+case('rust', 'field-of-a-call-result', 'the container operand is any expression: `foo().x`, `(Struct { a: 10 }).a`, a `Box<Struct>`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct A;\n\nimpl A {\n    pub fn go(&self) -> i32 {\n        1\n    }\n}\n\npub struct B;\n\nimpl B {\n    pub fn go(&self) -> i32 {\n        2\n    }\n}\n\npub struct Holder {\n    pub inner: A,\n}\n\npub fn make() -> Holder {\n    Holder { inner: A }\n}\n\npub fn call() -> i32 {\n    make().inner.go()\n}\n\npub fn literal() -> i32 {\n    (Holder { inner: A }).inner.go()\n}\n\npub fn boxed(b: &Box<Holder>) -> i32 {\n    b.inner.go()\n}\n'},
+     [('call', 'calls', 'A.go'), ('literal', 'calls', 'A.go'), ('boxed', 'calls', 'A.go')], [('call', 'calls', 'B.go'), ('literal', 'calls', 'B.go'), ('boxed', 'calls', 'B.go')],
+     source='The Rust Reference, expressions/field-expr.md r[expr.field.syntax]')
+case('rust', 'user-deref-field', 'the container operand is dereferenced through `Deref` as many times as needed to find the field',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::ops::Deref;\n\npub struct Inner {\n    pub x: i32,\n}\n\npub struct Other {\n    pub x: i32,\n}\n\npub struct Wrapper {\n    inner: Inner,\n}\n\nimpl Deref for Wrapper {\n    type Target = Inner;\n\n    fn deref(&self) -> &Inner {\n        &self.inner\n    }\n}\n\npub fn run(w: &Wrapper) -> i32 {\n    w.x\n}\n'},
+     [('run', 'reads', 'Inner.x')], [('run', 'reads', 'Other.x')],
+     source='The Rust Reference, expressions/field-expr.md r[expr.field.autoref-deref]')
+case('rust', 'parameter-called-hides-a-function', 'a call of a non-function value (a parameter, a local) is a call of that value, never of an outer function of its name',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn f(x: i32) -> i32 {\n    x\n}\n\npub fn apply(f: impl Fn(i32) -> i32) -> i32 {\n    f(1)\n}\n\npub fn run() -> i32 {\n    apply(|n| n + 1)\n}\n'},
+     [('run', 'calls', 'apply')], [('apply', 'calls', 'f'), ('apply', 'references', 'f')],
+     source='The Rust Reference, expressions/call-expr.md r[expr.call.trait]')
+case('rust', 'trait-method-by-type-path', '`Type::method(&x)` is the method of the trait impl for Type (`Foo::print(&f)`), not the same-named method of another type',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Pretty {\n    fn print(&self) -> i32;\n}\n\npub struct Foo;\n\npub struct Bar;\n\nimpl Pretty for Foo {\n    fn print(&self) -> i32 {\n        1\n    }\n}\n\nimpl Pretty for Bar {\n    fn print(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(f: &Foo) -> i32 {\n    Foo::print(f)\n}\n'},
+     [('run', 'calls', 'Foo.print')], [('run', 'calls', 'Bar.print')],
+     source='The Rust Reference, expressions/call-expr.md r[expr.call.desugar.fully-qualified]')
+case('rust', 'qualified-path-picks-the-trait', '`<Type as Trait>::f(x)` is the impl of that very trait, whatever other traits of Type have an `f`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Pretty {\n    fn print(&self) -> i32;\n}\n\npub trait Ugly {\n    fn print(&self) -> i32;\n}\n\npub struct Bar;\n\nimpl Pretty for Bar {\n    fn print(&self) -> i32 {\n        1\n    }\n}\n\nimpl Ugly for Bar {\n    fn print(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(b: &Bar) -> i32 {\n    <Bar as Pretty>::print(b)\n}\n'},
+     [('run', 'calls', 'src/lib.rs:Bar.print@12')], [('run', 'calls', 'src/lib.rs:Bar.print@18')],
+     source='The Rust Reference, expressions/call-expr.md r[expr.call.desugar.explicit-path]')
+case('rust', 'closure-annotated-parameter', "the type written after a closure parameter is the parameter's type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config;\n\nimpl Config {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        2\n    }\n}\n\npub fn run() -> i32 {\n    let f = |c: &Config| c.show();\n    f(&Config)\n}\n'},
+     [('run', 'calls', 'Config.show')], [('run', 'calls', 'Other.show')],
+     source='The Rust Reference, expressions/closure-expr.md r[expr.closure.param-type]')
+case('rust', 'closure-captures-a-local', "a closure's body sees the locals around it: a name it does not declare is the enclosing function's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config;\n\nimpl Config {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        2\n    }\n}\n\npub fn run() -> i32 {\n    let c = Config;\n    let f = || c.show();\n    f()\n}\n'},
+     [('run', 'calls', 'Config.show')], [('run', 'calls', 'Other.show')],
+     source='The Rust Reference, expressions/closure-expr.md r[expr.closure.captures]')
+case('rust', 'closure-result-type', "calling a local that holds a closure gives a value of the closure body's type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config;\n\nimpl Config {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        2\n    }\n}\n\npub fn run() -> i32 {\n    let make = || Config;\n    make().show()\n}\n'},
+     [('run', 'calls', 'Config.show')], [('run', 'calls', 'Other.show')],
+     source='The Rust Reference, expressions/closure-expr.md r[expr.closure.intro]')
+case('rust', 'constructor-as-a-value', 'a tuple struct, a unit struct and a tuple variant named as a value (`let c = Position;`) are uses of their type',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Position(pub i32, pub i32);\n\npub struct Gamma;\n\npub enum Version {\n    Triple(i32, i32),\n}\n\npub fn tuple_struct() -> Position {\n    let c = Position;\n    c(8, 6)\n}\n\npub fn unit() -> Gamma {\n    let a = Gamma;\n    a\n}\n\npub fn variant() -> Version {\n    let f = Version::Triple;\n    f(8, 6)\n}\n'},
+     [('tuple_struct', 'references', 'Position'), ('unit', 'references', 'Gamma'), ('variant', 'references', 'Version')], [],
+     source='The Rust Reference, expressions/struct-expr.md r[expr.struct.intro]')
+case('rust', 'struct-expression-labels-are-fields', "a field label (and the shorthand `Point { x, y: 0 }`) names the struct's field, never a function or variable of that name, whose value only the shorthand reads",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Point {\n    pub x: i32,\n    pub y: i32,\n}\n\npub fn x() -> i32 {\n    1\n}\n\npub fn y() -> i32 {\n    2\n}\n\npub fn labels() -> Point {\n    Point { x: 3, y: 4 }\n}\n\npub fn shorthand(x: i32) -> Point {\n    Point { x, y: 0 }\n}\n'},
+     [('labels', 'references', 'Point'), ('shorthand', 'references', 'Point')], [('labels', 'calls', 'src/lib.rs:x@6'), ('labels', 'calls', 'src/lib.rs:y@10'), ('labels', 'references', 'src/lib.rs:x@6'), ('shorthand', 'calls', 'src/lib.rs:x@6'), ('shorthand', 'references', 'src/lib.rs:x@6')],
+     source='The Rust Reference, expressions/struct-expr.md r[expr.struct.field.named]')
+case('rust', 'struct-update-base-is-an-expression', 'the base after `..` is an expression like any other',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Point {\n    pub x: i32,\n    pub y: i32,\n}\n\npub fn base() -> Point {\n    Point { x: 0, y: 0 }\n}\n\npub fn other() -> Point {\n    Point { x: 1, y: 1 }\n}\n\npub fn update() -> Point {\n    Point { y: 5, ..base() }\n}\n'},
+     [('update', 'calls', 'base')], [('update', 'calls', 'other')],
+     source='The Rust Reference, expressions/struct-expr.md r[expr.struct.update.intro]')
+case('rust', 'await-gives-the-output', "`x.await` is the output of the future: `load().await.show()` is a method of load's declared result",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config;\n\nimpl Config {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        2\n    }\n}\n\npub async fn load() -> Config {\n    Config\n}\n\npub async fn run() -> i32 {\n    let c = load().await;\n    c.show() + load().await.show()\n}\n'},
+     [('run', 'calls', 'load'), ('run', 'calls', 'Config.show')], [('run', 'calls', 'Other.show')],
+     source='The Rust Reference, expressions/await-expr.md r[expr.await.construct]')
+case('rust', 'tuple-expression-fields', 'the first operand of a tuple expression is field 0, so a local `(B, A)` has `.1` of type A and `let (x, _) = (B, A)` binds x to a B',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct A;\n\nimpl A {\n    pub fn go(&self) -> i32 {\n        1\n    }\n}\n\npub struct B;\n\nimpl B {\n    pub fn go(&self) -> i32 {\n        2\n    }\n}\n\npub fn literal() -> i32 {\n    let t = (B, A);\n    t.1.go()\n}\n\npub fn destructured() -> i32 {\n    let (x, _y) = (B, A);\n    x.go()\n}\n'},
+     [('literal', 'calls', 'A.go'), ('destructured', 'calls', 'B.go')], [('literal', 'calls', 'B.go'), ('destructured', 'calls', 'A.go')],
+     source='The Rust Reference, expressions/tuple-expr.md r[expr.tuple.fields]')
+case('rust', 'tuple-index-of-a-returned-tuple', "`pair().1.go()` and `p.0.go()` of a returned `(A, B)` are the methods of the part's type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct A;\n\nimpl A {\n    pub fn go(&self) -> i32 {\n        1\n    }\n}\n\npub struct B;\n\nimpl B {\n    pub fn go(&self) -> i32 {\n        2\n    }\n}\n\npub fn pair() -> (A, B) {\n    (A, B)\n}\n\npub fn first() -> i32 {\n    let p = pair();\n    p.0.go()\n}\n\npub fn second() -> i32 {\n    pair().1.go()\n}\n'},
+     [('first', 'calls', 'A.go'), ('second', 'calls', 'B.go')], [('first', 'calls', 'B.go'), ('second', 'calls', 'A.go')],
+     source='The Rust Reference, expressions/tuple-expr.md r[expr.tuple-index.result]')
+case('rust', 'array-list-element-type', "an array expression `[A, A]` has elements of the type of its operands, so `xs[0].go()` is A's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': '#[derive(Clone, Copy)]\npub struct A;\n\nimpl A {\n    pub fn go(&self) -> i32 {\n        1\n    }\n}\n\n#[derive(Clone, Copy)]\npub struct B;\n\nimpl B {\n    pub fn go(&self) -> i32 {\n        2\n    }\n}\n\npub fn list() -> i32 {\n    let xs = [A, A];\n    xs[0].go()\n}\n'},
+     [('list', 'calls', 'A.go')], [('list', 'calls', 'B.go')],
+     source='The Rust Reference, expressions/array-expr.md r[expr.array.array-behavior]')
+case('rust', 'array-repeat-element-type', '`[B; 3]` is an array of B',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': '#[derive(Clone, Copy)]\npub struct A;\n\nimpl A {\n    pub fn go(&self) -> i32 {\n        1\n    }\n}\n\n#[derive(Clone, Copy)]\npub struct B;\n\nimpl B {\n    pub fn go(&self) -> i32 {\n        2\n    }\n}\n\npub fn repeat() -> i32 {\n    let ys = [B; 3];\n    ys[1].go()\n}\n'},
+     [('repeat', 'calls', 'B.go')], [('repeat', 'calls', 'A.go')],
+     source='The Rust Reference, expressions/array-expr.md r[expr.array.repeat-behavior]')
+case('rust', 'array-length-and-repeat-operand-read-constants', 'the length operand and a constant repeat operand are paths to constant items, which the expression reads',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub const LEN: usize = 3;\n\npub const EMPTY: Vec<i32> = Vec::new();\n\npub mod m {\n    pub const LEN: usize = 4;\n\n    pub const EMPTY: Vec<i32> = Vec::new();\n}\n\npub fn run() -> usize {\n    let a: [u8; LEN] = [0; LEN];\n    let b = [EMPTY; 2];\n    a.len() + b.len()\n}\n'},
+     [('run', 'reads', 'src/lib.rs:LEN@1'), ('run', 'reads', 'src/lib.rs:EMPTY@3')], [('run', 'reads', 'src/lib.rs:LEN@8'), ('run', 'reads', 'src/lib.rs:EMPTY@10')],
+     source='The Rust Reference, expressions/array-expr.md r[expr.array.length-restriction]')
+case('rust', 'index-expression-calls-index', 'an index expression on another type is a call of its `Index::index`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::ops::Index;\n\npub struct Cell;\n\nimpl Cell {\n    pub fn val(&self) -> i32 {\n        1\n    }\n}\n\npub struct Item;\n\nimpl Item {\n    pub fn val(&self) -> i32 {\n        2\n    }\n}\n\npub struct Grid {\n    cells: Vec<Cell>,\n}\n\nimpl Index<usize> for Grid {\n    type Output = Cell;\n\n    fn index(&self, i: usize) -> &Cell {\n        &self.cells[i]\n    }\n}\n\npub struct Shelf {\n    items: Vec<Item>,\n}\n\nimpl Index<usize> for Shelf {\n    type Output = Item;\n\n    fn index(&self, i: usize) -> &Item {\n        &self.items[i]\n    }\n}\n\npub fn run(g: &Grid) -> &Cell {\n    &g[0]\n}\n'},
+     [('run', 'calls', 'Grid.index')], [('run', 'calls', 'Shelf.index')],
+     source='The Rust Reference, expressions/array-expr.md r[expr.array.index.trait]')
+case('rust', 'index-output-type', "the element of an indexed value is the impl's `type Output`: `g[0].val()` is the Output's method",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::ops::Index;\n\npub struct Cell;\n\nimpl Cell {\n    pub fn val(&self) -> i32 {\n        1\n    }\n}\n\npub struct Item;\n\nimpl Item {\n    pub fn val(&self) -> i32 {\n        2\n    }\n}\n\npub struct Grid {\n    cells: Vec<Cell>,\n}\n\nimpl Index<usize> for Grid {\n    type Output = Cell;\n\n    fn index(&self, i: usize) -> &Cell {\n        &self.cells[i]\n    }\n}\n\npub struct Shelf {\n    items: Vec<Item>,\n}\n\nimpl Index<usize> for Shelf {\n    type Output = Item;\n\n    fn index(&self, i: usize) -> &Item {\n        &self.items[i]\n    }\n}\n\npub fn run(g: &Grid) -> i32 {\n    g[0].val()\n}\n'},
+     [('run', 'calls', 'Cell.val')], [('run', 'calls', 'Item.val')],
+     source='The Rust Reference, expressions/array-expr.md r[expr.array.index.trait-impl]')
+case('rust', 'grouped-expression-is-its-operand', 'a parenthesized expression is its operand: `(a).go()`, `(helper)()` bind as without parentheses',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct A;\n\nimpl A {\n    pub fn go(&self) -> i32 {\n        1\n    }\n}\n\npub struct B;\n\nimpl B {\n    pub fn go(&self) -> i32 {\n        2\n    }\n}\n\npub fn helper() -> i32 {\n    3\n}\n\npub fn run() -> i32 {\n    let a = A;\n    (a).go() + (helper)() + ((A)).go()\n}\n'},
+     [('run', 'calls', 'A.go'), ('run', 'calls', 'helper')], [('run', 'calls', 'B.go')],
+     source='The Rust Reference, expressions/grouped-expr.md r[expr.paren.override-precedence]')
+case('rust', 'tuple-destructuring-assignment-writes', '`_` in a destructuring assignment names nothing, and the other names are the existing places assigned: `(_, TOTAL) = p` writes TOTAL',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub static mut TOTAL: i32 = 0;\n\npub static mut OTHER: i32 = 0;\n\npub fn run(p: (i32, i32)) {\n    unsafe {\n        (_, TOTAL) = p;\n    }\n}\n'},
+     [('run', 'writes', 'TOTAL')], [('run', 'reads', 'TOTAL'), ('run', 'writes', 'OTHER')],
+     source='The Rust Reference, expressions/underscore-expr.md r[expr.placeholder.lhs-assignment-only]')
+case('rust', 'borrow-and-dereference-keep-the-type', "`&x` is a reference to x's type: a method on `r = &c` is c's type's",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Config;\n\nimpl Config {\n    pub fn show(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn show(&self) -> i32 {\n        2\n    }\n}\n\npub fn borrowed() -> i32 {\n    let c = Config;\n    let r = &c;\n    r.show()\n}\n\npub fn dereferenced(r: &Config) -> i32 {\n    (*r).show()\n}\n\npub fn boxed() -> i32 {\n    let b = Box::new(Config);\n    (*b).show()\n}\n'},
+     [('borrowed', 'calls', 'Config.show'), ('dereferenced', 'calls', 'Config.show'), ('boxed', 'calls', 'Config.show')], [('borrowed', 'calls', 'Other.show'), ('dereferenced', 'calls', 'Other.show'), ('boxed', 'calls', 'Other.show')],
+     source='The Rust Reference, expressions/operator-expr.md r[expr.operator.borrow.result]')
+case('rust', 'explicit-deref-calls-deref', "on non-pointer types `*x` is `*Deref::deref(&x)`: a call of the type's `deref`",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::ops::Deref;\n\npub struct Inner;\n\nimpl Inner {\n    pub fn get(&self) -> i32 {\n        1\n    }\n}\n\npub struct Wrapper {\n    inner: Inner,\n}\n\nimpl Deref for Wrapper {\n    type Target = Inner;\n\n    fn deref(&self) -> &Inner {\n        &self.inner\n    }\n}\n\npub struct Boxed {\n    inner: Inner,\n}\n\nimpl Deref for Boxed {\n    type Target = Inner;\n\n    fn deref(&self) -> &Inner {\n        &self.inner\n    }\n}\n\npub fn run(w: &Wrapper) -> &Inner {\n    &**w\n}\n'},
+     [('run', 'calls', 'Wrapper.deref')], [('run', 'calls', 'Boxed.deref')],
+     source='The Rust Reference, expressions/operator-expr.md r[expr.deref.traits]')
+case('rust', 'try-converts-with-from', "`Err(e)` returns `Err(From::from(e))`: `?` calls the `From` impl of the function's error type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct ParseError;\n\npub struct AppError;\n\npub struct OtherError;\n\nimpl From<ParseError> for AppError {\n    fn from(_e: ParseError) -> AppError {\n        AppError\n    }\n}\n\nimpl From<ParseError> for OtherError {\n    fn from(_e: ParseError) -> OtherError {\n        OtherError\n    }\n}\n\npub fn parse() -> Result<i32, ParseError> {\n    Err(ParseError)\n}\n\npub fn run() -> Result<i32, AppError> {\n    let n = parse()?;\n    Ok(n)\n}\n'},
+     [('run', 'calls', 'AppError.from')], [('run', 'calls', 'OtherError.from')],
+     source='The Rust Reference, expressions/operator-expr.md r[expr.try.restricted-types]')
+case('rust', 'unary-operator-calls-the-trait-impl', 'unary `-` and `!` on a project type are calls of its `Neg::neg` / `Not::not`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::ops::{Neg, Not};\n\npub struct V(pub i32);\n\npub struct W(pub i32);\n\nimpl Neg for V {\n    type Output = V;\n\n    fn neg(self) -> V {\n        V(-self.0)\n    }\n}\n\nimpl Neg for W {\n    type Output = W;\n\n    fn neg(self) -> W {\n        W(-self.0)\n    }\n}\n\nimpl Not for V {\n    type Output = V;\n\n    fn not(self) -> V {\n        V(!self.0)\n    }\n}\n\nimpl Not for W {\n    type Output = W;\n\n    fn not(self) -> W {\n        W(!self.0)\n    }\n}\n\npub fn flip(a: V) -> V {\n    -a\n}\n\npub fn invert(a: V) -> V {\n    !a\n}\n'},
+     [('flip', 'calls', 'V.neg'), ('invert', 'calls', 'V.not')], [('flip', 'calls', 'W.neg'), ('invert', 'calls', 'W.not')],
+     source='The Rust Reference, expressions/operator-expr.md r[expr.negate.results]')
+case('rust', 'binary-operator-calls-the-trait-impl', "`a + b` of a project type is a call of `Add::add` of a's type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::ops::Add;\n\npub struct V(pub i32);\n\npub struct W(pub i32);\n\nimpl Add for V {\n    type Output = V;\n\n    fn add(self, o: V) -> V {\n        V(self.0 + o.0)\n    }\n}\n\nimpl Add for W {\n    type Output = W;\n\n    fn add(self, o: W) -> W {\n        W(self.0 + o.0)\n    }\n}\n\npub fn sum(a: V, b: V) -> V {\n    a + b\n}\n'},
+     [('sum', 'calls', 'V.add')], [('sum', 'calls', 'W.add')],
+     source='The Rust Reference, expressions/operator-expr.md r[expr.arith-logic.behavior]')
+case('rust', 'comparison-calls-eq', '`a == b` of a project type is a call of its `PartialEq::eq`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct V(pub i32);\n\npub struct W(pub i32);\n\nimpl PartialEq for V {\n    fn eq(&self, o: &V) -> bool {\n        self.0 == o.0\n    }\n}\n\nimpl PartialEq for W {\n    fn eq(&self, o: &W) -> bool {\n        self.0 == o.0\n    }\n}\n\npub fn same(a: &V, b: &V) -> bool {\n    a == b\n}\n'},
+     [('same', 'calls', 'V.eq')], [('same', 'calls', 'W.eq')],
+     source='The Rust Reference, expressions/operator-expr.md r[expr.cmp.behavior]')
+case('rust', 'cast-type-is-in-the-type-namespace', 'the type after `as` is in the type namespace: `x as Meters` is the alias, not a function `Meters`',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub type Meters = u64;\n\n#[allow(non_snake_case)]\npub fn Meters(n: u64) -> u64 {\n    n\n}\n\npub fn run(x: i32) -> u64 {\n    x as Meters\n}\n'},
+     [('run', 'references', 'src/lib.rs:Meters@1')], [('run', 'references', 'src/lib.rs:Meters@4'), ('run', 'calls', 'src/lib.rs:Meters@4')],
+     source='The Rust Reference, expressions/operator-expr.md r[expr.as.intro]')
+case('rust', 'field-assignment-writes-the-field', 'the assignee operand `c.n` is a place: `c.n = 1` and `c.items[0] = 1` write the field, `c.n` read reads it',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Counter {\n    pub n: i32,\n    pub items: Vec<i32>,\n}\n\npub struct Other {\n    pub n: i32,\n    pub items: Vec<i32>,\n}\n\npub fn set(c: &mut Counter) {\n    c.n = 1;\n}\n\npub fn add(c: &mut Counter) {\n    c.n += 1;\n}\n\npub fn put(c: &mut Counter) {\n    c.items[0] = 1;\n}\n\npub fn get(c: &Counter) -> i32 {\n    c.n\n}\n'},
+     [('set', 'writes', 'Counter.n'), ('add', 'writes', 'Counter.n'), ('put', 'writes', 'Counter.items'), ('get', 'reads', 'Counter.n')], [('set', 'writes', 'Other.n'), ('add', 'writes', 'Other.n'), ('put', 'writes', 'Other.items'), ('get', 'reads', 'Other.n')],
+     source='The Rust Reference, expressions/operator-expr.md r[expr.assign.assignee]')
+case('rust', 'struct-destructuring-assignment-writes', 'a struct pattern as the assignee names its type; its field labels are fields and the values are existing places: `Position { x: LAST, y: _ } = p` writes LAST',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Position {\n    pub x: u32,\n    pub y: u32,\n}\n\n#[allow(non_upper_case_globals)]\npub static mut x: u32 = 0;\n\npub static mut LAST: u32 = 0;\n\npub fn run(p: Position) {\n    unsafe {\n        Position { x: LAST, y: _ } = p;\n    }\n}\n'},
+     [('run', 'writes', 'LAST')], [('run', 'reads', 'LAST'), ('run', 'writes', 'src/lib.rs:x@7'), ('run', 'reads', 'src/lib.rs:x@7')],
+     source='The Rust Reference, expressions/operator-expr.md r[expr.assign.destructure.assignee]')
+case('rust', 'compound-assignment-calls-the-trait-impl', "`x += y` of a project type is a call of `AddAssign::add_assign` of x's type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'use std::ops::AddAssign;\n\npub struct V(pub i32);\n\npub struct W(pub i32);\n\nimpl AddAssign for V {\n    fn add_assign(&mut self, o: V) {\n        self.0 += o.0;\n    }\n}\n\nimpl AddAssign for W {\n    fn add_assign(&mut self, o: W) {\n        self.0 += o.0;\n    }\n}\n\npub fn grow(a: &mut V, b: V) {\n    *a += b;\n}\n'},
+     [('grow', 'calls', 'V.add_assign')], [('grow', 'calls', 'W.add_assign')],
+     source='The Rust Reference, expressions/operator-expr.md r[expr.compound-assign.trait]')
+case('rust', 'method-trait-in-scope', "a method call finds a trait's method only when that trait is in scope: `use a::Run;` makes `s.go()` Run's, never b::Walk's of the same name",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod a {\n    pub trait Run {\n        fn go(&self) -> i32;\n    }\n    impl Run for crate::S {\n        fn go(&self) -> i32 {\n            1\n        }\n    }\n}\n\npub mod b {\n    pub trait Walk {\n        fn go(&self) -> i32;\n    }\n    impl Walk for crate::S {\n        fn go(&self) -> i32 {\n            2\n        }\n    }\n}\n\npub struct S;\n\npub fn use_run(s: &S) -> i32 {\n    use crate::a::Run;\n    s.go()\n}\n'},
+     [('use_run', 'calls', 'a.Run.go')], [('use_run', 'calls', 'b.Walk.go')],
+     source='reference expressions/method-call-expr.md r[expr.method.candidate-search]; rustc_hir_typeck/src/method/probe.rs assemble_extension_candidates_for_traits_in_scope')
+case('rust', 'call-trait-path-method', "`Show::show(c)` is a call of the trait's method `Show.show`, not of `Dog.show`, another type's impl",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub trait Show {\n    fn show(&self) -> i32;\n}\n\npub struct Cat;\npub struct Dog;\n\nimpl Show for Cat {\n    fn show(&self) -> i32 {\n        1\n    }\n}\n\nimpl Show for Dog {\n    fn show(&self) -> i32 {\n        2\n    }\n}\n\npub fn call(c: &Cat) -> i32 {\n    Show::show(c)\n}\n'},
+     [('call', 'calls', 'Show.show')], [('call', 'calls', 'Dog.show')],
+     source='reference expressions/call-expr.md r[expr.call.desugar.fully-qualified]')
+case('rust', 'turbofish-argument-names-a-type', 'a type written as a generic argument of an expression path (`make::<Widget>()`) is a use of that type',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Widget {\n    pub n: i32,\n}\n\nimpl Widget {\n    pub fn show(&self) -> i32 {\n        self.n\n    }\n}\n\npub struct Gadget {\n    pub n: i32,\n}\n\nimpl Gadget {\n    pub fn show(&self) -> i32 {\n        self.n\n    }\n}\n\npub fn make<T: Default>() -> T {\n    T::default()\n}\n\nimpl Default for Widget {\n    fn default() -> Widget {\n        Widget { n: 0 }\n    }\n}\n\nimpl Default for Gadget {\n    fn default() -> Gadget {\n        Gadget { n: 1 }\n    }\n}\n\npub fn run() -> i32 {\n    make::<Widget>().show()\n}\n'},
+     [('run', 'references', 'Widget'), ('run', 'calls', 'make')], [('run', 'references', 'Gadget'), ('run', 'calls', 'Gadget.show')],
+     source='reference expressions/path-expr.md, r[expr.path.syntax] (generic args of a PathInExpression)')
+case('rust', 'item-before-its-declaration-in-a-block', 'an item of a block is in scope in the whole block, also before its declaration; a `let` only after its statement',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn helper() -> i32 {\n    1\n}\n\npub fn outer() -> i32 {\n    let x = helper();\n    fn helper() -> i32 {\n        2\n    }\n    x + helper()\n}\n'},
+     [('outer', 'calls', 'outer.helper')], [('outer', 'calls', 'src/lib.rs:helper')],
+     source='reference expressions/block-expr.md r[expr.block.namespace]; names/scopes.md r[names.scopes.items.statement]')
+case('rust', 'inner-block-item-is-local', 'an item declared in an inner block is no name outside that block',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn helper() -> i32 {\n    1\n}\n\npub fn outer() -> i32 {\n    let a = {\n        fn helper() -> i32 {\n            2\n        }\n        helper()\n    };\n    a + helper()\n}\n'},
+     [('outer', 'calls', 'outer.helper'), ('outer', 'calls', 'src/lib.rs:helper')], [],
+     source='reference expressions/block-expr.md r[expr.block.namespace]')
+case('rust', 'block-value-local', "a local assigned a block takes the type of the block's final operand",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run() -> i32 {\n    let r = {\n        let t = Repo::new();\n        t\n    };\n    r.find()\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference expressions/block-expr.md r[expr.block.value-trailing-expr]')
+case('rust', 'while-let-binding-scope', 'a `while let` binding is a name of the loop body only: it hides a function of its name there, not after the loop',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn size() -> usize {\n    1\n}\n\npub fn inside(mut v: Vec<usize>) -> usize {\n    let mut n = 0;\n    while let Some(size) = v.pop() {\n        n += size;\n    }\n    n\n}\n\npub fn after(mut v: Vec<usize>) -> usize {\n    while let Some(size) = v.pop() {\n        let _ = size;\n    }\n    size()\n}\n'},
+     [('after', 'calls', 'size')], [('inside', 'calls', 'size'), ('inside', 'references', 'size')],
+     source='reference expressions/loop-expr.md r[expr.loop.while.let.intro], r[expr.loop.while.let.desugar]')
+case('rust', 'while-let-binding-type', "a `while let` binding is typed by the pattern over the scrutinee's type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(mut repos: Vec<Repo>) -> i32 {\n    let mut n = 0;\n    while let Some(r) = repos.pop() {\n        n += r.find();\n    }\n    n\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference expressions/loop-expr.md r[expr.loop.while.let.intro]')
+case('rust', 'for-binding-scope', 'a `for` binding is a name of the body only: it hides a function of its name there, not after the loop',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn item() -> u8 {\n    1\n}\n\npub fn run(xs: Vec<u8>) -> u8 {\n    for item in xs {\n        let _ = item;\n    }\n    item()\n}\n\npub fn hidden(xs: Vec<u8>) -> u8 {\n    let mut n = 0;\n    for item in xs {\n        n += item;\n    }\n    n\n}\n'},
+     [('run', 'calls', 'item')], [('hidden', 'calls', 'item'), ('hidden', 'references', 'item')],
+     source='reference expressions/loop-expr.md r[expr.loop.for.condition]')
+case('rust', 'for-pattern-binding', 'a pattern of a `for` binds the parts of each item, typed by the item',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(xs: Vec<(Other, Repo)>) -> i32 {\n    let mut n = 0;\n    for (_o, r) in xs {\n        n += r.find();\n    }\n    n\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference expressions/loop-expr.md r[expr.loop.for.condition]; patterns.md r[patterns.for]')
+case('rust', 'if-let-else-block-has-no-binding', 'the bindings of an `if let` are not names of its `else` block: a function of the name is the one called there',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn size() -> usize {\n    1\n}\n\npub fn run(o: Option<usize>) -> usize {\n    if let Some(size) = o {\n        size\n    } else {\n        size()\n    }\n}\n'},
+     [('run', 'calls', 'size')], [],
+     source='reference expressions/if-expr.md r[expr.if.let.intro]; patterns.md r[patterns.ident.scope]')
+case('rust', 'if-let-chain-binding', 'a binding of a `let` in a condition chain is a name of the operands after it and of the block',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2024"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(a: Option<Repo>, b: Option<Other>) -> i32 {\n    if let Some(r) = a\n        && r.find() > 0\n        && let Some(o) = b\n    {\n        return r.find() + o.find();\n    }\n    0\n}\n'},
+     [('run', 'calls', 'Repo.find'), ('run', 'calls', 'Other.find')], [],
+     source='reference expressions/if-expr.md r[expr.if.chains.bindings]', since='2024')
+case('rust', 'default-binding-mode-type', 'matching a reference with a non-reference pattern binds references to the parts: typed by the part',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(o: &Option<Repo>) -> i32 {\n    if let Some(r) = o {\n        return r.find();\n    }\n    0\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference patterns.md r[patterns.ident.binding.intro]')
+case('rust', 'or-pattern-binding-type', 'a name bound in every alternative of an or-pattern is a name of the arm, typed by the alternatives',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub enum E {\n    X(Repo),\n    Y(Repo),\n    Z(Other),\n}\n\npub fn run(e: E) -> i32 {\n    match e {\n        E::X(n) | E::Y(n) => n.find(),\n        E::Z(o) => o.find(),\n    }\n}\n'},
+     [('run', 'calls', 'Repo.find'), ('run', 'calls', 'Other.find')], [],
+     source='reference expressions/match-expr.md r[expr.match.or-pattern], r[expr.match.or-patterns-restriction]')
+case('rust', 'match-guard-sees-the-arm-binding', "a guard is in the scope of the arm's bindings: a name in it is the binding, before a function of its name",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn r() -> Repo {\n    Repo\n}\n\npub fn run(o: Option<Other>) -> i32 {\n    match o {\n        Some(r) if r.find() > 0 => r.find(),\n        _ => 0,\n    }\n}\n'},
+     [('run', 'calls', 'Other.find')], [('run', 'calls', 'Repo.find'), ('run', 'calls', 'r'), ('run', 'references', 'r')],
+     source='reference expressions/match-expr.md r[expr.match.guard.bound-variables]')
+case('rust', 'parameter-pattern-binding', "a pattern in a parameter binds names of the body, typed by the parameter's type",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run((_o, r): (Other, Repo)) -> i32 {\n    r.find()\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference patterns.md r[patterns.param]')
+case('rust', 'ident-pattern-at-subpattern', '`name @ pattern` binds name as the matched value',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(r: Repo) -> i32 {\n    match r {\n        whole @ Repo => whole.find(),\n    }\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference patterns.md r[patterns.ident.scrutinized]')
+case('rust', 'ref-binding-type', 'a `ref` binding is a reference to the matched value: typed by it',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(o: Option<Repo>) -> i32 {\n    match o {\n        Some(ref r) => r.find(),\n        None => 0,\n    }\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference patterns.md r[patterns.ident.ref]')
+case('rust', 'const-pattern-is-a-path', 'a single identifier in a pattern is the constant, struct or variant of that name when one is in scope, never a new binding',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub const LIMIT: u8 = 42;\n\npub mod m {\n    pub const LIMIT: u8 = 7;\n}\n\npub fn check(x: u8) -> u8 {\n    match x {\n        LIMIT => 1,\n        _ => 0,\n    }\n}\n'},
+     [('check', 'reads', 'src/lib.rs:LIMIT')], [('check', 'reads', 'm.LIMIT')],
+     source='reference patterns.md r[patterns.ident.precedent], r[patterns.path.unqualified]')
+case('rust', 'associated-const-pattern', 'an associated constant written as a path pattern is a use of that constant of that type',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct A;\n\nimpl A {\n    pub const MAX: u8 = 1;\n}\n\npub struct B;\n\nimpl B {\n    pub const MAX: u8 = 2;\n}\n\npub fn check(x: u8) -> u8 {\n    match x {\n        A::MAX => 1,\n        _ => 0,\n    }\n}\n'},
+     [('check', 'reads', 'A.MAX')], [('check', 'reads', 'B.MAX')],
+     source='reference patterns.md r[patterns.path.unqualified]')
+case('rust', 'struct-pattern-shorthand-binding', "a shorthand field of a struct pattern binds a local of the field's name, typed by the field",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub struct Cfg {\n    pub repo: Repo,\n    pub other: Other,\n}\n\npub fn repo() -> Other {\n    Other\n}\n\npub fn run(c: Cfg) -> i32 {\n    let Cfg { repo, .. } = c;\n    repo.find()\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference patterns.md r[patterns.struct.binding-shorthand]')
+case('rust', 'struct-pattern-renamed-field', '`field: name` in a struct pattern binds name typed by that field, not by a field of another name',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub struct Cfg {\n    pub a: Repo,\n    pub b: Other,\n}\n\npub fn run(c: Cfg) -> i32 {\n    let Cfg { a: x, b: _ } = c;\n    x.find()\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference patterns.md r[patterns.destructure.named-field-shorthand], r[patterns.struct.ignore-rest]')
+case('rust', 'tuple-struct-pattern-binding', 'a binding in a tuple struct pattern is typed by the field at its position',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub struct Pair(pub Other, pub Repo);\n\npub fn run(p: Pair) -> i32 {\n    let Pair(_, r) = p;\n    r.find()\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference patterns.md r[patterns.tuple-struct.intro]')
+case('rust', 'tuple-pattern-binding', 'a binding in a tuple pattern is typed by the element at its position',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(p: (Other, Repo)) -> i32 {\n    let (_, r) = p;\n    r.find()\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='reference patterns.md r[patterns.tuple.intro]')
+case('rust', 'range-pattern-bound-is-a-constant', 'a path written as a bound of a range pattern is a read of the constant it names',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub mod m;\n\npub const LOW: u8 = 1;\npub const HIGH: u8 = 9;\n\npub fn classify(x: u8) -> bool {\n    match x {\n        LOW..=HIGH => true,\n        _ => false,\n    }\n}\n', 'src/m.rs': 'pub const LOW: u8 = 100;\npub const HIGH: u8 = 200;\n'},
+     [('classify', 'reads', 'src/lib.rs:LOW'), ('classify', 'reads', 'src/lib.rs:HIGH')], [('classify', 'reads', 'src/m.rs:LOW'), ('classify', 'reads', 'src/m.rs:HIGH')],
+     source='The Rust Reference, Patterns (r[patterns.range.bound], r[patterns.range.constraint-bound-path], r[patterns.range.path-value])')
+case('rust', 'tuple-index-field-pattern', '`Pair { 0: first, .. }` binds first as the type of field 0',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub struct Pair(pub Repo, pub Other);\n\npub fn run(p: Pair) -> i32 {\n    let Pair { 0: first, .. } = p;\n    first.find()\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='The Rust Reference, Patterns (r[patterns.struct.ignore-rest], r[patterns.struct.syntax])')
+case('rust', 'slice-pattern-element', '`[first, ..]` over `&[T]` binds first as a T',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\n\nimpl Repo {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(xs: &[Repo]) -> i32 {\n    match xs {\n        [first, ..] => first.find(),\n        [] => 0,\n    }\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='The Rust Reference, Patterns (r[patterns.slice.intro], r[patterns.slice.refutable-slice])')
+case('rust', 'reference-pattern-binding', '`let &inner = r;` with `r: &Repo` binds inner as a Repo',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': '#[derive(Clone, Copy)]\npub struct Repo;\n\nimpl Repo {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(r: &Repo) -> i32 {\n    let &inner = r;\n    inner.find()\n}\n'},
+     [('run', 'calls', 'Repo.find')], [('run', 'calls', 'Other.find')],
+     source='The Rust Reference, Patterns (r[patterns.ref.intro], r[patterns.ref.mut])')
+case('rust', 'while-let-chain-binding', 'a binding of a `let` in a `while` condition chain is a name of the operands after it and of the loop body, typed by the pattern',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2024"\n', 'src/lib.rs': 'pub struct Repo;\nimpl Repo { pub fn new() -> Repo { Repo } pub fn find(&self) -> i32 { 1 } }\npub struct Other;\nimpl Other { pub fn find(&self) -> i32 { 2 } }\n\npub fn run(mut a: Vec<Option<Repo>>, b: Option<Other>) -> i32 {\n    while let Some(Some(r)) = a.pop()\n        && r.find() > 0\n        && let Some(o) = &b\n    {\n        return r.find() + o.find();\n    }\n    0\n}\n'},
+     [('run', 'calls', 'Repo.find'), ('run', 'calls', 'Other.find')], [],
+     source='reference expressions/loop-expr.md r[expr.loop.while.chains.intro]; expressions/if-expr.md r[expr.if.chains.bindings]', since='2024')
+case('rust', 'nested-struct-pattern-binding-type', 'a name bound in a struct pattern nested in a struct pattern is typed by the field it sits at',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\nimpl Repo { pub fn new() -> Repo { Repo } pub fn find(&self) -> i32 { 1 } }\npub struct Other;\nimpl Other { pub fn find(&self) -> i32 { 2 } }\n\npub struct Inner {\n    pub item: Repo,\n}\npub struct Outer {\n    pub inner: Inner,\n    pub extra: Other,\n}\n\npub fn run(o: Outer) -> i32 {\n    let Outer { inner: Inner { item }, extra } = o;\n    item.find() + extra.find()\n}\n'},
+     [('run', 'calls', 'Repo.find'), ('run', 'calls', 'Other.find')], [],
+     source='reference patterns.md r[patterns.struct.intro], r[patterns.struct.binding-shorthand], r[patterns.destructure.intro]')
+case('rust', 'match-on-a-tuple-expression', 'names of a tuple pattern matched against a tuple expression of locals are typed by the operand at their position',
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub struct Repo;\nimpl Repo { pub fn new() -> Repo { Repo } pub fn find(&self) -> i32 { 1 } }\npub struct Other;\nimpl Other { pub fn find(&self) -> i32 { 2 } }\n\npub fn run(r: Repo, o: Other) -> i32 {\n    match (r, o) {\n        (x, y) => x.find() + y.find(),\n    }\n}\n'},
+     [('run', 'calls', 'Repo.find'), ('run', 'calls', 'Other.find')], [],
+     source='reference expressions/match-expr.md r[expr.match.pattern-vars]; patterns.md r[patterns.tuple.intro]')
+case('rust', 'macro-argument-sees-invocation-site', "a function named in a macro's arguments is looked up at the invocation site: the nested `helper` beats the top-level one",
+     RS, {'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n', 'src/lib.rs': 'pub fn helper() -> i32 {\n    1\n}\n\npub fn outer() -> i32 {\n    fn helper() -> i32 {\n        2\n    }\n    let v = vec![helper()];\n    assert_eq!(helper(), 2);\n    v[0]\n}\n'},
+     [('outer', 'calls', 'outer.helper')], [('outer', 'calls', 'src/lib.rs:helper')],
+     source="reference macros-by-example.md r[macro.decl.hygiene.intro]; rustc_resolve macros.rs (invocation args are ordinary AST resolved in the invocation's parent scope)")
+
 
 def run_case(c: dict[str, Any]) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as tmp:

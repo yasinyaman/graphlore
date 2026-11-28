@@ -208,6 +208,18 @@ def binder(lang: str, tmp: Path) -> list[str] | None:
     return None
 
 
+def _rust_impl_trait(c: dict[str, Any], file: str, line: int) -> str | None:
+    """The trait of the `impl Trait for X` block around line `line` of a
+    case's file (its last segment), or None."""
+    import re
+    lines = str(c["files"].get(file, "")).splitlines()
+    for text in reversed(lines[:max(line - 1, 0)]):
+        if re.match(r"\s*(pub\s+)?impl\b", text):
+            m = re.match(r"\s*(?:unsafe\s+)?impl\s*(?:<[^>]*>)?\s*([\w:]+)(?:<[^>]*>)?\s+for\b", text)
+            return m.group(1).split("::")[-1] if m else None
+    return None
+
+
 def _write(c: dict[str, Any], root: Path) -> None:
     for rel, src in c["files"].items():
         path = root / rel
@@ -237,7 +249,15 @@ def binding(c: dict[str, Any], tool: Path | list[str]) -> dict[str, Any]:
                        capture_output=True, text=True)
         if not out.exists():
             return {"id": c["id"], "wrong": [], "unjudged": [], "error": "the engine built no graph"}
-        nodes = json.loads(out.read_text(encoding="utf-8"))["nodes"]
+        built = json.loads(out.read_text(encoding="utf-8"))
+        nodes = built["nodes"]
+        # (a trait's method and each method written for it: rust-analyzer names
+        # the impl's function a call runs, the graph the trait's it calls)
+        by_id = {n["id"]: n for n in nodes}
+        dispatched: dict[int, list[dict[str, Any]]] = {}
+        for e in built.get("links", built.get("edges", [])):
+            if e.get("relation") == "dispatches_to" and e.get("source") in by_id and e.get("target") in by_id:
+                dispatched.setdefault(id(by_id[e["source"]]), []).append(by_id[e["target"]])
         cmd = [str(tool / "dump")] if isinstance(tool, Path) else tool
         done = subprocess.run([*cmd, str(root)], capture_output=True, text=True,
                               env={**os.environ, "GOFLAGS": "-mod=mod", "GOPROXY": "off",
@@ -276,13 +296,23 @@ def binding(c: dict[str, Any], tool: Path | list[str]) -> dict[str, Any]:
 
     def bound(src: str, dst: str) -> bool | None:
         srcs = {id(n) for n in nodes if conformance._matches(n, src) and n.get("type") != "external"}
-        dsts = [_span(n) for n in nodes if conformance._matches(n, dst) and n.get("type") != "external"]
+        wanted = [n for n in nodes if conformance._matches(n, dst) and n.get("type") != "external"]
+        dsts = [_span(n) for n in wanted]
+        impls = [_span(m) for n in wanted for m in dispatched.get(id(n), [])]
         if not srcs or not dsts or not all(d[1] for d in dsts):
             return None
         names = {d[4] for d in dsts}
         seen = [(u, h) for u, h in zip(uses, homes, strict=True) if h in srcs and u["expr"] in names]
         if any((u["to_file"], u["to_line"]) == (df, dl) and u["expr"] == dn
-               for u, _ in seen for df, dl, _, _, dn in dsts):
+               for u, _ in seen for df, dl, _, _, dn in dsts + impls):
+            return True
+        # (Rust: rust-analyzer names the function of the `impl Trait for X`
+        # block a trait's method call runs, also where the graph has no
+        # dispatch to it, an impl for a library's type: `impl Show for i32`)
+        traits = {str(n.get("qualname") or "").split(".")[-2] for n in wanted
+                  if c["lang"] == "rust" and str(n.get("qualname") or "").count(".")}
+        if traits and any(u["expr"] in names and _rust_impl_trait(c, u["to_file"], u["to_line"]) in traits
+                          for u, _ in seen):
             return True
         # (the compiler wrote nothing of the name there: no answer, as for
         # Roslyn's `: base(…)`, which its dump does not list)

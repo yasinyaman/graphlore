@@ -1,6 +1,6 @@
 {
- "passed": 1171,
- "total": 1287,
+ "passed": 1271,
+ "total": 1495,
  "cases": [
   {
    "id": "python/module-function",
@@ -8669,6 +8669,2061 @@
   },
   {
    "id": "rust/blanket-impl-is-no-method-of-a-library-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/item-before-its-declaration",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/module-shadows-the-prelude",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "other.std_box",
+     "calls",
+     "Box.new"
+    ],
+    [
+     "other.std_box",
+     "references",
+     "Box"
+    ]
+   ]
+  },
+  {
+   "id": "rust/module-shadows-the-extern-prelude",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/binding-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/local-declared-after-the-item",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/generic-fn-item-shadows-param",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "run.Item.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/use-imports-every-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/use-in-an-inner-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/glob-same-item-twice",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/glob-in-a-block-beats-an-outer-use",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "glob.amb"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "calls",
+     "outer.amb"
+    ]
+   ]
+  },
+  {
+   "id": "rust/edition-2015-global-path",
+   "ok": false,
+   "missing": [
+    [
+     "b.run",
+     "calls",
+     "src/lib.rs:foo"
+    ]
+   ],
+   "unwanted": [
+    [
+     "b.run",
+     "calls",
+     "b.foo"
+    ]
+   ]
+  },
+  {
+   "id": "rust/self-path-in-a-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/super-twice",
+   "ok": false,
+   "missing": [
+    [
+     "a.b.c.run",
+     "calls",
+     "a.foo"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/turbofish-type-path",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/qualified-trait-path",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:S.f@14"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/glob-skips-private",
+   "ok": false,
+   "missing": [
+    [
+     "make",
+     "references",
+     "b.Thing"
+    ]
+   ],
+   "unwanted": [
+    [
+     "make",
+     "references",
+     "a.Thing"
+    ]
+   ]
+  },
+  {
+   "id": "rust/raw-identifier",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:foo"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/pattern-constant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/named-struct-has-no-constructor",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:Shape@6"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:Shape@1"
+    ]
+   ]
+  },
+  {
+   "id": "rust/const-generic-parameter-hides-a-constant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/captured-local-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/associated-const-is-not-scoped",
+   "ok": false,
+   "missing": [
+    [
+     "S.own",
+     "reads",
+     "src/lib.rs:LIMIT@6"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/glob-import-of-an-enums-variants",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/variant-through-a-type-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/extern-crate-self-alias",
+   "ok": false,
+   "missing": [
+    [
+     "g",
+     "calls",
+     "src/lib.rs:f"
+    ]
+   ],
+   "unwanted": [
+    [
+     "g",
+     "calls",
+     "m.f"
+    ]
+   ]
+  },
+  {
+   "id": "rust/super-from-a-module-in-a-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-pattern-shorthand-binds-a-local",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "take",
+     "calls",
+     "src/lib.rs:helper@5"
+    ]
+   ]
+  },
+  {
+   "id": "rust/rust-nested-file-module-is-in-the-parents-directory",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-path-attribute-names-the-module-file",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/other.rs:f"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "calls",
+     "src/c.rs:f"
+    ]
+   ]
+  },
+  {
+   "id": "rust/rust-path-attribute-in-an-inline-module",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/inline/other.rs:f"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-nested-use-groups",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-use-alias-of-a-module",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-glob-skips-private-names",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "b.helper"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "calls",
+     "a.helper"
+    ]
+   ]
+  },
+  {
+   "id": "rust/rust-glob-import-shadows-the-prelude",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-glob-of-a-glob-re-export",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-2015-use-paths-start-at-the-crate-root",
+   "ok": false,
+   "missing": [
+    [
+     "bar.run",
+     "calls",
+     "src/lib.rs:foo.f"
+    ]
+   ],
+   "unwanted": [
+    [
+     "bar.run",
+     "calls",
+     "src/lib.rs:bar.foo.f"
+    ]
+   ]
+  },
+  {
+   "id": "rust/rust-glob-of-an-enum-binds-its-variants",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "references",
+     "Example"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-block-use-shadows-a-module-item",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-self-import-is-the-type-namespace",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:foo"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:bar.foo"
+    ]
+   ]
+  },
+  {
+   "id": "rust/rust-use-as-underscore-brings-a-traits-methods",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "foo.Zoo.zoo"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-use-crate-as-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-use-super-as-alias",
+   "ok": false,
+   "missing": [
+    [
+     "m.n.run",
+     "calls",
+     "m.f"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-extern-crate-self-as",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-cfg-removes-the-disabled-item",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:pick@7"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:pick@2"
+    ]
+   ]
+  },
+  {
+   "id": "rust/rust-cfg-attr-path-selects-the-module-file",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/first.rs:f"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-glob-import-filters-by-visibility",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:secret"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "calls",
+     "a.secret"
+    ]
+   ]
+  },
+  {
+   "id": "rust/rust-underscore-import-defines-no-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-2015-glob-import-is-crate-relative",
+   "ok": false,
+   "missing": [
+    [
+     "bar.run",
+     "calls",
+     "src/lib.rs:foo.f"
+    ]
+   ],
+   "unwanted": [
+    [
+     "bar.run",
+     "calls",
+     "src/lib.rs:bar.foo.f"
+    ]
+   ]
+  },
+  {
+   "id": "rust/extern-block-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/glob-skips-a-private-import",
+   "ok": false,
+   "missing": [
+    [
+     "c.run",
+     "calls",
+     "d.f"
+    ]
+   ],
+   "unwanted": [
+    [
+     "c.run",
+     "calls",
+     "a.f"
+    ]
+   ]
+  },
+  {
+   "id": "rust/super-glob-brings-the-parents-imports",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/super-repeated",
+   "ok": false,
+   "missing": [
+    [
+     "a.b.c.run",
+     "calls",
+     "a.f"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/cfg-on-a-use",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/tuple-pattern-parameter",
+   "ok": false,
+   "missing": [
+    [
+     "first",
+     "calls",
+     "Config.show"
+    ]
+   ],
+   "unwanted": [
+    [
+     "first",
+     "calls",
+     "Other.show"
+    ]
+   ]
+  },
+  {
+   "id": "rust/tuple-struct-pattern-parameter",
+   "ok": false,
+   "missing": [
+    [
+     "open",
+     "calls",
+     "Inner.go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/turbofish-type-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/unit-struct-value",
+   "ok": false,
+   "missing": [
+    [
+     "jar",
+     "references",
+     "Cookie"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/glob-variant-value",
+   "ok": false,
+   "missing": [
+    [
+     "globbed",
+     "references",
+     "Examples"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/union-field",
+   "ok": false,
+   "missing": [
+    [
+     "read",
+     "reads",
+     "Bits.f1"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/type-alias-is-its-type",
+   "ok": false,
+   "missing": [
+    [
+     "through_alias",
+     "calls",
+     "Config.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-expression-through-an-alias",
+   "ok": false,
+   "missing": [
+    [
+     "build",
+     "calls",
+     "Config.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/alias-by-use-constructor",
+   "ok": false,
+   "missing": [
+    [
+     "make",
+     "calls",
+     "Pair"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/const-in-a-block",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "local",
+     "reads",
+     "src/lib.rs:LIMIT"
+    ],
+    [
+     "local",
+     "reads",
+     "src/lib.rs:COUNT"
+    ]
+   ]
+  },
+  {
+   "id": "rust/extern-fn-in-a-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/impl-in-a-block-is-visible-outside",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/let-else-binding",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/typed-self-parameter-is-a-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/mut-parameter-is-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/function-item-bound-to-a-local",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "references",
+     "helper"
+    ],
+    [
+     "run",
+     "references",
+     "other"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/self-variant-is-the-impls-enum",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/named-variant-import-shadows-a-glob-struct",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "inner.run",
+     "calls",
+     "src/lib.rs:Circle@5"
+    ]
+   ]
+  },
+  {
+   "id": "rust/discriminant-reads-a-constant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/union-expression-is-a-use-of-the-union",
+   "ok": false,
+   "missing": [
+    [
+     "make",
+     "references",
+     "Bits"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/impl-for-a-type-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/alias-of-a-collection",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/associated-type-of-an-impl",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/constant-initializer-reads-constants",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/static-initializer-uses",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/link-name-is-no-rust-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/extern-static-is-read",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/block-item-is-visible-before-its-declaration",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/let-annotation-types-the-variable",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/alias-path-associated-function",
+   "ok": false,
+   "missing": [
+    [
+     "build",
+     "calls",
+     "Wide.make"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/generic-alias-keeps-its-arguments",
+   "ok": false,
+   "missing": [
+    [
+     "get",
+     "calls",
+     "Repo.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/alias-path-enum-variant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/use-declaration-in-a-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-in-a-block-hides-the-modules",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "run.Item.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/closure-parameter-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/static-mut-write",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/await-gives-the-declared-result",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/qualified-fn-in-a-block-hides-the-modules",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/tuple-struct-field-by-index",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-like-variant-expression",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/default-method-calls-a-required-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/trait-method-of-a-generic-trait",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/supertrait-method-on-a-bound",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/supertrait-method-on-a-trait-object",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/supertrait-method-in-a-default-body",
+   "ok": false,
+   "missing": [
+    [
+     "Circle.radius",
+     "calls",
+     "Shape.area"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/trait-path-and-qualified-path",
+   "ok": false,
+   "missing": [
+    [
+     "via_b",
+     "calls",
+     "B.name"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/blanket-impl-method",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Describe.describe"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/associated-type-projection",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Widget.spin"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/associated-constant-on-a-bound",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "reads",
+     "Named.NAME"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/box-self-receiver",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/deref-impl-method",
+   "ok": false,
+   "missing": [
+    [
+     "through",
+     "calls",
+     "Inner.inner_only"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/method-of-a-bound-not-a-guess-by-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/trait-in-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/by-value-before-autoref",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/associated-function-on-a-type-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/impl-trait-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-private-inherent-skipped-for-trait",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:m.S.show@15"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:m.S.show@4"
+    ]
+   ]
+  },
+  {
+   "id": "rust/rust-where-bound-on-projection",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Show.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-opaque-return-has-trait-methods-only",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-inherent-impl-per-instantiation",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:W.show@10"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:W.show@4"
+    ]
+   ]
+  },
+  {
+   "id": "rust/rust-path-inherent-before-trait-assoc-fn",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-method-call-ignores-field-of-same-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-trait-imported-as-underscore",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Show.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-inherent-impl-on-dyn-trait",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-array-unsizes-to-slice-for-methods",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Total.total"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-inherent-impl-through-type-alias",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Foo.make"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/const-parameter-hides-a-const",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/where-bound-on-a-concrete-type",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Show.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/parenthesized-dyn-with-auto-traits",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Show.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/impl-trait-argument-is-a-bound",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/impl-trait-return-is-the-trait",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/trait-object-has-its-supertraits-methods",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/typed-closure-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/fn-pointer-parameter-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/fn-pointer-field-call-is-the-field",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "go",
+     "calls",
+     "src/lib.rs:Hooks.run@6"
+    ]
+   ]
+  },
+  {
+   "id": "rust/tuple-pattern-types",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "A.go"
+    ],
+    [
+     "run",
+     "calls",
+     "B.other"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/enum-variants-through-a-glob",
+   "ok": false,
+   "missing": [
+    [
+     "pick",
+     "references",
+     "Mode"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/union-field-read",
+   "ok": false,
+   "missing": [
+    [
+     "read",
+     "reads",
+     "Bits.int"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/raw-pointer-deref-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/array-and-slice-element-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/deref-target-method-after-own",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Inner.only_inner"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/where-bound-on-an-associated-type",
+   "ok": false,
+   "missing": [
+    [
+     "render",
+     "calls",
+     "Show.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/types-inside-builtin-generic-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/rust-generic-param-default-type",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Config.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/bitwise-operator-calls-the-trait-impl",
+   "ok": false,
+   "missing": [
+    [
+     "both",
+     "calls",
+     "V.bitand"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/static-through-a-module-path",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/associated-const-path",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "reads",
+     "src/lib.rs:MAX@4"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/path-to-a-method-as-a-value",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "indirect_call",
+     "Counter.bump"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/user-deref-target",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Inner.only_inner"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/array-coerces-to-a-slice-receiver",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "[Item].total"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/trait-method-before-inherent-mut-self",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:Foo.bar@14"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:Foo.bar@8"
+    ]
+   ]
+  },
+  {
+   "id": "rust/parenthesized-field-call",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "field",
+     "calls",
+     "src/lib.rs:Hook.f@6"
+    ]
+   ]
+  },
+  {
+   "id": "rust/field-of-a-call-result",
+   "ok": false,
+   "missing": [
+    [
+     "literal",
+     "calls",
+     "A.go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/user-deref-field",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "reads",
+     "Inner.x"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/parameter-called-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/trait-method-by-type-path",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/qualified-path-picks-the-trait",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "src/lib.rs:Bar.print@12"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/closure-annotated-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/closure-captures-a-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/closure-result-type",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Config.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/constructor-as-a-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-expression-labels-are-fields",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-update-base-is-an-expression",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/await-gives-the-output",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/tuple-expression-fields",
+   "ok": false,
+   "missing": [
+    [
+     "literal",
+     "calls",
+     "A.go"
+    ],
+    [
+     "destructured",
+     "calls",
+     "B.go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/tuple-index-of-a-returned-tuple",
+   "ok": false,
+   "missing": [
+    [
+     "second",
+     "calls",
+     "B.go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/array-list-element-type",
+   "ok": false,
+   "missing": [
+    [
+     "list",
+     "calls",
+     "A.go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/array-repeat-element-type",
+   "ok": false,
+   "missing": [
+    [
+     "repeat",
+     "calls",
+     "B.go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/array-length-and-repeat-operand-read-constants",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/index-expression-calls-index",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Grid.index"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/index-output-type",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Cell.val"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/grouped-expression-is-its-operand",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/tuple-destructuring-assignment-writes",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/borrow-and-dereference-keep-the-type",
+   "ok": false,
+   "missing": [
+    [
+     "boxed",
+     "calls",
+     "Config.show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/explicit-deref-calls-deref",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Wrapper.deref"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/try-converts-with-from",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "AppError.from"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/unary-operator-calls-the-trait-impl",
+   "ok": false,
+   "missing": [
+    [
+     "flip",
+     "calls",
+     "V.neg"
+    ],
+    [
+     "invert",
+     "calls",
+     "V.not"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/binary-operator-calls-the-trait-impl",
+   "ok": false,
+   "missing": [
+    [
+     "sum",
+     "calls",
+     "V.add"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/comparison-calls-eq",
+   "ok": false,
+   "missing": [
+    [
+     "same",
+     "calls",
+     "V.eq"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/cast-type-is-in-the-type-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/field-assignment-writes-the-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-destructuring-assignment-writes",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "writes",
+     "LAST"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "reads",
+     "LAST"
+    ]
+   ]
+  },
+  {
+   "id": "rust/compound-assignment-calls-the-trait-impl",
+   "ok": false,
+   "missing": [
+    [
+     "grow",
+     "calls",
+     "V.add_assign"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/method-trait-in-scope",
+   "ok": false,
+   "missing": [
+    [
+     "use_run",
+     "calls",
+     "a.Run.go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/call-trait-path-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/turbofish-argument-names-a-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/item-before-its-declaration-in-a-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/inner-block-item-is-local",
+   "ok": false,
+   "missing": [
+    [
+     "outer",
+     "calls",
+     "src/lib.rs:helper"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/block-value-local",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/while-let-binding-scope",
+   "ok": false,
+   "missing": [
+    [
+     "after",
+     "calls",
+     "size"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/while-let-binding-type",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/for-binding-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/for-pattern-binding",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/if-let-else-block-has-no-binding",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "size"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/if-let-chain-binding",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/default-binding-mode-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/or-pattern-binding-type",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ],
+    [
+     "run",
+     "calls",
+     "Other.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/match-guard-sees-the-arm-binding",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/parameter-pattern-binding",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/ident-pattern-at-subpattern",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/ref-binding-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/const-pattern-is-a-path",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/associated-const-pattern",
+   "ok": false,
+   "missing": [
+    [
+     "check",
+     "reads",
+     "A.MAX"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-pattern-shorthand-binding",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-pattern-renamed-field",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/tuple-struct-pattern-binding",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": [
+    [
+     "run",
+     "calls",
+     "Other.find"
+    ]
+   ]
+  },
+  {
+   "id": "rust/tuple-pattern-binding",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/range-pattern-bound-is-a-constant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/tuple-index-field-pattern",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/slice-pattern-element",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/reference-pattern-binding",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/while-let-chain-binding",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/nested-struct-pattern-binding-type",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ],
+    [
+     "run",
+     "calls",
+     "Other.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/match-on-a-tuple-expression",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Repo.find"
+    ],
+    [
+     "run",
+     "calls",
+     "Other.find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "rust/macro-argument-sees-invocation-site",
    "ok": true,
    "missing": [],
    "unwanted": []

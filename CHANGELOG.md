@@ -18,10 +18,14 @@ All notable changes to this project are documented here. The format is based on
   project now, and a `String`, `Vec` or primitive field counts as the
   library's where the project defines no type of the name. On ureq the
   edges rust-analyzer contradicts fall from 40 to 34.
-- **`verify_cases.py --binding` asks rust-analyzer** about Rust cases, as it
-  asks go/types and Roslyn (`oracle_rust.py --dump`), and
-  `rule_inventory.py` lists the Rust Reference's files and rustc's resolver
-  as sections, for the sweep.
+- **The Rust sweep** (`docs/rule-sources.md`, 'Phase 2b: the sweep'): the
+  Rust Reference file by file and rustc's resolver and method probe, 121
+  sections, read by a smaller model and checked by cargo, rust-analyzer
+  (`verify_cases.py --binding`, `oracle_rust.py --dump`) and the engine. 208
+  new conformance cases (285 Rust cases; the engine holds 177, precise mode
+  253) and 509 rules in the inventory, every section read. The binding check
+  counts a use rust-analyzer binds to the function of an `impl Trait for X`
+  as the trait's method, which the graph names.
 - **`graphlore-out/`: the output directory under graphlore's own name**
   (release B's last step, `docs/native-engine.md`). Builds write
   `graphlore-out/graph.json` and `.graphlore_labels.json`. A graph in the

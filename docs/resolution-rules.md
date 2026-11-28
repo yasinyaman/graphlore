@@ -146,8 +146,11 @@ of an extension, an indexer's `Count` for `l[^1]`), and a name a property
 pattern or attribute argument writes.
 
 The other five languages with an indexer here lose nothing: TypeScript 60 of
-60, JavaScript 31 of 31, Rust 75 of 75, Java 71 of 71, Ruby 37 of 37 in
-precise mode — 949 of the 989 cases of the seven. Ruby's
+60, JavaScript 31 of 31, Java 71 of 71, Ruby 37 of 37 in precise mode. Rust
+was 75 of 75 before its sweep; of the 285 cases after it, precise mode holds
+253 and the engine alone 177 (rust-analyzer settles the ones that need a
+type: patterns, operators, `Deref`, aliases) — 1127 of the 1199 cases of the
+seven. Ruby's
 `module-method-is-no-bare-call` holds only there: the engine still guesses a
 module's method by name, because the facts hold no top-level `include`.
 Nine of the Java cases came from what scip-java contradicted on gson
@@ -1251,11 +1254,11 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | a namespace-qualified attribute name finds the suffixed class in that namespace only | `attribute-qualified-name` | – | **no**: no B -references-> Two.MarkAttribute |
 | a generic attribute's type arguments choose the class of that arity, not the non-generic class of the same name | `attribute-generic-arity` | 11– | **no**: no Target -references-> MarkAttribute<T> has Target -references-> MarkAttribute |
 
-### rust (75 of 75)
+### rust (177 of 285)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
-Found by: the specification 37, a compiler 15, comparison 6, the grammar 2, the language's own tools 15. With the place it was read in the language's own tools: 20.
+Found by: the specification 37, a compiler 17, comparison 6, the grammar 2, the language's own tools 15, a sweep of them 208. With the place it was read in the language's own tools: 230.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -1334,6 +1337,216 @@ Found by: the specification 37, a compiler 15, comparison 6, the grammar 2, the 
 | an item of another module is in scope only through a `use`: `Result` in the crate root is the prelude's, not `http::Result` | `item-of-another-module-needs-use` | – | yes |
 | `xs().is_empty()` where `xs` returns `&[T]` is the slice's method; `xs()[0].is_empty()` is the element's | `size-of-a-returned-slice` | – | yes |
 | `usize::from(b)` is the primitive's associated function: no guess goes to a project method of the name | `primitive-type-path` | – | yes |
+| `Type::<A>::f()` is the `f` of the `impl Type<A>` block, of several impls of one generic type each with an `f` | `turbofish-picks-the-impl` | – | yes |
+| a method of an impl for the impl's own type parameter (`impl<M: Finder> Finder for &M`) is no method a value of a library's type is asked: `self.s.find('a')` on a `String` field is `str::find` | `blanket-impl-is-no-method-of-a-library-type` | – | yes |
+| a function declared in a block is a name of the block from its start: a call written before the declaration is the block's function, not the module's | `item-before-its-declaration` | – | yes |
+| a project type named like a prelude type is the name in its own module; a module that does not import it still has the prelude's | `module-shadows-the-prelude` | – | **no**: has other.std_box -calls-> Box.new; other.std_box -references-> Box |
+| a `mod std` of the project is what `std::helper()` means in its parent module, before the extern prelude's std | `module-shadows-the-extern-prelude` | – | yes |
+| a parameter, a closure parameter, a `for` variable and an `if let` binding of the name of a function hide it in their body: the call is of the binding, and the function is still the name elsewhere | `binding-hides-a-function` | – | yes |
+| a nested function's call of `foo` is the module's function, whatever local `foo` the enclosing function declares (after the item); the enclosing function's own `foo()` is the local | `local-declared-after-the-item` | – | yes |
+| a struct declared in a generic function named like the function's type parameter (and like a module type) is the name in the body: `Item::show()` is the local struct's method | `generic-fn-item-shadows-param` | – | **no**: no run -calls-> run.Item.show |
+| one `use m::foo;` binds the module foo (type namespace) and the function foo (value namespace): `foo()` and `foo::g()` are each the one of their namespace | `use-imports-every-namespace` | – | yes |
+| a `use` written in a nested block binds its name in that block only; a call after the block is the module's import | `use-in-an-inner-block` | – | yes |
+| `use m1::*; use m2::*;` where m2 re-exports m1's Thing: `Thing` is that one type | `glob-same-item-twice` | – | yes |
+| in a block, `use glob::*;` brings a name that is closer than the module's `use outer::amb;`: `amb()` there is the glob's, and outside the block the outer import | `glob-in-a-block-beats-an-outer-use` | – | **no**: no run -calls-> glob.amb has run -calls-> outer.amb |
+| edition 2015: `::foo()` in a module is the crate root's foo, never the module's own foo | `edition-2015-global-path` | – | **no**: no b.run -calls-> src/lib.rs:foo has b.run -calls-> b.foo |
+| `self::make()` inside an impl is the module's function make, not the associated function `S::make` of the impl's type | `self-path-in-a-method` | – | yes |
+| `super::super::foo()` and `self::super::super::foo()` from a module two levels down are the foo of the grandparent module, not the parent's or the root's | `super-twice` | – | **no**: no a.b.c.run -calls-> a.foo |
+| `Buf::<u8>::make()` is the associated function of Buf, not the module's `make` | `turbofish-type-path` | – | yes |
+| `<S as T1>::f()` is the function of `impl T1 for S`; `S::f()` is the inherent one; `<S as T2>::f` would be the other trait's | `qualified-trait-path` | – | **no**: no run -calls-> src/lib.rs:S.f@14 |
+| `use a::*;` does not bring a's private `Thing`: with `use b::*;` bringing a public `Thing`, the name is b's | `glob-skips-private` | – | **no**: no make -references-> b.Thing has make -references-> a.Thing |
+| `r#foo()` is a call of the function named `foo` (the `r#` is no part of the name) | `raw-identifier` | – | **no**: no run -calls-> src/lib.rs:foo |
+| `ZERO =>` in a match arm, where ZERO is a constant in scope, is a read of that constant and not a binding; a constant of another module of the name is not in scope | `pattern-constant` | – | yes |
+| a struct with named fields has no constructor in the value namespace: `Shape()` is the function of that name | `named-struct-has-no-constructor` | – | **no**: no run -calls-> src/lib.rs:Shape@6 has run -calls-> src/lib.rs:Shape@1 |
+| a const generic parameter hides a constant of its name in the item it is declared on | `const-generic-parameter-hides-a-constant` | – | yes |
+| a closure that calls a captured local calls the local, not the function of its name | `captured-local-hides-a-function` | – | yes |
+| `Self::LIMIT` is the associated const of the impl, a bare `LIMIT` in its methods the module's constant | `associated-const-is-not-scoped` | – | **no**: no S.own -reads-> src/lib.rs:LIMIT@6 |
+| `use a::Shape::*;` makes the variants of that enum names of the module | `glob-import-of-an-enums-variants` | – | yes |
+| `Alias::Circle(1)` with `type Alias = Shape;` is a variant of Shape | `variant-through-a-type-alias` | – | yes |
+| `extern crate self as demo;` names the crate root: `demo::f()` is the root's `f` | `extern-crate-self-alias` | – | **no**: no g -calls-> src/lib.rs:f has g -calls-> m.f |
+| `super::helper()` in a module written inside a function is the enclosing module's `helper`, not an item of the block | `super-from-a-module-in-a-block` | – | yes |
+| `let Cfg { helper } = c;` binds the local `helper`: calling it is not a call of the function `helper` | `struct-pattern-shorthand-binds-a-local` | – | **no**: has take -calls-> src/lib.rs:helper@5 |
+| `mod config;` written in util.rs is the file util/config.rs, not src/config.rs | `rust-nested-file-module-is-in-the-parents-directory` | – | yes |
+| `#[path = "other.rs"] mod c;` is the file src/other.rs, never src/c.rs | `rust-path-attribute-names-the-module-file` | – | **no**: no run -calls-> src/other.rs:f has run -calls-> src/c.rs:f |
+| `mod inline { #[path = "other.rs"] mod inner; }` in lib.rs is src/inline/other.rs | `rust-path-attribute-in-an-inline-module` | – | **no**: no run -calls-> src/inline/other.rs:f |
+| `use a::{b::{self, f}, g};` binds b (module), f of b and g of a, not the f of a | `rust-nested-use-groups` | – | yes |
+| `use a::deep as d;` makes `d::f()` the f of a::deep, not of the other module named deep | `rust-use-alias-of-a-module` | – | yes |
+| `use a::*;` does not bring a's private `helper`: with `use b::*;` beside it, `helper()` is b's | `rust-glob-skips-private-names` | – | **no**: no run -calls-> b.helper has run -calls-> a.helper |
+| `use shapes::*;` with a project `Vec` makes `Vec::new()` the project's, not std's | `rust-glob-import-shadows-the-prelude` | – | yes |
+| `use a::*;` where a has `pub use crate::b::*;` brings b's f, not the other module's f | `rust-glob-of-a-glob-re-export` | – | yes |
+| edition 2015: `use foo::f;` in `mod bar` is the f of the crate-root `foo`, not of `bar::foo` | `rust-2015-use-paths-start-at-the-crate-root` | – | **no**: no bar.run -calls-> src/lib.rs:foo.f has bar.run -calls-> src/lib.rs:bar.foo.f |
+| `use Example::*;` in a function makes `V1` / `V2` variants of Example, not of Other | `rust-glob-of-an-enum-binds-its-variants` | – | **no**: no run -references-> Example |
+| `use inner::helper;` in a function body makes `helper()` there inner's, before the module's own `helper` | `rust-block-use-shadows-a-module-item` | – | yes |
+| after `use bar::foo::{self};` and a local `fn foo`, `foo()` is the local function and `foo::g()` the module's | `rust-self-import-is-the-type-namespace` | – | **no**: no run -calls-> src/lib.rs:foo has run -calls-> src/lib.rs:bar.foo |
+| `use foo::Zoo as _;` puts Zoo's methods in scope: `z.zoo()` is foo::Zoo::zoo, not the method of another trait of the project that is not imported | `rust-use-as-underscore-brings-a-traits-methods` | – | **no**: no run -calls-> foo.Zoo.zoo |
+| `use crate as root;` makes `root::f()` the crate root's f, not the f of the module around | `rust-use-crate-as-alias` | – | yes |
+| `use super as parent;` makes `parent::f()` the f of the parent module, not the module's own f | `rust-use-super-as-alias` | – | **no**: no m.n.run -calls-> m.f |
+| `extern crate self as demo;` makes `demo::f()` the crate root's f from any module, not the f of the module around | `rust-extern-crate-self-as` | – | yes |
+| with no feature set, `pick()` is the `#[cfg(not(feature = "fast"))]` definition, never the `#[cfg(feature = "fast")]` one | `rust-cfg-removes-the-disabled-item` | – | **no**: no run -calls-> src/lib.rs:pick@7 has run -calls-> src/lib.rs:pick@2 |
+| `#[cfg_attr(not(any()), path = "first.rs")] #[cfg_attr(any(), path = "second.rs")] mod os;` is src/first.rs | `rust-cfg-attr-path-selects-the-module-file` | – | **no**: no run -calls-> src/first.rs:f |
+| a glob brings only what the importing module can see: a sibling module's private function is no name of `use sibling::*;` | `rust-glob-import-filters-by-visibility` | – | **no**: no run -calls-> src/lib.rs:secret has run -calls-> a.secret |
+| `use foo::Zoo as _;` does not define the name `Zoo`: the project's own `struct Zoo` stays the only `Zoo` of the module | `rust-underscore-import-defines-no-name` | – | yes |
+| edition 2015: `use foo::*;` in `mod bar` is a glob of the crate-root foo, not of `bar::foo` | `rust-2015-glob-import-is-crate-relative` | – | **no**: no bar.run -calls-> src/lib.rs:foo.f has bar.run -calls-> src/lib.rs:bar.foo.f |
+| a function declared in an extern block is a name of its module and the call binds to it | `extern-block-function` | – | yes |
+| a private `use` of a module is no name a glob of the module brings elsewhere | `glob-skips-a-private-import` | – | **no**: no c.run -calls-> d.f has c.run -calls-> a.f |
+| `use super::*;` in a child module binds what the parent imports privately | `super-glob-brings-the-parents-imports` | – | yes |
+| `super::super::f()` is f of the module two levels up | `super-repeated` | – | **no**: no a.b.c.run -calls-> a.f |
+| a `use` under a false `#[cfg]` binds no name | `cfg-on-a-use` | – | yes |
+| a parameter written as a tuple pattern binds each name to the matching part of its type | `tuple-pattern-parameter` | – | **no**: no first -calls-> Config.show has first -calls-> Other.show |
+| a parameter written as `Wrapper(inner): Wrapper` binds inner to the field's type | `tuple-struct-pattern-parameter` | – | **no**: no open -calls-> Inner.go |
+| `size::<Config>()` calls size and names Config | `turbofish-type-argument` | – | yes |
+| `Cookie` and `Cookie {}` written as values are uses of the unit struct | `unit-struct-value` | – | **no**: no jar -references-> Cookie |
+| a unit variant named bare after a glob import of its enum is a use of the enum | `glob-variant-value` | – | **no**: no globbed -references-> Examples |
+| a field read on a union value is the union's field | `union-field` | – | **no**: no read -reads-> Bits.f1 |
+| a parameter typed by an alias calls the aliased type's methods | `type-alias-is-its-type` | – | **no**: no through_alias -calls-> Config.show |
+| `Cfg { .. }` builds a Config, so its methods are Config's | `struct-expression-through-an-alias` | – | **no**: no build -calls-> Config.show |
+| a tuple struct re-exported under another name by `use ... as` is called as its constructor | `alias-by-use-constructor` | – | **no**: no make -calls-> Pair |
+| a const or static declared in a function is that function's name; the module's is read only outside | `const-in-a-block` | – | **no**: has local -reads-> src/lib.rs:LIMIT; local -reads-> src/lib.rs:COUNT |
+| an `extern` block inside a function declares a name of that block, hiding the module's function | `extern-fn-in-a-block` | – | yes |
+| an inherent impl written inside a function gives its type a method everywhere | `impl-in-a-block-is-visible-outside` | – | yes |
+| a name bound by `let Some(c) = x else { .. };` is a Config in the following statements | `let-else-binding` | – | yes |
+| a function whose first parameter is `self: &Rc<Self>` is a method of Self, found by a call on an `Rc<Self>` value | `typed-self-parameter-is-a-method` | – | yes |
+| a `mut` parameter is a parameter of its declared type: a method called on it is that type's | `mut-parameter-is-typed` | – | yes |
+| `let f = helper;` and `let g: fn() -> i32 = other;` are uses of the module's functions, never of a method named alike | `function-item-bound-to-a-local` | – | **no**: no run -references-> helper; run -references-> other |
+| `Self::Fast` / `Self::Slow(1)` in `impl Mode` name the variants of Mode, not those of Other | `self-variant-is-the-impls-enum` | – | yes |
+| `use super::*;` brings the struct Circle, `use crate::Shape::Circle;` the variant: the named import wins, so `Circle(1)` is the variant | `named-variant-import-shadows-a-glob-struct` | – | **no**: has inner.run -calls-> src/lib.rs:Circle@5 |
+| `Low = BASE` reads the constant BASE (the variant is where it is written), not another constant | `discriminant-reads-a-constant` | – | yes |
+| `Bits { i: 1 }` is a use of the union Bits, never of the struct Plain that also has a field i | `union-expression-is-a-use-of-the-union` | – | **no**: no make -references-> Bits |
+| a method written in `impl Id` (an alias of Wide) is a method of Wide, found by a call on a Wide value | `impl-for-a-type-alias` | – | yes |
+| `for r in rs` with `rs: Repos` and `type Repos = Vec<Repo>` makes r a Repo | `alias-of-a-collection` | – | **no**: no run -calls-> Repo.find |
+| `d.item()` returns `Self::Item`, which `impl Source for Db` binds to Repo: `.find()` on it is Repo's | `associated-type-of-an-impl` | – | **no**: no run -calls-> Repo.find |
+| `const BITS = [BIT1]` reads BIT1 from BITS, and BIT2, which it does not name, is not read | `constant-initializer-reads-constants` | – | yes |
+| `static LIMIT: u32 = twice(BASE);` calls twice and reads BASE from LIMIT | `static-initializer-uses` | – | yes |
+| `c_sqrt` is the extern declaration; the Rust function `sqrt` is not what it calls | `link-name-is-no-rust-name` | 2024– | yes |
+| a read of an extern block's static is a read of that declaration, and a module static of another name is not read | `extern-static-is-read` | 2024– | yes |
+| `go()` written before `fn go` in the same block is the block's go, not the module's go or a method | `block-item-is-visible-before-its-declaration` | – | yes |
+| `let r: Repo = make();` makes r a Repo although make is generic | `let-annotation-types-the-variable` | – | yes |
+| an associated function called by a path that starts at a type alias is the aliased type's function | `alias-path-associated-function` | – | **no**: no build -calls-> Wide.make |
+| a value typed by a generic alias has the aliased generic type's fields typed by the alias's arguments | `generic-alias-keeps-its-arguments` | – | **no**: no get -calls-> Repo.show |
+| a variant written through a type alias of its enum is a use of that enum | `alias-path-enum-variant` | – | yes |
+| a `use` in a block binds in the block only and shadows an item of the module there | `use-declaration-in-a-block` | – | yes |
+| a struct (and its impl) written in a block is the type named there, hiding the module's struct of that name | `struct-in-a-block-hides-the-modules` | – | **no**: no run -calls-> run.Item.show |
+| a closure's parameter is a local of the closure and hides an item of its name there | `closure-parameter-hides-a-function` | – | yes |
+| an assignment to a static is a write of the static the name means | `static-mut-write` | – | yes |
+| `f().await` of an async function is a value of its declared result type | `await-gives-the-declared-result` | 2018– | yes |
+| qualifiers (`const`, `unsafe`) do not change where a function's name is visible | `qualified-fn-in-a-block-hides-the-modules` | – | yes |
+| `w.0` is the first field of a tuple struct and has its declared type | `tuple-struct-field-by-index` | – | yes |
+| a struct expression naming a variant by a path from its enum is a use of that enum | `struct-like-variant-expression` | – | yes |
+| `self.f()` in a trait's default method is the trait's own declaration f | `default-method-calls-a-required-method` | – | yes |
+| a method of a generic trait `Seq<T>` is the implementing type's method on a value of that type | `trait-method-of-a-generic-trait` | – | yes |
+| a `C: Circle` value has the methods of Circle's supertrait Shape | `supertrait-method-on-a-bound` | – | yes |
+| a `&dyn Circle` has the methods of Circle's supertrait Shape | `supertrait-method-on-a-trait-object` | – | yes |
+| in a trait's default method, `self.f()` is a method of a supertrait declared by `where Self: Shape` | `supertrait-method-in-a-default-body` | – | **no**: no Circle.radius -calls-> Shape.area |
+| `Trait::f(x)` and `<T as Trait>::f(x)` name the trait's own function, whichever other trait has an f | `trait-path-and-qualified-path` | – | **no**: no via_b -calls-> B.name |
+| a method a blanket `impl<T: Show> Describe for T` gives is a method of every type that is Show, not another type's method of the name | `blanket-impl-method` | – | **no**: no run -calls-> Describe.describe |
+| `<Foo as Maker>::Out` is the type Foo's impl gives `Out`: a method called on a value of it is that type's | `associated-type-projection` | – | **no**: no run -calls-> Widget.spin |
+| `T::NAME` of `T: Named` is the trait's constant, not a constant of the same name another trait has | `associated-constant-on-a-bound` | – | **no**: no run -reads-> Named.NAME |
+| a method with `self: Box<Self>` is called on a `Box<Foo>`: it is Foo's method, not another type's of the name | `box-self-receiver` | – | yes |
+| a method the type lacks is looked up on the target of its `Deref` impl; the type's own method comes first | `deref-impl-method` | – | **no**: no through -calls-> Inner.inner_only |
+| a method called on a `T: Tr` value is the trait's, whichever unrelated type has an inherent method of the name | `method-of-a-bound-not-a-guess-by-name` | – | yes |
+| a trait's method is a candidate only where the trait is in scope: of two traits with the method, the one the file imports | `trait-in-scope` | – | yes |
+| of two trait methods that fit a receiver, the one whose `self` type is the receiver's type is found before one that needs an autoref | `by-value-before-autoref` | – | yes |
+| `T::make()` of `T: Maker` is the trait's function, not another type's `make` | `associated-function-on-a-type-parameter` | – | yes |
+| a parameter written `impl Trait` has the methods of the trait, not a same-named method of an unrelated type | `impl-trait-argument` | – | yes |
+| A private inherent method of another module is no candidate: the trait method of the name is picked | `rust-private-inherent-skipped-for-trait` | – | **no**: no run -calls-> src/lib.rs:m.S.show@15 has run -calls-> src/lib.rs:m.S.show@4 |
+| A where clause on an associated type gives a value of it the bound trait's methods | `rust-where-bound-on-projection` | – | **no**: no run -calls-> Show.show |
+| A call on the result of `-> impl Trait` binds the trait's method, not the concrete type's inherent one | `rust-opaque-return-has-trait-methods-only` | – | yes |
+| A method of `impl W<String>` is called on a W<String>, not the same-named method of `impl W<i32>` | `rust-inherent-impl-per-instantiation` | – | **no**: no run -calls-> src/lib.rs:W.show@10 has run -calls-> src/lib.rs:W.show@4 |
+| `S::make()` names the inherent associated function, not the trait's of the same name | `rust-path-inherent-before-trait-assoc-fn` | – | yes |
+| A method call binds the method, not the same-named function-typed field | `rust-method-call-ignores-field-of-same-name` | – | yes |
+| a trait imported with `as _` brings its methods into scope for a method call; the other trait's method of the name, not in scope, is no candidate | `rust-trait-imported-as-underscore` | – | **no**: no run -calls-> Show.show |
+| `impl dyn Trait { fn f }` gives f to values of type dyn Trait (through Box or a reference); an implementor's own inherent f is not the callee | `rust-inherent-impl-on-dyn-trait` | – | yes |
+| a method called on an array finds the trait impl written for the slice type (the unsize step of the receiver) | `rust-array-unsizes-to-slice-for-methods` | – | **no**: no run -calls-> Total.total |
+| `impl Alias { fn make }` is Foo's associated function and `Alias::make()` calls it | `rust-inherent-impl-through-type-alias` | – | **no**: no run -calls-> Foo.make |
+| a const generic parameter `N` is a value name of the item and hides the module's `const N` | `const-parameter-hides-a-const` | – | yes |
+| a value of a type bounded by a where clause has the bound trait's methods | `where-bound-on-a-concrete-type` | – | **no**: no run -calls-> Show.show |
+| `&(dyn Show + Send + 'static)` is a trait object of `Show`: a call on it is Show's method | `parenthesized-dyn-with-auto-traits` | – | **no**: no run -calls-> Show.show |
+| a parameter written `impl Show` has Show's methods, not a same-named method of an unrelated type | `impl-trait-argument-is-a-bound` | – | yes |
+| a call on the result of `-> impl Show` is `Show.show`, not the hidden type's inherent `show` | `impl-trait-return-is-the-trait` | – | yes |
+| a value of `&dyn Child` has the methods of Child's supertrait Base | `trait-object-has-its-supertraits-methods` | – | yes |
+| a closure parameter written with a type is a value of that type inside the closure body | `typed-closure-parameter` | – | yes |
+| calling a parameter of type `fn() -> i32` is the parameter's call, not the module function of its name | `fn-pointer-parameter-hides-a-function` | – | yes |
+| `(h.run)()` reads the field `run` (of function pointer type); `h.run()` would be the method | `fn-pointer-field-call-is-the-field` | – | **no**: has go -calls-> src/lib.rs:Hooks.run@6 |
+| a name bound by a tuple pattern has the type at its position in the tuple's type | `tuple-pattern-types` | – | **no**: no run -calls-> A.go; run -calls-> B.other |
+| `use Mode::*;` makes `Fast` the variant of Mode, not the variant of another enum of that name | `enum-variants-through-a-glob` | – | **no**: no pick -references-> Mode |
+| `b.int` on a `Bits` union is the field `Bits.int` | `union-field-read` | – | **no**: no read -reads-> Bits.int |
+| `(*p).find()` on a `*const Repo` is `Repo.find` | `raw-pointer-deref-method` | – | yes |
+| an element of `[Repo; 2]` or `&[Repo]` has Repo's methods | `array-and-slice-element-type` | – | yes |
+| a method call on a value of a type with a `Deref` impl finds the type's own method first and the target's after | `deref-target-method-after-own` | – | **no**: no run -calls-> Inner.only_inner |
+| a value typed `T::Item` has the methods of the trait a where clause bounds `T::Item` by, not a same-named inherent method of an unrelated type | `where-bound-on-an-associated-type` | – | **no**: no render -calls-> Show.show |
+| a name written inside a fn pointer, tuple, array or raw pointer type is a use of that type, and only of the one written | `types-inside-builtin-generic-types` | – | yes |
+| A generic parameter's default is the type a bare use of the generic stands for: h.v of `Holder` (= Holder<Config>) has Config's methods, not another type's same-named method | `rust-generic-param-default-type` | – | **no**: no run -calls-> Config.show |
+| an operator written on values of a project type is a call of the method its `std::ops` trait impl gives that type (`a & b` is `BitAnd::bitand` of a's type) | `bitwise-operator-calls-the-trait-impl` | – | **no**: no both -calls-> V.bitand |
+| `m::STATIC` names the static item of module m, and reading it is a read of that item | `static-through-a-module-path` | – | yes |
+| `Type::CONST` names the associated constant of that type, not the same-named constant of another type | `associated-const-path` | – | **no**: no run -reads-> src/lib.rs:MAX@4 |
+| a path to an associated function or method used as a value (`Type::method`, no call) is a use of that function | `path-to-a-method-as-a-value` | – | **no**: no run -indirect_call-> Counter.bump |
+| a receiver is dereferenced through a user's `Deref` impl (`type Target`): the target's methods are found, but the wrapper's own method of the name comes first | `user-deref-target` | – | **no**: no run -calls-> Inner.only_inner |
+| an array receiver is finally unsized to a slice: a method of a trait implemented for `[T]` is found on an array | `array-coerces-to-a-slice-receiver` | – | **no**: no run -calls-> [Item].total |
+| candidates are tried type by type in the receiver list (`T`, `&T`, `&mut T`): a trait method taking `&self` is found before an inherent one taking `&mut self` | `trait-method-before-inherent-mut-self` | – | **no**: no run -calls-> src/lib.rs:Foo.bar@14 has run -calls-> src/lib.rs:Foo.bar@8 |
+| `x.f()` calls the method f, `(x.f)()` reads the field f and calls its value | `parenthesized-field-call` | – | **no**: has field -calls-> src/lib.rs:Hook.f@6 |
+| the container operand is any expression: `foo().x`, `(Struct { a: 10 }).a`, a `Box<Struct>` | `field-of-a-call-result` | – | **no**: no literal -calls-> A.go |
+| the container operand is dereferenced through `Deref` as many times as needed to find the field | `user-deref-field` | – | **no**: no run -reads-> Inner.x |
+| a call of a non-function value (a parameter, a local) is a call of that value, never of an outer function of its name | `parameter-called-hides-a-function` | – | yes |
+| `Type::method(&x)` is the method of the trait impl for Type (`Foo::print(&f)`), not the same-named method of another type | `trait-method-by-type-path` | – | yes |
+| `<Type as Trait>::f(x)` is the impl of that very trait, whatever other traits of Type have an `f` | `qualified-path-picks-the-trait` | – | **no**: no run -calls-> src/lib.rs:Bar.print@12 |
+| the type written after a closure parameter is the parameter's type | `closure-annotated-parameter` | – | yes |
+| a closure's body sees the locals around it: a name it does not declare is the enclosing function's | `closure-captures-a-local` | – | yes |
+| calling a local that holds a closure gives a value of the closure body's type | `closure-result-type` | – | **no**: no run -calls-> Config.show |
+| a tuple struct, a unit struct and a tuple variant named as a value (`let c = Position;`) are uses of their type | `constructor-as-a-value` | – | yes |
+| a field label (and the shorthand `Point { x, y: 0 }`) names the struct's field, never a function or variable of that name, whose value only the shorthand reads | `struct-expression-labels-are-fields` | – | yes |
+| the base after `..` is an expression like any other | `struct-update-base-is-an-expression` | – | yes |
+| `x.await` is the output of the future: `load().await.show()` is a method of load's declared result | `await-gives-the-output` | – | yes |
+| the first operand of a tuple expression is field 0, so a local `(B, A)` has `.1` of type A and `let (x, _) = (B, A)` binds x to a B | `tuple-expression-fields` | – | **no**: no literal -calls-> A.go; destructured -calls-> B.go |
+| `pair().1.go()` and `p.0.go()` of a returned `(A, B)` are the methods of the part's type | `tuple-index-of-a-returned-tuple` | – | **no**: no second -calls-> B.go |
+| an array expression `[A, A]` has elements of the type of its operands, so `xs[0].go()` is A's | `array-list-element-type` | – | **no**: no list -calls-> A.go |
+| `[B; 3]` is an array of B | `array-repeat-element-type` | – | **no**: no repeat -calls-> B.go |
+| the length operand and a constant repeat operand are paths to constant items, which the expression reads | `array-length-and-repeat-operand-read-constants` | – | yes |
+| an index expression on another type is a call of its `Index::index` | `index-expression-calls-index` | – | **no**: no run -calls-> Grid.index |
+| the element of an indexed value is the impl's `type Output`: `g[0].val()` is the Output's method | `index-output-type` | – | **no**: no run -calls-> Cell.val |
+| a parenthesized expression is its operand: `(a).go()`, `(helper)()` bind as without parentheses | `grouped-expression-is-its-operand` | – | yes |
+| `_` in a destructuring assignment names nothing, and the other names are the existing places assigned: `(_, TOTAL) = p` writes TOTAL | `tuple-destructuring-assignment-writes` | – | yes |
+| `&x` is a reference to x's type: a method on `r = &c` is c's type's | `borrow-and-dereference-keep-the-type` | – | **no**: no boxed -calls-> Config.show |
+| on non-pointer types `*x` is `*Deref::deref(&x)`: a call of the type's `deref` | `explicit-deref-calls-deref` | – | **no**: no run -calls-> Wrapper.deref |
+| `Err(e)` returns `Err(From::from(e))`: `?` calls the `From` impl of the function's error type | `try-converts-with-from` | – | **no**: no run -calls-> AppError.from |
+| unary `-` and `!` on a project type are calls of its `Neg::neg` / `Not::not` | `unary-operator-calls-the-trait-impl` | – | **no**: no flip -calls-> V.neg; invert -calls-> V.not |
+| `a + b` of a project type is a call of `Add::add` of a's type | `binary-operator-calls-the-trait-impl` | – | **no**: no sum -calls-> V.add |
+| `a == b` of a project type is a call of its `PartialEq::eq` | `comparison-calls-eq` | – | **no**: no same -calls-> V.eq |
+| the type after `as` is in the type namespace: `x as Meters` is the alias, not a function `Meters` | `cast-type-is-in-the-type-namespace` | – | yes |
+| the assignee operand `c.n` is a place: `c.n = 1` and `c.items[0] = 1` write the field, `c.n` read reads it | `field-assignment-writes-the-field` | – | yes |
+| a struct pattern as the assignee names its type; its field labels are fields and the values are existing places: `Position { x: LAST, y: _ } = p` writes LAST | `struct-destructuring-assignment-writes` | – | **no**: no run -writes-> LAST has run -reads-> LAST |
+| `x += y` of a project type is a call of `AddAssign::add_assign` of x's type | `compound-assignment-calls-the-trait-impl` | – | **no**: no grow -calls-> V.add_assign |
+| a method call finds a trait's method only when that trait is in scope: `use a::Run;` makes `s.go()` Run's, never b::Walk's of the same name | `method-trait-in-scope` | – | **no**: no use_run -calls-> a.Run.go |
+| `Show::show(c)` is a call of the trait's method `Show.show`, not of `Dog.show`, another type's impl | `call-trait-path-method` | – | yes |
+| a type written as a generic argument of an expression path (`make::<Widget>()`) is a use of that type | `turbofish-argument-names-a-type` | – | yes |
+| an item of a block is in scope in the whole block, also before its declaration; a `let` only after its statement | `item-before-its-declaration-in-a-block` | – | yes |
+| an item declared in an inner block is no name outside that block | `inner-block-item-is-local` | – | **no**: no outer -calls-> src/lib.rs:helper |
+| a local assigned a block takes the type of the block's final operand | `block-value-local` | – | **no**: no run -calls-> Repo.find |
+| a `while let` binding is a name of the loop body only: it hides a function of its name there, not after the loop | `while-let-binding-scope` | – | **no**: no after -calls-> size |
+| a `while let` binding is typed by the pattern over the scrutinee's type | `while-let-binding-type` | – | **no**: no run -calls-> Repo.find |
+| a `for` binding is a name of the body only: it hides a function of its name there, not after the loop | `for-binding-scope` | – | yes |
+| a pattern of a `for` binds the parts of each item, typed by the item | `for-pattern-binding` | – | **no**: no run -calls-> Repo.find |
+| the bindings of an `if let` are not names of its `else` block: a function of the name is the one called there | `if-let-else-block-has-no-binding` | – | **no**: no run -calls-> size |
+| a binding of a `let` in a condition chain is a name of the operands after it and of the block | `if-let-chain-binding` | 2024– | yes |
+| matching a reference with a non-reference pattern binds references to the parts: typed by the part | `default-binding-mode-type` | – | yes |
+| a name bound in every alternative of an or-pattern is a name of the arm, typed by the alternatives | `or-pattern-binding-type` | – | **no**: no run -calls-> Repo.find; run -calls-> Other.find |
+| a guard is in the scope of the arm's bindings: a name in it is the binding, before a function of its name | `match-guard-sees-the-arm-binding` | – | yes |
+| a pattern in a parameter binds names of the body, typed by the parameter's type | `parameter-pattern-binding` | – | **no**: no run -calls-> Repo.find |
+| `name @ pattern` binds name as the matched value | `ident-pattern-at-subpattern` | – | **no**: no run -calls-> Repo.find |
+| a `ref` binding is a reference to the matched value: typed by it | `ref-binding-type` | – | yes |
+| a single identifier in a pattern is the constant, struct or variant of that name when one is in scope, never a new binding | `const-pattern-is-a-path` | – | yes |
+| an associated constant written as a path pattern is a use of that constant of that type | `associated-const-pattern` | – | **no**: no check -reads-> A.MAX |
+| a shorthand field of a struct pattern binds a local of the field's name, typed by the field | `struct-pattern-shorthand-binding` | – | **no**: no run -calls-> Repo.find |
+| `field: name` in a struct pattern binds name typed by that field, not by a field of another name | `struct-pattern-renamed-field` | – | **no**: no run -calls-> Repo.find |
+| a binding in a tuple struct pattern is typed by the field at its position | `tuple-struct-pattern-binding` | – | **no**: no run -calls-> Repo.find has run -calls-> Other.find |
+| a binding in a tuple pattern is typed by the element at its position | `tuple-pattern-binding` | – | yes |
+| a path written as a bound of a range pattern is a read of the constant it names | `range-pattern-bound-is-a-constant` | – | yes |
+| `Pair { 0: first, .. }` binds first as the type of field 0 | `tuple-index-field-pattern` | – | **no**: no run -calls-> Repo.find |
+| `[first, ..]` over `&[T]` binds first as a T | `slice-pattern-element` | – | **no**: no run -calls-> Repo.find |
+| `let &inner = r;` with `r: &Repo` binds inner as a Repo | `reference-pattern-binding` | – | yes |
+| a binding of a `let` in a `while` condition chain is a name of the operands after it and of the loop body, typed by the pattern | `while-let-chain-binding` | 2024– | **no**: no run -calls-> Repo.find |
+| a name bound in a struct pattern nested in a struct pattern is typed by the field it sits at | `nested-struct-pattern-binding-type` | – | **no**: no run -calls-> Repo.find; run -calls-> Other.find |
+| names of a tuple pattern matched against a tuple expression of locals are typed by the operand at their position | `match-on-a-tuple-expression` | – | **no**: no run -calls-> Repo.find; run -calls-> Other.find |
+| a function named in a macro's arguments is looked up at the invocation site: the nested `helper` beats the top-level one | `macro-argument-sees-invocation-site` | – | yes |
 
 ### swift (52 of 52)
 
@@ -1569,4 +1782,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1169 of 1285 rules hold
+1271 of 1495 rules hold

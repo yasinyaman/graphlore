@@ -1240,6 +1240,31 @@ extensions are written for (`await 3`), aliases and `global::`, attribute
 targets, accessibility, nullable value types, and the finer points of
 overload resolution.
 
+Rust, the third: the Reference file by file (one section per file, a rule
+id going to the file of its longest prefix) and rustc's resolver
+(`rustc_resolve`'s `ident.rs`, `late.rs`, `imports.rs`,
+`build_reduced_graph.rs`, `macros.rs`) and method probe (`probe.rs`,
+`confirm.rs`, `mod.rs`), 121 sections in 8 groups (44 with no rule of name
+binding, settled by hand). 24 readers (two rounds of gap hunting; only names
+found nothing in its second) returned 508 rows: 216 new cases, 116 held, 139
+not followed, 37 sections with no rule. rust-analyzer answers
+`verify_cases.py --binding` for Rust (`oracle_rust.py --dump`, its LSIF index
+of each case's project); of the 209 distinct cases one did not compile (a
+generic parameter of an outer item, E0401) and the binding check first
+flagged 15. Its blind spots were two, and the check learnt both: rust-analyzer
+names the function of the `impl Trait for X` block a trait's method call runs
+where the graph names the trait's (a use bound to a function the trait
+dispatches to, or one of an `impl` of that trait, counts as the trait's), and
+absent edges named by a bare name that a field and a function share
+(qualified by line by hand). The inventory has 509 rules (362 held, 147 not
+followed) and 121 of 121 sections read. The engine holds 100 of the 208 new
+cases (177 of the 285), precise mode 253. Open, by size: pattern bindings
+typed by what they take apart (`for (a, b)`, `while let`, struct, tuple
+struct, slice and `@` patterns, a parameter pattern), operators as calls of
+their traits' impls (`+`, `==`, `!`, `?`, `[]`, `*`), globs that skip private
+names, type aliases, `Deref` targets, `where` bounds and associated types,
+edition 2015 paths and `#[path]`.
+
 **Phase 3: inference, by the numbers.** (Measured: see 'Phase 3: inference, by the numbers' above; nothing built.) Per language, what one step of
 inference would add (a closure parameter typed by the collection it is
 called on, a pattern binding), from the lists the oracles already produce,
