@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Rust operators are calls of their traits' methods** (seven of the
+  sweep's cases): `a + b` is `add` of a's type, `a += b` `add_assign`, `-a`
+  `neg`, `!a` `not`, `*a` `deref`, `a[i]` `index`, `==` `eq`, `<`
+  `partial_cmp`, kept only where it resolves to a method of the project's
+  type (`refs::rust_operator`, context `operator`). Never for `*self`, for
+  one of several impls of the trait for one type (the operand types pick,
+  which the facts do not say) or for an impl written for a library's type.
 - **Rust patterns bind the parts they take** (ten of the sweep's cases).
   A parameter written as a pattern (`(c, _o): (Config, Other)`,
   `Pair(a, b): Pair`), a `let`, `if let` / `while let`, a `match` arm and a

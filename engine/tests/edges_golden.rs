@@ -4223,3 +4223,18 @@ fn rust_patterns_bind_the_parts_they_take() {
         );
     }
 }
+
+// Rust operators are calls of their traits' methods on the operand's type
+// (the sweep's 'Operator expressions'); `*self` is the language's own.
+#[test]
+fn rust_operators_call_their_traits_methods() {
+    let calls = call_ids("rust-operators", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        (
+            "src/lib.rs",
+            "use std::ops::{Add, Neg};\n\n#[derive(Clone, Copy, PartialEq)]\npub struct V(pub i32);\n\nimpl Add for V {\n    type Output = V;\n    fn add(self, o: V) -> V {\n        V(self.0 + o.0)\n    }\n}\n\nimpl Neg for V {\n    type Output = V;\n    fn neg(self) -> V {\n        V(-self.0)\n    }\n}\n\npub fn sum(a: V, b: V) -> V {\n    a + b\n}\n\npub fn flip(a: V) -> V {\n    -a\n}\n",
+        ),
+    ]);
+    let has = |from: &str, to: &str| calls.contains(&(from.to_string(), to.to_string()));
+    assert!(has("sum()", "src_lib_v_add") && has("flip()", "src_lib_v_neg"), "{calls:?}");
+}

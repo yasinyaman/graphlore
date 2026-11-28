@@ -148,7 +148,7 @@ pattern or attribute argument writes.
 The other five languages with an indexer here lose nothing: TypeScript 60 of
 60, JavaScript 31 of 31, Java 71 of 71, Ruby 37 of 37 in precise mode. Rust
 was 75 of 75 before its sweep; of the 285 cases after it, precise mode holds
-253 and the engine alone 187 (rust-analyzer settles the ones that need a
+253 and the engine alone 194 (rust-analyzer settles the ones that need a
 type: patterns, operators, `Deref`, aliases) — 1127 of the 1199 cases of the
 seven. Ruby's
 `module-method-is-no-bare-call` holds only there: the engine still guesses a
@@ -1254,7 +1254,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | a namespace-qualified attribute name finds the suffixed class in that namespace only | `attribute-qualified-name` | – | **no**: no B -references-> Two.MarkAttribute |
 | a generic attribute's type arguments choose the class of that arity, not the non-generic class of the same name | `attribute-generic-arity` | 11– | **no**: no Target -references-> MarkAttribute<T> has Target -references-> MarkAttribute |
 
-### rust (187 of 285)
+### rust (194 of 285)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
@@ -1476,7 +1476,7 @@ Found by: the specification 37, a compiler 17, comparison 6, the grammar 2, the 
 | a value typed `T::Item` has the methods of the trait a where clause bounds `T::Item` by, not a same-named inherent method of an unrelated type | `where-bound-on-an-associated-type` | – | **no**: no render -calls-> Show.show |
 | a name written inside a fn pointer, tuple, array or raw pointer type is a use of that type, and only of the one written | `types-inside-builtin-generic-types` | – | yes |
 | A generic parameter's default is the type a bare use of the generic stands for: h.v of `Holder` (= Holder<Config>) has Config's methods, not another type's same-named method | `rust-generic-param-default-type` | – | **no**: no run -calls-> Config.show |
-| an operator written on values of a project type is a call of the method its `std::ops` trait impl gives that type (`a & b` is `BitAnd::bitand` of a's type) | `bitwise-operator-calls-the-trait-impl` | – | **no**: no both -calls-> V.bitand |
+| an operator written on values of a project type is a call of the method its `std::ops` trait impl gives that type (`a & b` is `BitAnd::bitand` of a's type) | `bitwise-operator-calls-the-trait-impl` | – | yes |
 | `m::STATIC` names the static item of module m, and reading it is a read of that item | `static-through-a-module-path` | – | yes |
 | `Type::CONST` names the associated constant of that type, not the same-named constant of another type | `associated-const-path` | – | **no**: no run -reads-> src/lib.rs:MAX@4 |
 | a path to an associated function or method used as a value (`Type::method`, no call) is a use of that function | `path-to-a-method-as-a-value` | – | **no**: no run -indirect_call-> Counter.bump |
@@ -1501,20 +1501,20 @@ Found by: the specification 37, a compiler 17, comparison 6, the grammar 2, the 
 | an array expression `[A, A]` has elements of the type of its operands, so `xs[0].go()` is A's | `array-list-element-type` | – | **no**: no list -calls-> A.go |
 | `[B; 3]` is an array of B | `array-repeat-element-type` | – | **no**: no repeat -calls-> B.go |
 | the length operand and a constant repeat operand are paths to constant items, which the expression reads | `array-length-and-repeat-operand-read-constants` | – | yes |
-| an index expression on another type is a call of its `Index::index` | `index-expression-calls-index` | – | **no**: no run -calls-> Grid.index |
+| an index expression on another type is a call of its `Index::index` | `index-expression-calls-index` | – | yes |
 | the element of an indexed value is the impl's `type Output`: `g[0].val()` is the Output's method | `index-output-type` | – | **no**: no run -calls-> Cell.val |
 | a parenthesized expression is its operand: `(a).go()`, `(helper)()` bind as without parentheses | `grouped-expression-is-its-operand` | – | yes |
 | `_` in a destructuring assignment names nothing, and the other names are the existing places assigned: `(_, TOTAL) = p` writes TOTAL | `tuple-destructuring-assignment-writes` | – | yes |
 | `&x` is a reference to x's type: a method on `r = &c` is c's type's | `borrow-and-dereference-keep-the-type` | – | **no**: no boxed -calls-> Config.show |
-| on non-pointer types `*x` is `*Deref::deref(&x)`: a call of the type's `deref` | `explicit-deref-calls-deref` | – | **no**: no run -calls-> Wrapper.deref |
+| on non-pointer types `*x` is `*Deref::deref(&x)`: a call of the type's `deref` | `explicit-deref-calls-deref` | – | yes |
 | `Err(e)` returns `Err(From::from(e))`: `?` calls the `From` impl of the function's error type | `try-converts-with-from` | – | **no**: no run -calls-> AppError.from |
-| unary `-` and `!` on a project type are calls of its `Neg::neg` / `Not::not` | `unary-operator-calls-the-trait-impl` | – | **no**: no flip -calls-> V.neg; invert -calls-> V.not |
-| `a + b` of a project type is a call of `Add::add` of a's type | `binary-operator-calls-the-trait-impl` | – | **no**: no sum -calls-> V.add |
-| `a == b` of a project type is a call of its `PartialEq::eq` | `comparison-calls-eq` | – | **no**: no same -calls-> V.eq |
+| unary `-` and `!` on a project type are calls of its `Neg::neg` / `Not::not` | `unary-operator-calls-the-trait-impl` | – | yes |
+| `a + b` of a project type is a call of `Add::add` of a's type | `binary-operator-calls-the-trait-impl` | – | yes |
+| `a == b` of a project type is a call of its `PartialEq::eq` | `comparison-calls-eq` | – | yes |
 | the type after `as` is in the type namespace: `x as Meters` is the alias, not a function `Meters` | `cast-type-is-in-the-type-namespace` | – | yes |
 | the assignee operand `c.n` is a place: `c.n = 1` and `c.items[0] = 1` write the field, `c.n` read reads it | `field-assignment-writes-the-field` | – | yes |
 | a struct pattern as the assignee names its type; its field labels are fields and the values are existing places: `Position { x: LAST, y: _ } = p` writes LAST | `struct-destructuring-assignment-writes` | – | **no**: no run -writes-> LAST has run -reads-> LAST |
-| `x += y` of a project type is a call of `AddAssign::add_assign` of x's type | `compound-assignment-calls-the-trait-impl` | – | **no**: no grow -calls-> V.add_assign |
+| `x += y` of a project type is a call of `AddAssign::add_assign` of x's type | `compound-assignment-calls-the-trait-impl` | – | yes |
 | a method call finds a trait's method only when that trait is in scope: `use a::Run;` makes `s.go()` Run's, never b::Walk's of the same name | `method-trait-in-scope` | – | **no**: no use_run -calls-> a.Run.go |
 | `Show::show(c)` is a call of the trait's method `Show.show`, not of `Dog.show`, another type's impl | `call-trait-path-method` | – | yes |
 | a type written as a generic argument of an expression path (`make::<Widget>()`) is a use of that type | `turbofish-argument-names-a-type` | – | yes |
@@ -1782,4 +1782,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1281 of 1495 rules hold
+1288 of 1495 rules hold

@@ -10372,6 +10372,19 @@ fn resolve_file(
         {
             continue;
         }
+        // Rust: of two impls of an operator's trait for one type (`impl Add
+        // for Stats`, `impl Add<&Stats> for Stats`) the operand types pick,
+        // which the facts do not say; and an impl for a library's type
+        // (`impl Index<Match> for [u8]`) is one of its many indexings
+        if r.context == "operator" && p.family[f] == Some(Family::Rust) {
+            if let Some((Target::Def(t), _)) = &found {
+                let key = qual_key(Family::Rust, &p.def(*t).qualname);
+                let several = p.by_qual.get(&key).is_some_and(|v| v.len() > 1);
+                if several || p.class_of(t.0, Some(t.1)).is_none() {
+                    continue;
+                }
+            }
+        }
         // a local called (`handler(x)`, `builder::add`) is the value
         // it holds being called, not its type being constructed
         if is_call && r.path.len() == 1 && p.is_local_name(f, scope_def, &r.path[0]) {

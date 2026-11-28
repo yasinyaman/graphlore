@@ -1,5 +1,5 @@
 {
- "passed": 1281,
+ "passed": 1288,
  "total": 1495,
  "cases": [
   {
@@ -9973,14 +9973,8 @@
   },
   {
    "id": "rust/bitwise-operator-calls-the-trait-impl",
-   "ok": false,
-   "missing": [
-    [
-     "both",
-     "calls",
-     "V.bitand"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -10224,14 +10218,8 @@
   },
   {
    "id": "rust/index-expression-calls-index",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Grid.index"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -10272,14 +10260,8 @@
   },
   {
    "id": "rust/explicit-deref-calls-deref",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Wrapper.deref"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -10296,43 +10278,20 @@
   },
   {
    "id": "rust/unary-operator-calls-the-trait-impl",
-   "ok": false,
-   "missing": [
-    [
-     "flip",
-     "calls",
-     "V.neg"
-    ],
-    [
-     "invert",
-     "calls",
-     "V.not"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "rust/binary-operator-calls-the-trait-impl",
-   "ok": false,
-   "missing": [
-    [
-     "sum",
-     "calls",
-     "V.add"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "rust/comparison-calls-eq",
-   "ok": false,
-   "missing": [
-    [
-     "same",
-     "calls",
-     "V.eq"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -10367,14 +10326,8 @@
   },
   {
    "id": "rust/compound-assignment-calls-the-trait-impl",
-   "ok": false,
-   "missing": [
-    [
-     "grow",
-     "calls",
-     "V.add_assign"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {

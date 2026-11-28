@@ -2751,6 +2751,68 @@ fn held_path(v: Node, src: &[u8]) -> Option<Vec<String>> {
     })
 }
 
+/// A Rust operator expression's operand and the trait method it calls
+/// (`a + b`: `a`, `add`), or None for an operator no trait gives (`&&`,
+/// `||`, `&x`) or a node that is no operator.
+fn rust_operator<'t>(n: Node<'t>, src: &[u8]) -> Option<(Node<'t>, &'static str)> {
+    let binary = |op: &str| -> Option<&'static str> {
+        Some(match op {
+            "+" => "add",
+            "-" => "sub",
+            "*" => "mul",
+            "/" => "div",
+            "%" => "rem",
+            "&" => "bitand",
+            "|" => "bitor",
+            "^" => "bitxor",
+            "<<" => "shl",
+            ">>" => "shr",
+            "==" | "!=" => "eq",
+            "<" | ">" | "<=" | ">=" => "partial_cmp",
+            _ => return None,
+        })
+    };
+    match n.kind_str() {
+        "binary_expression" => {
+            let op = text(n.by_field("operator")?, src);
+            Some((n.by_field("left")?, binary(&op)?))
+        }
+        "compound_assignment_expr" => {
+            let op = text(n.by_field("operator")?, src);
+            let method = match op.as_str() {
+                "+=" => "add_assign",
+                "-=" => "sub_assign",
+                "*=" => "mul_assign",
+                "/=" => "div_assign",
+                "%=" => "rem_assign",
+                "&=" => "bitand_assign",
+                "|=" => "bitor_assign",
+                "^=" => "bitxor_assign",
+                "<<=" => "shl_assign",
+                ">>=" => "shr_assign",
+                _ => return None,
+            };
+            Some((n.by_field("left")?, method))
+        }
+        "unary_expression" => {
+            let op = n.child(0).map(|c| text(c, src))?;
+            let operand = kids(n).into_iter().next()?;
+            let method = match op.as_str() {
+                "-" => "neg",
+                "!" => "not",
+                // (`*self` in a `&self` method takes the reference apart,
+                // the language's own dereference)
+                "*" if operand.kind_str() == "self" || text(operand, src) == "self" => return None,
+                "*" => "deref",
+                _ => return None,
+            };
+            Some((operand, method))
+        }
+        "index_expression" => Some((kids(n).into_iter().next()?, "index")),
+        _ => None,
+    }
+}
+
 /// The parts of a Rust tuple or tuple struct pattern in the order written,
 /// `_` (an unnamed node) included: what says which part each one takes.
 fn pattern_items<'t>(p: Node<'t>, ty: Option<Node<'t>>) -> Vec<Node<'t>> {
@@ -4797,6 +4859,26 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 {
                     path.push(format!("operator{op}"));
                     push(&mut refs, n, RefKind::Call, path, "operator", None);
+                }
+            }
+        }
+        // Rust: an operator is the method of its trait (the Reference's
+        // 'Operator expressions', `std::ops` / `std::cmp`): `a + b` is
+        // `a.add(b)`, `a += b` `a.add_assign(b)`, `-a` `a.neg()`, `!a`
+        // `a.not()`, `*a` `a.deref()`, `a[i]` `a.index(i)`, `a == b`
+        // `a.eq(&b)`, `a < b` `a.partial_cmp(&b)`; context `operator`, kept
+        // only where it resolves to a method of the operand's type
+        if facts.lang == Some(crate::lang::Lang::Rust) {
+            if let Some((operand, method)) = rust_operator(n, src) {
+                if let Some(mut path) =
+                    path_of(operand, src).filter(|p| !p.iter().any(|s| s == UNKNOWN))
+                {
+                    path.push(method.to_string());
+                    let at = refs.len();
+                    push(&mut refs, n, RefKind::Call, path, "operator", None);
+                    if let Some(r) = refs.get_mut(at) {
+                        r.args = Some(u8::from(!matches!(n.kind_str(), "unary_expression")));
+                    }
                 }
             }
         }
