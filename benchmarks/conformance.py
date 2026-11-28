@@ -1956,7 +1956,7 @@ case("go", "library-receiver-is-no-guess", "a method called on a value the sourc
 case("rust", "field-beside-a-method", "`self.x` with no call is the field, beside a method of its name",
      RS, {"Cargo.toml": CARGO,
           "src/lib.rs": "pub struct Config {\n    proxy: u8,\n}\n\nimpl Config {\n    pub fn proxy(mut self, p: u8) -> Self {\n        self.proxy = p;\n        self\n    }\n\n    pub fn show(&self) -> u8 {\n        self.proxy\n    }\n}\n"},
-     [("Config.show", "reads", "src/lib.rs:Config.proxy")], [("Config.show", "references", "Config.proxy")])
+     [("Config.show", "reads", "src/lib.rs:Config.proxy@2")], [("Config.show", "references", "src/lib.rs:Config.proxy@6")])
 case("rust", "result-of-self", "`-> Result<Self, E>` gives the type the method is declared for",
      RS, {"Cargo.toml": CARGO,
           "src/lib.rs": "pub struct Error;\n\npub struct Authority;\n\nimpl Authority {\n    pub fn username(&self) -> u8 {\n        1\n    }\n}\n\npub struct Proxy;\n\nimpl Proxy {\n    pub fn new(_s: &str) -> Result<Self, Error> {\n        Err(Error)\n    }\n\n    pub fn username(&self) -> u8 {\n        2\n    }\n}\n\npub fn t() -> u8 {\n    let proxy = Proxy::new(\"x\").ok().unwrap();\n    proxy.username()\n}\n\npub fn direct() -> u8 {\n    let proxy = match Proxy::new(\"x\") {\n        Ok(p) => p,\n        Err(_) => return 0,\n    };\n    proxy.username()\n}\n\npub fn plain() -> u8 {\n    let proxy = Proxy::new(\"x\").unwrap_or(Proxy);\n    proxy.username()\n}\n"},

@@ -15,6 +15,7 @@ resolver, on the whole program.
 
     rustup component add rust-analyzer
     python benchmarks/oracle_rust.py /tmp/polyglot/ureq --samples 20
+    python benchmarks/oracle_rust.py --dump PROJECT   # one line per binding (verify_cases.py --binding)
 """
 from __future__ import annotations
 
@@ -93,7 +94,20 @@ def judge(root: Path) -> dict[str, Any] | None:
     return result
 
 
+def dump(root: Path) -> int:
+    """Each use rust-analyzer binds to a declaration of the project, one JSON
+    line in `oracle_go.py`'s shape (`file`, `line`, `expr`, `to_file`,
+    `to_line`): what `verify_cases.py --binding` reads."""
+    for u in bindings(root):
+        for to_file, to_line in u["decls"]:
+            print(json.dumps({"file": u["file"], "line": u["line"], "expr": u["expr"],
+                              "to_file": to_file, "to_line": to_line}))
+    return 0
+
+
 def main() -> int:
+    if sys.argv[1:2] == ["--dump"] and len(sys.argv) == 3:
+        return dump(Path(sys.argv[2]).resolve())
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("repos", nargs="+", help="Cargo workspaces")
     ap.add_argument("--samples", type=int, default=6)

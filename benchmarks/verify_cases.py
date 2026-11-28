@@ -27,7 +27,8 @@ A language with no toolchain on this machine is listed as not checked.
 
 That a case compiles does not say which definition a name in it reaches.
 `--binding` asks that too, where a type checker answers (Go: go/types, through
-`oracle_go.py`'s program): for each edge a case expects, the compiler must bind
+`oracle_go.py`'s program; C#: Roslyn; Rust: rust-analyzer, `oracle_rust.py
+--dump`): for each edge a case expects, the compiler must bind
 a use inside the source definition to the target definition; for each edge it
 says is absent, it must not. A case whose expectation the compiler contradicts
 is wrong, whatever the engine does with it. Edges that are no binding of a name
@@ -176,13 +177,14 @@ def verify(c: dict[str, Any]) -> dict[str, Any]:
 # relations that bind no name the compiler could be asked about
 NOT_BINDINGS = {"imports", "imports_from", "re_exports", "contains", "method", "defines",
                 "case_of", "dispatches_to", "couples_with", "documents", "handles", "http_calls"}
-BINDERS = {"go", "csharp"}
+BINDERS = {"go", "csharp", "rust"}
 
 
 def binder(lang: str, tmp: Path) -> list[str] | None:
     """The command that prints a project's bindings in `oracle_go.py`'s
     shape (`file`, `line`, `expr`, `to_file`, `to_line`), built once under
-    `tmp`: go/types for Go, Roslyn for C#. None when it cannot be built."""
+    `tmp`: go/types for Go, Roslyn for C#, rust-analyzer for Rust. None when
+    it cannot be built."""
     if lang == "go":
         import oracle_go
         if oracle_go.setup(tmp):
@@ -198,6 +200,11 @@ def binder(lang: str, tmp: Path) -> list[str] | None:
                                env={**os.environ, "DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1"})
         dll = tool / "out" / "oracle.dll"
         return ["dotnet", str(dll)] if built.returncode == 0 and dll.exists() else None
+    if lang == "rust":
+        import shutil
+        if shutil.which("rust-analyzer") is None:
+            return None
+        return [sys.executable, str(Path(__file__).resolve().parent / "oracle_rust.py"), "--dump"]
     return None
 
 
