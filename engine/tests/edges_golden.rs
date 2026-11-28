@@ -4170,3 +4170,35 @@ fn module_scopes_of_ecma_and_ruby() {
     ]);
     assert!(!rb.iter().any(|(_, t)| t.starts_with("lib_faraday")), "{rb:?}");
 }
+
+// Rust: of the impls of one generic type for different type arguments, a
+// call's turbofish names the one whose function it calls (ureq's
+// `RequestBuilder::<WithBody>::new`).
+#[test]
+fn turbofish_picks_the_impl() {
+    let calls = call_ids("rust-turbofish", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        (
+            "src/lib.rs",
+            "pub struct WithBody;\npub struct WithoutBody;\n\npub struct RequestBuilder<B> {\n    pub body: B,\n}\n\nimpl RequestBuilder<WithoutBody> {\n    pub fn new() -> Self {\n        RequestBuilder { body: WithoutBody }\n    }\n}\n\nimpl RequestBuilder<WithBody> {\n    pub fn new() -> Self {\n        RequestBuilder { body: WithBody }\n    }\n}\n\npub fn post() -> RequestBuilder<WithBody> {\n    RequestBuilder::<WithBody>::new()\n}\n\npub fn get() -> RequestBuilder<WithoutBody> {\n    RequestBuilder::<WithoutBody>::new()\n}\n",
+        ),
+    ]);
+    let has = |from: &str, to: &str| calls.contains(&(from.to_string(), to.to_string()));
+    assert!(has("post()", "src_lib_requestbuilder_new_2"), "{calls:?}");
+    assert!(has("get()", "src_lib_requestbuilder_new"), "{calls:?}");
+    assert!(!has("post()", "src_lib_requestbuilder_new"), "{calls:?}");
+}
+
+// Rust: a method of an impl for the impl's own type parameter (ripgrep's
+// `impl<'a, M: Matcher> Matcher for &'a M`) is never a library value's.
+#[test]
+fn blanket_impl_is_no_method_of_a_library_type() {
+    let calls = call_ids("rust-blanket", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        (
+            "src/lib.rs",
+            "pub trait Finder {\n    fn find(&self, x: char) -> Option<usize>;\n}\n\nimpl<'a, M: Finder> Finder for &'a M {\n    fn find(&self, x: char) -> Option<usize> {\n        (*self).find(x)\n    }\n}\n\npub struct Text {\n    pub s: String,\n}\n\nimpl Text {\n    pub fn first_a(&self) -> Option<usize> {\n        self.s.find('a')\n    }\n}\n",
+        ),
+    ]);
+    assert!(!calls.iter().any(|(from, _)| from == ".first_a()"), "{calls:?}");
+}

@@ -2527,6 +2527,37 @@ fn param_node<'t>(ps: Node<'t>, name: &str, src: &[u8]) -> Option<Node<'t>> {
 /// How many type arguments a call writes for what it calls: C#
 /// `client.Get<User>(id)` (the called name is a `generic_name`), Java
 /// `this.<User>get(id)`.
+/// The last names of the type arguments a Rust `generic_type` is written
+/// with: `RequestBuilder<WithBody, u8>` gives `["WithBody", "u8"]`, a
+/// lifetime nothing.
+fn rust_targ_names(generic: Node, src: &[u8]) -> Vec<String> {
+    let Some(list) = generic.by_field("type_arguments") else { return Vec::new() };
+    kids(list)
+        .into_iter()
+        .filter_map(|a| match a.kind_str() {
+            "type_identifier" | "primitive_type" => Some(text(a, src)),
+            "scoped_type_identifier" => a.by_field("name").map(|x| text(x, src)),
+            "generic_type" => a.by_field("type").map(|t| {
+                let t = t.by_field("name").unwrap_or(t);
+                text(t, src)
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Rust `Type::<A>::f()`: the type arguments of the type before the name
+/// called (`["A"]`), where the call writes them.
+fn rust_path_targs(n: Node, src: &[u8]) -> Vec<String> {
+    let Some(f) = n.by_field("function").filter(|f| f.kind_str() == "scoped_identifier") else {
+        return Vec::new();
+    };
+    match f.by_field("path") {
+        Some(p) if p.kind_str() == "generic_type" => rust_targ_names(p, src),
+        _ => Vec::new(),
+    }
+}
+
 fn call_targs(n: Node) -> u8 {
     let called = n.by_field("function").map(|f| {
         if f.kind_str() == "member_access_expression" {
@@ -3329,6 +3360,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             hints: Vec::new(),
             implicit: None,
             targs: 0,
+            path_targs: Vec::new(),
             arity,
             this_of: None,
             recv: None,
@@ -3485,6 +3517,34 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         if let Some(found) = m.imports_of(n, src) {
             imports.extend(found);
             continue;
+        }
+        // Rust `impl RequestBuilder<WithBody> { fn new() … }`: the impl's type
+        // arguments, on each function of its body
+        if n.kind_str() == "impl_item" {
+            let targs = n
+                .by_field("type")
+                .filter(|t| t.kind_str() == "generic_type")
+                .map(|t| rust_targ_names(t, src))
+                .unwrap_or_default();
+            // (`impl<M: Matcher> Matcher for &M`: for its own type parameter)
+            let blanket = n.by_field("type").is_some_and(|mut t| {
+                while matches!(t.kind_str(), "reference_type" | "pointer_type") {
+                    match t.by_field("type") {
+                        Some(x) => t = x,
+                        None => return false,
+                    }
+                }
+                t.kind_str() == "type_identifier"
+                    && type_params(n, src).iter().any(|p| *p == text(t, src))
+            });
+            if !targs.is_empty() || blanket {
+                for item in n.by_field("body").map(kids).unwrap_or_default() {
+                    if let Some(&di) = by_node.get(&item.id()) {
+                        facts.defs[di].owner_targs = targs.clone();
+                        facts.defs[di].blanket = blanket;
+                    }
+                }
+            }
         }
         facts.spec_includes.extend(m.spec_includes(n, src));
         if !by_node.contains_key(&n.id()) {
@@ -4764,6 +4824,11 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 r.self_arg = passes_self(n, src);
                 r.hints = arg_facts(n, src);
                 r.targs = call_targs(n);
+                if n.kind_str() == "call_expression"
+                    && crate::parse::current() == Some(crate::lang::Lang::Rust)
+                {
+                    r.path_targs = rust_path_targs(n, src);
+                }
             }
             // functions handed over as values: `MockTransport(app)`,
             // `map(str.strip, xs)`, `hooks = [on_request]` inside an argument
@@ -8317,6 +8382,8 @@ fn add_blocks(
         }
         let parent = open.last().map(|&(i, _)| i);
         defs.push(Def {
+            owner_targs: Vec::new(),
+            blanket: false,
             name: String::new(),
             qualname: String::new(),
             kind: crate::facts::DefKind::Other,
@@ -8512,6 +8579,8 @@ fn add_extras(
                 .then(|| (line(around), m.end_line(around)))
         });
         defs.push(Def {
+            owner_targs: Vec::new(),
+            blanket: false,
             name,
             qualname,
             kind: *kind,

@@ -1,6 +1,6 @@
 {
- "passed": 1169,
- "total": 1285,
+ "passed": 1171,
+ "total": 1287,
  "cases": [
   {
    "id": "python/module-function",
@@ -8660,6 +8660,18 @@
      "Faraday.Utils.URI"
     ]
    ]
+  },
+  {
+   "id": "rust/turbofish-picks-the-impl",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/blanket-impl-is-no-method-of-a-library-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   }
  ]
 }

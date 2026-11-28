@@ -24,7 +24,7 @@ pub const CACHE_DIR: &str = "cache";
 /// The layout of the cached facts (`Key::format`): 2 keeps a definition's
 /// byte range, which an update resolved without before; 3 keeps each file's
 /// shadowed names and the hash of its facts.
-pub const FORMAT: u32 = 3;
+pub const FORMAT: u32 = 4;
 pub const CACHE_FILE: &str = "graphlore-native.bin";
 /// A file modified this close to the cache being written may have changed
 /// again within the same timestamp: its content hash decides.

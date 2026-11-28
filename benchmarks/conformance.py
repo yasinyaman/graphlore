@@ -5566,6 +5566,19 @@ case("ruby", "module-method-is-no-bare-call", "a bare call is a method of `self`
       "spec/ip_spec.rb": "RSpec.describe 'ip' do\n  def ip_of(url)\n    URI(url).host\n  end\nend\n"},
      [], [("ip_of", "calls", "Faraday.Utils.URI")],
      source="faraday spec/integration/options/proxy_options_integration_spec.rb; the facts hold no top-level `include`, which the rule needs to tell this from rakefile.rb's `include RakefileHelpers`")
+# Found by rust-analyzer on ureq (`oracle_rust.py`): the impls of one generic
+# type for different type arguments, told apart by the turbofish of a call.
+case("rust", "turbofish-picks-the-impl", "`Type::<A>::f()` is the `f` of the `impl Type<A>` block, of several impls of one generic type each with an `f`",
+     "The Rust Reference, 'Implementations' (r[items.impl.inherent]: an inherent impl is of the type it is written for, type arguments and all) and 'Paths' (r[paths.expr.turbofish])",
+     {"Cargo.toml": CARGO21, "src/lib.rs": "pub struct WithBody;\npub struct WithoutBody;\n\npub struct RequestBuilder<B> {\n    pub body: B,\n}\n\nimpl RequestBuilder<WithoutBody> {\n    pub fn new() -> Self {\n        RequestBuilder { body: WithoutBody }\n    }\n}\n\nimpl RequestBuilder<WithBody> {\n    pub fn new() -> Self {\n        RequestBuilder { body: WithBody }\n    }\n}\n\npub fn post() -> RequestBuilder<WithBody> {\n    RequestBuilder::<WithBody>::new()\n}\n\npub fn get() -> RequestBuilder<WithoutBody> {\n    RequestBuilder::<WithoutBody>::new()\n}\n"},
+     [("post", "calls", "src/lib.rs:RequestBuilder.new@15"), ("get", "calls", "src/lib.rs:RequestBuilder.new@9")],
+     [("post", "calls", "src/lib.rs:RequestBuilder.new@9"), ("get", "calls", "src/lib.rs:RequestBuilder.new@15")],
+     source="ureq src/request.rs `RequestBuilder::<WithBody>::new`; rustc_hir_typeck method/probe.rs (an inherent candidate's impl must unify with the self type)")
+case("rust", "blanket-impl-is-no-method-of-a-library-type", "a method of an impl for the impl's own type parameter (`impl<M: Finder> Finder for &M`) is no method a value of a library's type is asked: `self.s.find('a')` on a `String` field is `str::find`",
+     "The Rust Reference, 'Implementations' (r[items.impl.trait]) and 'Method call expressions' (r[expr.method.candidate-search]: the candidates are the methods of the receiver's type and of the traits it implements)",
+     {"Cargo.toml": CARGO21, "src/lib.rs": "pub trait Finder {\n    fn find(&self, x: char) -> Option<usize>;\n}\n\nimpl<'a, M: Finder> Finder for &'a M {\n    fn find(&self, x: char) -> Option<usize> {\n        (*self).find(x)\n    }\n}\n\npub struct Text {\n    pub s: String,\n}\n\nimpl Text {\n    pub fn first_a(&self) -> Option<usize> {\n        self.s.find('a')\n    }\n}\n"},
+     [], [("Text.first_a", "calls", "find")],
+     source="ripgrep crates/regex/src/matcher.rs `self.regex.find(input)` beside grep-matcher's `impl<'a, M: Matcher> Matcher for &'a M`")
 
 
 

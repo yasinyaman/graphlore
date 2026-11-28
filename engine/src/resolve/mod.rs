@@ -573,6 +573,11 @@ const RUST_PRIMITIVES: &[&str] = &[
     "i128", "isize", "f32", "f64",
 ];
 
+/// The types Rust's prelude names in every module (`String`, `Vec`): a type
+/// written with one of these, where the project defines none of the name,
+/// is the standard library's.
+const RUST_PRELUDE_TYPES: &[&str] = &["String", "Vec", "Option", "Result", "Box"];
+
 /// Methods of C++'s standard library (`std::string::c_str`).
 const CPP_CORE_METHODS: &[&str] = &[
     "c_str",
@@ -2910,6 +2915,11 @@ impl<'a> Project<'a> {
     /// When several fit alike, all of them (at most four, the one found
     /// first): the call is of one of them, and the facts do not say which.
     fn pick_overload(&self, f: usize, d: Option<usize>, m: DefRef, r: &RefFact) -> Vec<DefRef> {
+        // Rust `RequestBuilder::<WithBody>::new()`: the `new` of the impl
+        // written for those type arguments
+        if let Some(x) = self.impl_for_turbofish(m, &r.path_targs) {
+            return vec![x];
+        }
         // where one name can have several definitions at once; elsewhere a
         // second definition replaces the first
         if !self.family[m.0].is_some_and(Family::overloads) {
@@ -4328,7 +4338,16 @@ impl<'a> Project<'a> {
             None
         };
         let Some(head) = written.and_then(|p| p.first()) else { return false };
-        matches!(self.resolve_name(x.0, def.parent, head), Some(Target::Ext(..)))
+        match self.resolve_name(x.0, def.parent, head) {
+            Some(Target::Ext(..)) => true,
+            // (Rust: `s: String`, `n: u32`, named by the prelude or the language)
+            None => {
+                self.family[x.0] == Some(Family::Rust)
+                    && (RUST_PRIMITIVES.contains(&head.as_str())
+                        || RUST_PRELUDE_TYPES.contains(&head.as_str()))
+            }
+            _ => false,
+        }
     }
 
     /// A local that does not hide the outer name: a plain assignment where
@@ -5945,10 +5964,12 @@ impl<'a> Project<'a> {
                 if path.len() >= 2
                     && self.def(t).receiver.is_none()
                     // (nor a method a project trait gives a library's type:
-                    // `impl UriExt for Uri`)
-                    && self
-                        .class_of(t.0, Some(t.1))
-                        .is_some_and(|c| self.def(c).kind != DefKind::Interface)
+                    // `impl UriExt for Uri`; one of an impl for any type,
+                    // `impl<M: Matcher> Matcher for &M`, is no such method)
+                    && (self.def(t).blanket
+                        || self
+                            .class_of(t.0, Some(t.1))
+                            .is_some_and(|c| self.def(c).kind != DefKind::Interface))
                     && self.receiver_is_library(f, d, &path[..path.len() - 1]) =>
             {
                 None
@@ -7902,6 +7923,38 @@ impl<'a> Project<'a> {
         *self.cur.borrow_mut() = s.3;
         *self.args.borrow_mut() = s.4;
         *self.self_arg.borrow_mut() = s.5;
+    }
+
+    /// Of the functions of one name the impls of a generic Rust type define
+    /// (`impl RequestBuilder<WithoutBody> { fn new() }`, `impl
+    /// RequestBuilder<WithBody> { fn new() }`), the one whose impl is written
+    /// with the type arguments the call's turbofish names. None when `m` is
+    /// already that one, or no single other is.
+    fn impl_for_turbofish(&self, m: DefRef, targs: &[String]) -> Option<DefRef> {
+        if targs.is_empty() || self.family[m.0] != Some(Family::Rust) {
+            return None;
+        }
+        let def = self.def(m);
+        if def.owner_targs.is_empty() || def.owner_targs == targs {
+            return None;
+        }
+        let key = qual_key(Family::Rust, &def.qualname);
+        let found: Vec<DefRef> = self
+            .by_qual
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|o| {
+                *o != m
+                    && self.family[o.0] == Some(Family::Rust)
+                    && self.def(*o).owner_targs == targs
+            })
+            .collect();
+        match found.as_slice() {
+            [one] => Some(*one),
+            _ => None,
+        }
     }
 
     /// What call reference `ri` of file `f` calls, with the overload its
@@ -11200,6 +11253,7 @@ pub fn resolve(
                     hints: Vec::new(),
                     implicit: None,
                     targs: 0,
+                    path_targs: Vec::new(),
                     arity: None,
                     this_of: None,
                     recv: None,

@@ -641,6 +641,8 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                 let children_owner =
                     if kind == DefKind::Extension { Some(bare.clone()) } else { None };
                 defs.push(Def {
+                    owner_targs: Vec::new(),
+                    blanket: false,
                     name: bare,
                     qualname: qualname.clone(),
                     kind,

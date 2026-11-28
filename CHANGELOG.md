@@ -7,6 +7,21 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Rust: the impl a turbofish names, and blanket impls kept off library
+  values** (two conformance cases, found by rust-analyzer on ureq and
+  ripgrep; `oracle_rust.py`). `RequestBuilder::<WithBody>::new()` is the
+  `new` of `impl RequestBuilder<WithBody>`, not of another impl of the type
+  (`Def::owner_targs`, `RefFact::path_targs`). A method of an impl written
+  for the impl's own type parameter (`impl<'a, M: Matcher> Matcher for &'a
+  M`) is no method a library's value is asked (`Def::blanket`): ripgrep's
+  `self.regex.find(…)` on a `regex_automata` value names nothing of the
+  project now, and a `String`, `Vec` or primitive field counts as the
+  library's where the project defines no type of the name. On ureq the
+  edges rust-analyzer contradicts fall from 40 to 34.
+- **`verify_cases.py --binding` asks rust-analyzer** about Rust cases, as it
+  asks go/types and Roslyn (`oracle_rust.py --dump`), and
+  `rule_inventory.py` lists the Rust Reference's files and rustc's resolver
+  as sections, for the sweep.
 - **`graphlore-out/`: the output directory under graphlore's own name**
   (release B's last step, `docs/native-engine.md`). Builds write
   `graphlore-out/graph.json` and `.graphlore_labels.json`. A graph in the

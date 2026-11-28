@@ -468,6 +468,7 @@ impl State {
             hints: Vec::new(),
             implicit: None,
             targs: 0,
+            path_targs: Vec::new(),
             arity: None,
             this_of: None,
             recv: None,

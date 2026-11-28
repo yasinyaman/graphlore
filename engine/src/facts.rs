@@ -240,6 +240,17 @@ pub struct Def {
     /// parameter of the class around is written as its name.
     #[serde(default)]
     pub targs: Vec<Vec<String>>,
+    /// A Rust function of `impl Type<A, B> { … }`: the last names of the type
+    /// arguments the impl's type is written with (`impl RequestBuilder<WithBody>`:
+    /// `["WithBody"]`). Of the impls of one generic type, the one a call's
+    /// turbofish names (`RequestBuilder::<WithBody>::new()`).
+    #[serde(default)]
+    pub owner_targs: Vec<String>,
+    /// A Rust function of an impl written for one of its own type parameters
+    /// (`impl<'a, M: Matcher> Matcher for &'a M`): it is no method of a type
+    /// the project or a library defines, so a library's value is not asked it.
+    #[serde(default)]
+    pub blanket: bool,
     /// For each of `targs`, the element type when it is a collection
     /// (`Call<List<Contributor>>`: `Contributor`).
     #[serde(default)]
@@ -555,6 +566,10 @@ pub struct RefFact {
     /// (`client.Get<User>(id)`: 1); 0 when it writes none.
     #[serde(default)]
     pub targs: u8,
+    /// Rust `Type::<A>::f()`: the last names of the type arguments written on
+    /// the type before the called name (`["A"]`).
+    #[serde(default)]
+    pub path_targs: Vec<String>,
     /// C#, for a type written: how many type arguments it is written with
     /// (`RestResponse` is 0, `RestResponse<T>` 1). C# tells types of one
     /// name apart by it.
