@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Rust patterns bind the parts they take** (ten of the sweep's cases).
+  A parameter written as a pattern (`(c, _o): (Config, Other)`,
+  `Pair(a, b): Pair`), a `let`, `if let` / `while let`, a `match` arm and a
+  `for` take the value apart by one walk (`refs::rust_pattern_binds`): a
+  tuple's part (of the written tuple type when there is one), a slice's
+  element, a struct's field (`Cfg { repo, .. }`, `{ 0: first }`), a tuple
+  struct's numbered field with `_` keeping its place, `x @ p` and each side
+  of `a | b`. The type a tuple-struct pattern names is no local any more.
 - **Rust: the impl a turbofish names, and blanket impls kept off library
   values** (two conformance cases, found by rust-analyzer on ureq and
   ripgrep; `oracle_rust.py`). `RequestBuilder::<WithBody>::new()` is the

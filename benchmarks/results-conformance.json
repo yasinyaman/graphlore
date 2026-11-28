@@ -1,5 +1,5 @@
 {
- "passed": 1271,
+ "passed": 1281,
  "total": 1495,
  "cases": [
   {
@@ -8932,15 +8932,9 @@
   },
   {
    "id": "rust/struct-pattern-shorthand-binds-a-local",
-   "ok": false,
+   "ok": true,
    "missing": [],
-   "unwanted": [
-    [
-     "take",
-     "calls",
-     "src/lib.rs:helper@5"
-    ]
-   ]
+   "unwanted": []
   },
   {
    "id": "rust/rust-nested-file-module-is-in-the-parents-directory",
@@ -9232,32 +9226,14 @@
   },
   {
    "id": "rust/tuple-pattern-parameter",
-   "ok": false,
-   "missing": [
-    [
-     "first",
-     "calls",
-     "Config.show"
-    ]
-   ],
-   "unwanted": [
-    [
-     "first",
-     "calls",
-     "Other.show"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "rust/tuple-struct-pattern-parameter",
-   "ok": false,
-   "missing": [
-    [
-     "open",
-     "calls",
-     "Inner.go"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -10546,26 +10522,14 @@
   },
   {
    "id": "rust/parameter-pattern-binding",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "rust/ident-pattern-at-subpattern",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -10594,45 +10558,21 @@
   },
   {
    "id": "rust/struct-pattern-shorthand-binding",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "rust/struct-pattern-renamed-field",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "rust/tuple-struct-pattern-binding",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
-   "unwanted": [
-    [
-     "run",
-     "calls",
-     "Other.find"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "rust/tuple-pattern-binding",
@@ -10660,14 +10600,8 @@
   },
   {
    "id": "rust/slice-pattern-element",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -10690,19 +10624,8 @@
   },
   {
    "id": "rust/nested-struct-pattern-binding-type",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ],
-    [
-     "run",
-     "calls",
-     "Other.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {

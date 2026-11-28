@@ -2644,12 +2644,54 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<Bound> {
         "let_condition" | "let_declaration" => {
             let pattern = n.by_field("pattern");
             let value = n.by_field("value").and_then(|v| held_path(v, src));
-            if let Some(p) = pattern {
-                out.extend(
+            // (`let (a, b) = f();` of plain names is `destructured`'s)
+            let plain_tuple = |p: Node| {
+                n.kind_str() == "let_declaration"
+                    && p.kind_str() == "tuple_pattern"
+                    && kids(p).iter().all(|c| matches!(c.kind_str(), "identifier" | "mut_pattern"))
+            };
+            match (pattern, n.by_field("type")) {
+                // `let (a, b): (A, B) = …;`: the parts of the written type
+                (Some(p), Some(t))
+                    if n.kind_str() == "let_declaration" && p.kind_str() != "identifier" =>
+                {
+                    let mut found = Vec::new();
+                    rust_pattern_binds(p, value, Some(t), src, &mut found, 0);
+                    out.extend(found.into_iter().map(|(a, b, c)| (a, b, c, None)));
+                }
+                (Some(p), _) if !plain_tuple(p) => out.extend(
                     held_by_pattern(p, value.as_deref(), src)
                         .into_iter()
                         .map(|(a, b, c)| (a, b, c, None)),
-                );
+                ),
+                _ => {}
+            }
+        }
+        // Rust `fn run((a, b): (A, B))`: a parameter that takes its value apart
+        "parameter" if crate::parse::current() == Some(crate::lang::Lang::Rust) => {
+            if let (Some(p), Some(t)) = (n.by_field("pattern"), n.by_field("type")) {
+                if !matches!(p.kind_str(), "identifier" | "self" | "mut_pattern") {
+                    let mut found = Vec::new();
+                    rust_pattern_binds(p, None, Some(t), src, &mut found, 0);
+                    out.extend(found.into_iter().map(|(a, b, c)| (a, b, c, None)));
+                }
+            }
+        }
+        // Rust `for (k, v) in xs`: the parts of each element
+        "for_expression" if crate::parse::current() == Some(crate::lang::Lang::Rust) => {
+            let p = n
+                .by_field("pattern")
+                .filter(|p| p.kind_str() != "identifier" && pair_names(*p, src).is_none());
+            let of = n.by_field("value").and_then(|v| path_of(v, src)).filter(|v| v[0] != UNKNOWN);
+            if let Some(p) = p {
+                let mut found = Vec::new();
+                let each = of.map(|mut v| {
+                    v.push(ITERATED.into());
+                    v
+                });
+                rust_pattern_binds(p, each, None, src, &mut found, 0);
+                let range = Some((n.start_byte(), n.end_byte()));
+                out.extend(found.into_iter().map(|(a, b, c)| (a, b, c, range)));
             }
         }
         "match_expression" => {
@@ -2709,6 +2751,152 @@ fn held_path(v: Node, src: &[u8]) -> Option<Vec<String>> {
     })
 }
 
+/// The parts of a Rust tuple or tuple struct pattern in the order written,
+/// `_` (an unnamed node) included: what says which part each one takes.
+fn pattern_items<'t>(p: Node<'t>, ty: Option<Node<'t>>) -> Vec<Node<'t>> {
+    crate::generic::all_kids(p)
+        .into_iter()
+        .filter(|c| {
+            !is_comment(c)
+                && !matches!(c.kind_str(), "(" | ")" | ",")
+                && ty.is_none_or(|t| t.id() != c.id())
+        })
+        .collect()
+}
+
+/// What a Rust pattern binds, each name with the path of the part of the
+/// value it takes (`value`; None where the walk cannot tell, a name that
+/// still hides the outer ones): a tuple's part `[#i]`, a slice's element
+/// `[]`, a struct's field, what `Some(p)` / `Ok(p)` holds once opened, a
+/// tuple struct's or variant's numbered field; `x @ p` and each side of
+/// `a | b` take the value itself. With `ty`, the type a parameter or a `let`
+/// writes, a name takes that type and a tuple's parts the tuple type's parts
+/// (the Reference's 'Patterns').
+fn rust_pattern_binds(
+    p: Node,
+    value: Option<Vec<String>>,
+    ty: Option<Node>,
+    src: &[u8],
+    out: &mut Vec<(String, Vec<String>, bool)>,
+    depth: usize,
+) {
+    if depth > 8 {
+        return;
+    }
+    let mut p = p;
+    while matches!(p.kind_str(), "reference_pattern" | "ref_pattern" | "mut_pattern") {
+        match kids(p).into_iter().last() {
+            Some(inner) => p = inner,
+            None => return,
+        }
+    }
+    let mut ty = ty;
+    while let Some(t) = ty.filter(|t| t.kind_str() == "reference_type") {
+        ty = t.by_field("type");
+    }
+    let part = |v: &Option<Vec<String>>, marker: String| {
+        v.as_ref().filter(|v| v.first().is_none_or(|h| h != UNKNOWN)).map(|v| {
+            let mut v = v.clone();
+            v.push(marker);
+            v
+        })
+    };
+    let rest = |c: &Node| matches!(c.kind_str(), "remaining_field_pattern" | "rest_pattern");
+    match p.kind_str() {
+        "identifier" => {
+            let name = text(p, src);
+            if name == "_" {
+                return;
+            }
+            match ty.and_then(|t| first_type(t, src)) {
+                Some(t) => out.push((name, t, true)),
+                None => out.push((name, value.unwrap_or_default(), false)),
+            }
+        }
+        "captured_pattern" => {
+            let ks: Vec<Node> = kids(p).into_iter().filter(|c| !is_comment(c)).collect();
+            if let Some(first) = ks.first().filter(|c| c.kind_str() == "identifier") {
+                rust_pattern_binds(*first, value.clone(), ty, src, out, depth + 1);
+            }
+            if let Some(last) = ks.last().filter(|c| ks.len() > 1 && !rest(c)) {
+                rust_pattern_binds(*last, value, ty, src, out, depth + 1);
+            }
+        }
+        "or_pattern" => {
+            for alt in kids(p).into_iter().filter(|c| !is_comment(c)) {
+                rust_pattern_binds(alt, value.clone(), ty, src, out, depth + 1);
+            }
+        }
+        "tuple_pattern" => {
+            let parts: Vec<Node> =
+                ty.filter(|t| t.kind_str() == "tuple_type").map(kids).unwrap_or_default();
+            let mut known = true;
+            for (i, c) in pattern_items(p, None).into_iter().enumerate() {
+                if rest(&c) {
+                    known = false;
+                    continue;
+                }
+                let v = if known { part(&value, tuple_part(i)) } else { None };
+                let t = if known { parts.get(i).copied() } else { None };
+                rust_pattern_binds(c, v, t, src, out, depth + 1);
+            }
+        }
+        "slice_pattern" => {
+            for c in kids(p).into_iter().filter(|c| !is_comment(c) && !rest(c)) {
+                rust_pattern_binds(c, part(&value, ELEMENT.into()), None, src, out, depth + 1);
+            }
+        }
+        "tuple_struct_pattern" => {
+            let Some(t) = p.by_field("type") else { return };
+            let binds: Vec<Node> = pattern_items(p, Some(t));
+            let variant = text(t, src);
+            match variant.as_str() {
+                "Some" | "Ok" => {
+                    let v = part(&value, OPENED.into());
+                    for c in binds {
+                        rust_pattern_binds(c, v.clone(), None, src, out, depth + 1);
+                    }
+                }
+                "Err" | "None" => {
+                    for c in binds {
+                        rust_pattern_binds(c, None, None, src, out, depth + 1);
+                    }
+                }
+                _ => {
+                    let base = path_of(t, src);
+                    let mut known = true;
+                    for (i, c) in binds.into_iter().enumerate() {
+                        if rest(&c) {
+                            known = false;
+                            continue;
+                        }
+                        let v = if known { part(&base, tuple_part(i)) } else { None };
+                        rust_pattern_binds(c, v, None, src, out, depth + 1);
+                    }
+                }
+            }
+        }
+        "struct_pattern" => {
+            let base = p.by_field("type").and_then(|t| path_of(t, src));
+            for f in kids(p).into_iter().filter(|c| c.kind_str() == "field_pattern") {
+                let Some(name) = f.by_field("name").map(|x| text(x, src)) else { continue };
+                // (`Pair { 0: first, .. }`: a tuple struct's numbered field)
+                let field = match name.parse::<usize>() {
+                    Ok(i) => tuple_part(i),
+                    Err(_) => name.clone(),
+                };
+                let v = part(&base, field);
+                match f.by_field("pattern") {
+                    Some(inner) => rust_pattern_binds(inner, v, None, src, out, depth + 1),
+                    None if name != "_" => out.push((name, v.unwrap_or_default(), false)),
+                    None => {}
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 /// What a Rust pattern binds out of a value: `Some(p)` / `Ok(p)` is what the
 /// value holds once opened, `Slot::Full(a, b)` the fields of that variant.
 /// `Err(e)` and a pattern that names nothing bind nothing the source types.
@@ -2723,6 +2911,19 @@ fn held_by_pattern(
             Some(inner) => p = inner,
             None => return Vec::new(),
         }
+    }
+    // a pattern of patterns: the general walk (a bare `Some(p)` keeps the
+    // rule below: `if let Some(x) = x` binds nothing new)
+    if matches!(
+        p.kind_str(),
+        "tuple_pattern" | "slice_pattern" | "struct_pattern" | "captured_pattern" | "or_pattern"
+    ) || (p.kind_str() == "tuple_struct_pattern"
+        && p.by_field("type")
+            .is_some_and(|t| !matches!(text(t, src).as_str(), "Some" | "Ok" | "Err" | "None")))
+    {
+        let mut out = Vec::new();
+        rust_pattern_binds(p, value.map(<[String]>::to_vec), None, src, &mut out, 0);
+        return out;
     }
     if p.kind_str() != "tuple_struct_pattern" {
         return Vec::new();
@@ -2814,6 +3015,19 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
         if !out.is_empty() {
             return out;
         }
+    }
+    // (Rust `(a, b): (A, B)`, `Pair(x, y): Pair`: a pattern that takes the
+    // value apart binds its names in `bound_by_pattern`, each its own part)
+    if k == "parameter"
+        && crate::parse::current() == Some(crate::lang::Lang::Rust)
+        && n.by_field("pattern").is_some_and(|p| {
+            matches!(
+                p.kind_str(),
+                "tuple_pattern" | "tuple_struct_pattern" | "struct_pattern" | "slice_pattern"
+            )
+        })
+    {
+        return out;
     }
     // parameters: `x: Foo`, `Foo x`, `x Foo`, `$x: Foo`
     if in_params && k.contains("parameter") && !k.ends_with("parameters") && !k.ends_with("_list") {
@@ -2950,6 +3164,23 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                     path.push(key);
                     out.push((name, path, false, false));
                 }
+                return out;
+            }
+            // (Rust `let Pair(_, r) = p;`, `let Cfg { repo, .. } = c;`: the
+            // names of a pattern that takes the value apart are
+            // `bound_by_pattern`'s, each its part; the type named is no local)
+            if k == "let_declaration"
+                && n.by_field("pattern").is_some_and(|p| {
+                    matches!(
+                        p.kind_str(),
+                        "tuple_struct_pattern"
+                            | "struct_pattern"
+                            | "slice_pattern"
+                            | "captured_pattern"
+                            | "or_pattern"
+                    )
+                })
+            {
                 return out;
             }
             let name = n
@@ -3712,6 +3943,21 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     pstack.push(ps);
                 }
                 while let Some(ps) = pstack.pop() {
+                    // (Rust `(a, b): (A, B)`: `bound_by_pattern` binds the parts)
+                    if facts.lang == Some(crate::lang::Lang::Rust)
+                        && ps.kind_str() == "parameter"
+                        && ps.by_field("pattern").is_some_and(|p| {
+                            matches!(
+                                p.kind_str(),
+                                "tuple_pattern"
+                                    | "tuple_struct_pattern"
+                                    | "struct_pattern"
+                                    | "slice_pattern"
+                            )
+                        })
+                    {
+                        continue;
+                    }
                     let found = locals_of(ps, src, true);
                     if found.is_empty() {
                         for c in kids(ps) {
@@ -7985,6 +8231,14 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
         }
         _ => return None,
     };
+    // (a Rust pattern of a loop other than a pair of names, `(k, v)` of a map
+    // or of `enumerate()`, is `bound_by_pattern`'s: each its part)
+    if crate::parse::current() == Some(crate::lang::Lang::Rust)
+        && var.kind_str() != "identifier"
+        && pair_names(var, src).is_none()
+    {
+        return None;
+    }
     if let Some((key, value)) = pair_names(var, src) {
         // `for ((a, b) in xs.zip(ys))`, Python `zip(xs, ys)`: one of each
         if let Some((left, right)) = zipped(iterable, src) {

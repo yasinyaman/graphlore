@@ -148,7 +148,7 @@ pattern or attribute argument writes.
 The other five languages with an indexer here lose nothing: TypeScript 60 of
 60, JavaScript 31 of 31, Java 71 of 71, Ruby 37 of 37 in precise mode. Rust
 was 75 of 75 before its sweep; of the 285 cases after it, precise mode holds
-253 and the engine alone 177 (rust-analyzer settles the ones that need a
+253 and the engine alone 187 (rust-analyzer settles the ones that need a
 type: patterns, operators, `Deref`, aliases) — 1127 of the 1199 cases of the
 seven. Ruby's
 `module-method-is-no-bare-call` holds only there: the engine still guesses a
@@ -1254,7 +1254,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | a namespace-qualified attribute name finds the suffixed class in that namespace only | `attribute-qualified-name` | – | **no**: no B -references-> Two.MarkAttribute |
 | a generic attribute's type arguments choose the class of that arity, not the non-generic class of the same name | `attribute-generic-arity` | 11– | **no**: no Target -references-> MarkAttribute<T> has Target -references-> MarkAttribute |
 
-### rust (177 of 285)
+### rust (187 of 285)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
@@ -1365,7 +1365,7 @@ Found by: the specification 37, a compiler 17, comparison 6, the grammar 2, the 
 | `Alias::Circle(1)` with `type Alias = Shape;` is a variant of Shape | `variant-through-a-type-alias` | – | yes |
 | `extern crate self as demo;` names the crate root: `demo::f()` is the root's `f` | `extern-crate-self-alias` | – | **no**: no g -calls-> src/lib.rs:f has g -calls-> m.f |
 | `super::helper()` in a module written inside a function is the enclosing module's `helper`, not an item of the block | `super-from-a-module-in-a-block` | – | yes |
-| `let Cfg { helper } = c;` binds the local `helper`: calling it is not a call of the function `helper` | `struct-pattern-shorthand-binds-a-local` | – | **no**: has take -calls-> src/lib.rs:helper@5 |
+| `let Cfg { helper } = c;` binds the local `helper`: calling it is not a call of the function `helper` | `struct-pattern-shorthand-binds-a-local` | – | yes |
 | `mod config;` written in util.rs is the file util/config.rs, not src/config.rs | `rust-nested-file-module-is-in-the-parents-directory` | – | yes |
 | `#[path = "other.rs"] mod c;` is the file src/other.rs, never src/c.rs | `rust-path-attribute-names-the-module-file` | – | **no**: no run -calls-> src/other.rs:f has run -calls-> src/c.rs:f |
 | `mod inline { #[path = "other.rs"] mod inner; }` in lib.rs is src/inline/other.rs | `rust-path-attribute-in-an-inline-module` | – | **no**: no run -calls-> src/inline/other.rs:f |
@@ -1392,8 +1392,8 @@ Found by: the specification 37, a compiler 17, comparison 6, the grammar 2, the 
 | `use super::*;` in a child module binds what the parent imports privately | `super-glob-brings-the-parents-imports` | – | yes |
 | `super::super::f()` is f of the module two levels up | `super-repeated` | – | **no**: no a.b.c.run -calls-> a.f |
 | a `use` under a false `#[cfg]` binds no name | `cfg-on-a-use` | – | yes |
-| a parameter written as a tuple pattern binds each name to the matching part of its type | `tuple-pattern-parameter` | – | **no**: no first -calls-> Config.show has first -calls-> Other.show |
-| a parameter written as `Wrapper(inner): Wrapper` binds inner to the field's type | `tuple-struct-pattern-parameter` | – | **no**: no open -calls-> Inner.go |
+| a parameter written as a tuple pattern binds each name to the matching part of its type | `tuple-pattern-parameter` | – | yes |
+| a parameter written as `Wrapper(inner): Wrapper` binds inner to the field's type | `tuple-struct-pattern-parameter` | – | yes |
 | `size::<Config>()` calls size and names Config | `turbofish-type-argument` | – | yes |
 | `Cookie` and `Cookie {}` written as values are uses of the unit struct | `unit-struct-value` | – | **no**: no jar -references-> Cookie |
 | a unit variant named bare after a glob import of its enum is a use of the enum | `glob-variant-value` | – | **no**: no globbed -references-> Examples |
@@ -1530,21 +1530,21 @@ Found by: the specification 37, a compiler 17, comparison 6, the grammar 2, the 
 | matching a reference with a non-reference pattern binds references to the parts: typed by the part | `default-binding-mode-type` | – | yes |
 | a name bound in every alternative of an or-pattern is a name of the arm, typed by the alternatives | `or-pattern-binding-type` | – | **no**: no run -calls-> Repo.find; run -calls-> Other.find |
 | a guard is in the scope of the arm's bindings: a name in it is the binding, before a function of its name | `match-guard-sees-the-arm-binding` | – | yes |
-| a pattern in a parameter binds names of the body, typed by the parameter's type | `parameter-pattern-binding` | – | **no**: no run -calls-> Repo.find |
-| `name @ pattern` binds name as the matched value | `ident-pattern-at-subpattern` | – | **no**: no run -calls-> Repo.find |
+| a pattern in a parameter binds names of the body, typed by the parameter's type | `parameter-pattern-binding` | – | yes |
+| `name @ pattern` binds name as the matched value | `ident-pattern-at-subpattern` | – | yes |
 | a `ref` binding is a reference to the matched value: typed by it | `ref-binding-type` | – | yes |
 | a single identifier in a pattern is the constant, struct or variant of that name when one is in scope, never a new binding | `const-pattern-is-a-path` | – | yes |
 | an associated constant written as a path pattern is a use of that constant of that type | `associated-const-pattern` | – | **no**: no check -reads-> A.MAX |
-| a shorthand field of a struct pattern binds a local of the field's name, typed by the field | `struct-pattern-shorthand-binding` | – | **no**: no run -calls-> Repo.find |
-| `field: name` in a struct pattern binds name typed by that field, not by a field of another name | `struct-pattern-renamed-field` | – | **no**: no run -calls-> Repo.find |
-| a binding in a tuple struct pattern is typed by the field at its position | `tuple-struct-pattern-binding` | – | **no**: no run -calls-> Repo.find has run -calls-> Other.find |
+| a shorthand field of a struct pattern binds a local of the field's name, typed by the field | `struct-pattern-shorthand-binding` | – | yes |
+| `field: name` in a struct pattern binds name typed by that field, not by a field of another name | `struct-pattern-renamed-field` | – | yes |
+| a binding in a tuple struct pattern is typed by the field at its position | `tuple-struct-pattern-binding` | – | yes |
 | a binding in a tuple pattern is typed by the element at its position | `tuple-pattern-binding` | – | yes |
 | a path written as a bound of a range pattern is a read of the constant it names | `range-pattern-bound-is-a-constant` | – | yes |
 | `Pair { 0: first, .. }` binds first as the type of field 0 | `tuple-index-field-pattern` | – | **no**: no run -calls-> Repo.find |
-| `[first, ..]` over `&[T]` binds first as a T | `slice-pattern-element` | – | **no**: no run -calls-> Repo.find |
+| `[first, ..]` over `&[T]` binds first as a T | `slice-pattern-element` | – | yes |
 | `let &inner = r;` with `r: &Repo` binds inner as a Repo | `reference-pattern-binding` | – | yes |
 | a binding of a `let` in a `while` condition chain is a name of the operands after it and of the loop body, typed by the pattern | `while-let-chain-binding` | 2024– | **no**: no run -calls-> Repo.find |
-| a name bound in a struct pattern nested in a struct pattern is typed by the field it sits at | `nested-struct-pattern-binding-type` | – | **no**: no run -calls-> Repo.find; run -calls-> Other.find |
+| a name bound in a struct pattern nested in a struct pattern is typed by the field it sits at | `nested-struct-pattern-binding-type` | – | yes |
 | names of a tuple pattern matched against a tuple expression of locals are typed by the operand at their position | `match-on-a-tuple-expression` | – | **no**: no run -calls-> Repo.find; run -calls-> Other.find |
 | a function named in a macro's arguments is looked up at the invocation site: the nested `helper` beats the top-level one | `macro-argument-sees-invocation-site` | – | yes |
 
@@ -1782,4 +1782,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1271 of 1495 rules hold
+1281 of 1495 rules hold

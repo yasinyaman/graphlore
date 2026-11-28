@@ -1258,7 +1258,7 @@ dispatches to, or one of an `impl` of that trait, counts as the trait's), and
 absent edges named by a bare name that a field and a function share
 (qualified by line by hand). The inventory has 509 rules (362 held, 147 not
 followed) and 121 of 121 sections read. The engine holds 100 of the 208 new
-cases (177 of the 285), precise mode 253. Open, by size: pattern bindings
+cases (177 of the 285; 187 after the first fixes, Rust patterns), precise mode 253. Open, by size: pattern bindings
 typed by what they take apart (`for (a, b)`, `while let`, struct, tuple
 struct, slice and `@` patterns, a parameter pattern), operators as calls of
 their traits' impls (`+`, `==`, `!`, `?`, `[]`, `*`), globs that skip private

@@ -4202,3 +4202,24 @@ fn blanket_impl_is_no_method_of_a_library_type() {
     ]);
     assert!(!calls.iter().any(|(from, _)| from == ".first_a()"), "{calls:?}");
 }
+
+// Rust patterns that take a value apart (the sweep's 'Patterns'): each name
+// is the part it takes, of a parameter's written type, of a struct's field
+// or of a tuple struct's numbered field (`_` keeps its place).
+#[test]
+fn rust_patterns_bind_the_parts_they_take() {
+    let calls = call_ids("rust-patterns", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        (
+            "src/lib.rs",
+            "pub struct Repo;\nimpl Repo {\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub struct Pair(pub Other, pub Repo);\n\npub struct Cfg {\n    pub repo: Repo,\n    pub other: Other,\n}\n\npub fn param((_o, r): (Other, Repo)) -> i32 {\n    r.find()\n}\n\npub fn tuple_struct(p: Pair) -> i32 {\n    let Pair(_, r) = p;\n    r.find()\n}\n\npub fn fields(c: Cfg) -> i32 {\n    let Cfg { repo, .. } = c;\n    repo.find()\n}\n\npub fn slice(xs: &[Repo]) -> i32 {\n    match xs {\n        [first, ..] => first.find(),\n        [] => 0,\n    }\n}\n",
+        ),
+    ]);
+    for f in ["param()", "tuple_struct()", "fields()", "slice()"] {
+        assert!(calls.contains(&(f.to_string(), "src_lib_repo_find".to_string())), "{f} {calls:?}");
+        assert!(
+            !calls.contains(&(f.to_string(), "src_lib_other_find".to_string())),
+            "{f} {calls:?}"
+        );
+    }
+}
