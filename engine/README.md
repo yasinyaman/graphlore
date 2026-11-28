@@ -25,10 +25,10 @@ pip install graphlore-engine      # prebuilt abi3 wheels: Linux (glibc, musl), m
 ```
 
 ```bash
-python -m graphlore_engine build /path/to/repo      # writes graphify-out/graph.json
+python -m graphlore_engine build /path/to/repo      # writes graphlore-out/graph.json
 python -m graphlore_engine build /path/to/repo --incremental   # parse only what changed
 python -m graphlore_engine build /path/to/repo --unresolved left.json   # the calls left without an edge, with the reason
-python -m graphlore_engine cluster graphify-out/graph.json     # detect its communities again
+python -m graphlore_engine cluster graphlore-out/graph.json     # detect its communities again
 python -m graphlore_engine spans src/app.ts         # one file's definitions
 python -m graphlore_engine languages
 ```

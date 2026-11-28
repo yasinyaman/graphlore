@@ -12,12 +12,12 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 @pytest.fixture()
 def project(tmp_path, monkeypatch):
-    """A temp project dir with a graphify-out/ populated from fixtures.
+    """A temp project dir with a graphlore-out/ populated from fixtures.
 
     Repoints the server's module-level PROJECT_DIR at the temp project so the
     analysis tools and resources read the fixture graph.
     """
-    out = tmp_path / "graphify-out"
+    out = tmp_path / "graphlore-out"
     out.mkdir()
     shutil.copy(FIXTURES / "graph.json", out / "graph.json")
     shutil.copy(FIXTURES / "GRAPH_REPORT.md", out / "GRAPH_REPORT.md")
@@ -35,12 +35,12 @@ def empty_project(tmp_path, monkeypatch):
 @pytest.fixture()
 def polyglot(tmp_path, monkeypatch):
     """A copy of fixtures/polyglot: five languages, and the graph graphify 0.9
-    built of them (``graph.json``, copied to ``graphify-out/``)."""
+    built of them (``graph.json``, copied to ``graphlore-out/``)."""
     src = FIXTURES / "polyglot"
     root = tmp_path / "polyglot"
     shutil.copytree(src, root, ignore=shutil.ignore_patterns("graph.json"))
-    (root / "graphify-out").mkdir()
-    shutil.copy(src / "graph.json", root / "graphify-out" / "graph.json")
+    (root / "graphlore-out").mkdir()
+    shutil.copy(src / "graph.json", root / "graphlore-out" / "graph.json")
     server._GRAPH_CACHE.clear()
     server._SPAN_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", root)

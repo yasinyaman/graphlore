@@ -1,6 +1,6 @@
 ---
 name: graphlore-explore
-description: Explore, understand, review or debug a codebase through its code knowledge graph using the graphlore MCP tools. Use when onboarding to an unfamiliar repository, tracing how a named flow or feature works end-to-end, finding likely root-cause locations for a bug, reviewing a codebase's structure (import cycles, layering, dead or duplicated code), or answering "where/how is X implemented" — especially when a graphify-out/graph.json exists. Favors token-budgeted subgraph extraction over opening many files.
+description: Explore, understand, review or debug a codebase through its code knowledge graph using the graphlore MCP tools. Use when onboarding to an unfamiliar repository, tracing how a named flow or feature works end-to-end, finding likely root-cause locations for a bug, reviewing a codebase's structure (import cycles, layering, dead or duplicated code), or answering "where/how is X implemented" — especially when a graphlore-out/graph.json (or an older graphify-out/graph.json) exists. Favors token-budgeted subgraph extraction over opening many files.
 ---
 
 # Exploring a codebase with graphlore
@@ -30,7 +30,8 @@ switches to another repository (there is no per-call project argument).
 `graphlore_build` builds with graphlore's native engine (the graph has
 definitions, spans, imports, calls and type references resolved from the source,
 and communities of its own, as the build result says). The build writes
-`graphify-out/` inside the folder it reads, so after
+`graphlore-out/` inside the folder it reads (an older `graphify-out/` is moved
+there by the first build), so after
 `graphlore_build("/path/to/other/repo")` the build result tells you to switch
 before the read tools can see that graph. The build also writes `graph.html`, a
 page for the user: the graph, the tools' findings (cycles, shared state,
@@ -43,7 +44,7 @@ picture helps; the tools remain your way in.
 2. If missing or stale: `graphlore_build(".", update=True)` (needs no API key).
    Read the result: it carries what the build left out (files in a language it
    does not read, parse errors, files too large) and notes on vendored files and
-   an unignored `graphify-out/`.
+   an unignored `graphlore-out/`.
 
 ## Find code by what it does — `graphlore_locate`
 

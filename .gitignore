@@ -18,6 +18,7 @@ coverage.xml
 htmlcov/
 
 # Graphify output
+graphlore-out/
 graphify-out/
 
 # Editors / OS

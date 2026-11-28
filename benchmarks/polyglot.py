@@ -302,7 +302,7 @@ def setup(root: Path, repos: list[dict[str, Any]], graphify: bool = True) -> Non
             _git(d, "fetch", "-q", "--depth", "1", "origin", repo["sha"])
             _git(d, "checkout", "-q", "FETCH_HEAD")
         with (d / ".git" / "info" / "exclude").open("a", encoding="utf-8") as fh:
-            fh.write("graphify-out/\n")
+            fh.write("graphify-out/\ngraphlore-out/\n")
         if not graphify:
             print(f"fetched {repo['key']}")
         elif not (d / "graphify-out" / "graph.json").exists():

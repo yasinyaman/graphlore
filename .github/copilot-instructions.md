@@ -2,7 +2,7 @@
 
 This is a condensed copy of `AGENTS.md` at the repository root, which is the full and authoritative guidance. Read it when you can; if the two disagree, `AGENTS.md` wins.
 
-graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPServer`, not v1 `FastMCP`) that makes a code knowledge graph (`graphify-out/graph.json`, built by its own native engine) navigable and joins it to real source spans. `engine/`, graphlore's native extractor in Rust (a separate `graphlore-engine` wheel, a dependency of graphlore), builds the graph; the external `graphify` CLI built it before 0.9.0, and a graph it wrote is still read.
+graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPServer`, not v1 `FastMCP`) that makes a code knowledge graph (`graphlore-out/graph.json`, built by its own native engine) navigable and joins it to real source spans. `engine/`, graphlore's native extractor in Rust (a separate `graphlore-engine` wheel, a dependency of graphlore), builds the graph; the external `graphify` CLI built it before 0.9.0, and a graph it wrote is still read.
 
 ## Checks
 
@@ -31,6 +31,7 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 - Optional dependencies (`semble`, `model2vec`/`numpy` for `[embed]`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn`, `graphlore_engine`) are imported inside functions and degrade to a fallback or install hint.
 - `graphlore_locate` and the duplication scan run on the built-in index in `search.py` (semble only with `GRAPHLORE_SEMANTIC_BACKEND=semble`) (BM25 always; static embeddings from `embed.py` with `[embed]`). Its kernel (`_PyKernel.tokenize` / `bm25f`, and the native engine's port in `engine/src/search.rs`, used when installed) must keep matching `tests/fixtures/search_golden.json`.
 - graph.json analysis tools must work with no `graphify` binary and no optional extras.
+- A build writes `graphlore-out/` and `.graphlore_labels.json`; graphify's `graphify-out/` and `.graphify_labels.json` are read until release C. Find the graph with `config.out_dir(project)`, never a path built from `config.OUT_DIR_NAME`; walks skip `config.out_dir_names()`.
 - Set `read_only_hint` / `destructive_hint` on every tool to match what it does.
 - A tool that ranks or audits the graph takes `scope: str = ""` and goes through `_scope_view`; it reports `view.payload()` and wraps its text in `_with_note`, so what the scope left out (vendored/minified files, external nodes) is always stated.
 - A tool that lifts import edges to file level passes `ImportChecker().kind` (one instance per call) and reports `checker.rejected`; graphify resolves imports by name and gets same-named modules wrong.

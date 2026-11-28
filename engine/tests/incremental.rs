@@ -27,7 +27,7 @@ fn project(name: &str) -> PathBuf {
 
 fn opts(root: &Path, incremental: bool) -> BuildOptions {
     let mut o = BuildOptions::new(root);
-    o.out = Some(root.join("graphify-out/graph.json"));
+    o.out = Some(root.join("graphlore-out/graph.json"));
     o.incremental = incremental;
     o
 }
@@ -51,7 +51,7 @@ fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for e in fs::read_dir(dir).unwrap() {
         let p = e.unwrap().path();
-        if p.ends_with("graphify-out") {
+        if p.ends_with("graphlore-out") {
             continue;
         }
         if p.is_dir() {
@@ -77,7 +77,7 @@ fn an_update_parses_what_changed_and_writes_the_same_graph() {
     assert_eq!((again.incremental.reused, again.incremental.parsed), (5, 0));
 
     // one file changed, one deleted, one added
-    let graph_path = root.join("graphify-out/graph.json");
+    let graph_path = root.join("graphlore-out/graph.json");
     let before = fs::read(&graph_path).unwrap();
     fs::write(root.join("pkg/util.py"), "def double(x):\n    return x + x\n").unwrap();
     fs::remove_file(root.join("README.md")).unwrap();
@@ -115,7 +115,7 @@ fn a_touched_file_is_checked_by_its_content() {
 fn a_cache_that_cannot_be_used_means_a_full_parse() {
     let root = project("bad");
     build_graph(&opts(&root, false)).unwrap();
-    let cache = root.join("graphify-out/cache/graphlore-native.bin");
+    let cache = root.join("graphlore-out/cache/graphlore-native.bin");
     assert!(cache.is_file());
     fs::write(&cache, b"not a cache").unwrap();
     let (_, report) = build_graph(&opts(&root, true)).unwrap();
@@ -142,7 +142,7 @@ fn write_files(root: &Path, files: &[(&str, &str)]) {
 
 /// An update and a full build of the same tree, from the same previous graph.
 fn update_and_full(root: &Path) -> (Value, graphlore_engine::BuildReport, Value) {
-    let graph_path = root.join("graphify-out/graph.json");
+    let graph_path = root.join("graphlore-out/graph.json");
     let before = fs::read(&graph_path).unwrap();
     let (updated, report) = build_graph(&opts(root, true)).unwrap();
     let after = fs::read(&graph_path).unwrap();
@@ -261,7 +261,7 @@ fn the_previous_communities_come_from_the_cache_only_for_the_graph_it_wrote() {
     assert!(report.incremental.previous_cached);
     // a graph.json written by someone else (copied over, or by `cluster`):
     // read from the file itself, and the same graph comes out
-    let graph_path = root.join("graphify-out/graph.json");
+    let graph_path = root.join("graphlore-out/graph.json");
     let text = fs::read(&graph_path).unwrap();
     fs::remove_file(&graph_path).unwrap();
     fs::write(&graph_path, text).unwrap();

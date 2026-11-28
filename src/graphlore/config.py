@@ -23,9 +23,9 @@ def env(name: str, default: str | None = None) -> str | None:
 
     The ``GRAPHIFY_*`` spellings predate the graphlore rename and are still
     honored so existing configs keep working; new configs should use
-    ``GRAPHLORE_*``. (``graphify-out/`` and ``.graphify_labels.json``, named
-    after the Graphify CLI that built the graph before 0.9.0, keep their names
-    regardless.)
+    ``GRAPHLORE_*``. (The output directory and the saved community names were
+    ``graphify-out/`` and ``.graphify_labels.json`` before 0.9.0; a graph
+    written under those names is still read, see :func:`out_dir`.)
     """
     value = os.environ.get(f"GRAPHLORE_{name}")
     if value is None:
@@ -65,7 +65,86 @@ PROJECT_DIR = Path(env("PROJECT_DIR", ".")).resolve()
 # is given; until then `project_pending` is True and the tools say so.
 PROJECT_FROM_CLIENT = _truthy(env("PROJECT_FROM_CLIENT")) and env("PROJECT_DIR") is None
 project_pending = PROJECT_FROM_CLIENT
-OUT_DIR_NAME = env("OUT_DIR", "graphify-out")
+OUT_DIR_NAME = env("OUT_DIR", "graphlore-out")
+# Set by GRAPHLORE_OUT_DIR (or GRAPHIFY_OUT_DIR): that name is used as given,
+# never the legacy directory in its place and never a move.
+OUT_DIR_EXPLICIT = env("OUT_DIR") is not None
+# What graphify and graphlore before 0.9.0 wrote. Read while no graph has been
+# built under the new names; a build moves it (`migrate_out_dir`).
+LEGACY_OUT_DIR_NAME = "graphify-out"
+LABELS_FILE = ".graphlore_labels.json"
+LEGACY_LABELS_FILE = ".graphify_labels.json"
+
+
+def out_dir(project: Path | None = None) -> Path:
+    """The output directory to read in ``project``: ``OUT_DIR_NAME``, or the
+    legacy ``graphify-out/`` while it holds a graph.json and the new one does
+    not (and the name was not set explicitly)."""
+    root = Path(project or PROJECT_DIR)
+    new = root / OUT_DIR_NAME
+    if OUT_DIR_EXPLICIT or (new / "graph.json").exists():
+        return new
+    old = root / LEGACY_OUT_DIR_NAME
+    return old if (old / "graph.json").exists() else new
+
+
+def out_dir_names() -> tuple[str, ...]:
+    """The directory names a walk of the project leaves out as graph output."""
+    if OUT_DIR_NAME == LEGACY_OUT_DIR_NAME:
+        return (OUT_DIR_NAME,)
+    return (OUT_DIR_NAME, LEGACY_OUT_DIR_NAME)
+
+
+def labels_path(directory: Path) -> Path:
+    """The saved community names in an output directory: ``.graphlore_labels.json``,
+    else graphify's ``.graphify_labels.json`` when only that one is there."""
+    new = directory / LABELS_FILE
+    old = directory / LEGACY_LABELS_FILE
+    return old if not new.exists() and old.exists() else new
+
+
+def migrate_out_dir(project: Path) -> str:
+    """Before a build: move a legacy ``graphify-out/`` to ``OUT_DIR_NAME`` so the
+    build keeps its cache, its communities and their names. A directory git
+    tracks is left where it is (a move would change the work tree): the saved
+    names are copied and the build starts afresh. Returns a note, or ""."""
+    import shutil
+    import subprocess
+
+    if OUT_DIR_EXPLICIT or OUT_DIR_NAME == LEGACY_OUT_DIR_NAME:
+        return ""
+    new = project / OUT_DIR_NAME
+    old = project / LEGACY_OUT_DIR_NAME
+    if new.exists() or not old.is_dir() or old.is_symlink():
+        return ""
+    tracked = False
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(project), "ls-files", "--", LEGACY_OUT_DIR_NAME],
+            capture_output=True, text=True, timeout=1,
+        )
+        tracked = proc.returncode == 0 and bool(proc.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        if not tracked:
+            os.replace(old, new)
+            labels = new / LEGACY_LABELS_FILE
+            if labels.exists() and not (new / LABELS_FILE).exists():
+                os.replace(labels, new / LABELS_FILE)
+            return (f"moved {LEGACY_OUT_DIR_NAME}/ to {OUT_DIR_NAME}/ (graphlore's output "
+                    f"directory since 0.9.0); a .gitignore line for {LEGACY_OUT_DIR_NAME}/ "
+                    f"wants {OUT_DIR_NAME}/ now")
+        labels = old / LEGACY_LABELS_FILE
+        if labels.exists():
+            new.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(labels, new / LABELS_FILE)
+        return (f"{LEGACY_OUT_DIR_NAME}/ is tracked by git, so it was left in place: this "
+                f"build writes {OUT_DIR_NAME}/ afresh"
+                + (" (the saved community names copied)" if labels.exists() else "")
+                + f"; remove {LEGACY_OUT_DIR_NAME}/ once nothing reads it")
+    except OSError as e:
+        return f"{LEGACY_OUT_DIR_NAME}/ could not be moved to {OUT_DIR_NAME}/ ({e})"
 
 
 def cache_root() -> Path | None:
@@ -114,7 +193,7 @@ def workspace_repos(project_dir: Path | None = None) -> list[str]:
 
     def skip(p: Path) -> bool:
         return (p.name.startswith(".") or p.name in _WORKSPACE_SKIP
-                or p.name == OUT_DIR_NAME or not p.is_dir() or p.is_symlink())
+                or p.name in out_dir_names() or not p.is_dir() or p.is_symlink())
 
     found: list[str] = []
     try:

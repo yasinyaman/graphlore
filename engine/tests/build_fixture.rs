@@ -116,29 +116,53 @@ fn nodes_carry_their_span_and_build_is_deterministic() {
 fn writes_atomically_and_skips_the_out_dir() {
     let tmp = std::env::temp_dir().join(format!("graphlore-engine-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(tmp.join("graphify-out")).unwrap();
+    std::fs::create_dir_all(tmp.join("graphlore-out")).unwrap();
     std::fs::write(tmp.join("a.py"), "def f():\n    pass\n").unwrap();
-    std::fs::write(tmp.join("graphify-out/stale.py"), "def g():\n    pass\n").unwrap();
+    std::fs::write(tmp.join("graphlore-out/stale.py"), "def g():\n    pass\n").unwrap();
+    // the output directory graphify and graphlore before 0.9.0 wrote is left out too
+    std::fs::create_dir_all(tmp.join("graphify-out")).unwrap();
+    std::fs::write(tmp.join("graphify-out/older.py"), "def k():\n    pass\n").unwrap();
     std::fs::create_dir_all(tmp.join("node_modules/x")).unwrap();
     std::fs::write(tmp.join("node_modules/x/i.js"), "function h() {}\n").unwrap();
     std::fs::write(tmp.join("notes.lua"), "-- not read\n").unwrap();
     let mut opts = BuildOptions::new(&tmp);
-    opts.out = Some(tmp.join("graphify-out/graph.json"));
+    opts.out = Some(tmp.join("graphlore-out/graph.json"));
     let report = graphlore_engine::build(&opts).unwrap();
     assert_eq!(report.files, 1);
     assert_eq!(report.not_read.get(".lua"), Some(&1));
     let written: Value = serde_json::from_str(
-        &std::fs::read_to_string(tmp.join("graphify-out/graph.json")).unwrap(),
+        &std::fs::read_to_string(tmp.join("graphlore-out/graph.json")).unwrap(),
     )
     .unwrap();
     let ids: Vec<&str> =
         written["nodes"].as_array().unwrap().iter().map(|n| n["id"].as_str().unwrap()).collect();
     assert_eq!(ids, vec!["a", "a_f"]);
-    let leftovers: Vec<_> = std::fs::read_dir(tmp.join("graphify-out"))
+    let leftovers: Vec<_> = std::fs::read_dir(tmp.join("graphlore-out"))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .filter(|n| n.contains(".tmp-"))
         .collect();
     assert!(leftovers.is_empty());
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn reads_names_saved_under_graphify_s_file_name() {
+    let tmp = std::env::temp_dir().join(format!("graphlore-engine-labels-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("graphlore-out")).unwrap();
+    std::fs::write(tmp.join("a.py"), "def f():\n    pass\n").unwrap();
+    // a name saved for a community the graph does not have: dropped, and the
+    // names that are left written under the new file name
+    std::fs::write(tmp.join("graphlore-out/.graphify_labels.json"), r#"{"99": "Gone"}"#).unwrap();
+    let mut opts = BuildOptions::new(&tmp);
+    opts.out = Some(tmp.join("graphlore-out/graph.json"));
+    let report = graphlore_engine::build(&opts).unwrap();
+    assert_eq!(report.communities.renamed_labels, 1);
+    let kept: Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.join("graphlore-out/.graphlore_labels.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(kept, serde_json::json!({}));
     std::fs::remove_dir_all(&tmp).unwrap();
 }

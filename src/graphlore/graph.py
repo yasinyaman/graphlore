@@ -17,7 +17,7 @@ from . import config
 
 
 def _out_dir() -> Path:
-    return config.PROJECT_DIR / config.OUT_DIR_NAME
+    return config.out_dir(config.PROJECT_DIR)
 
 
 def _graph_path() -> Path:

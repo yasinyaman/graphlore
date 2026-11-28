@@ -195,7 +195,7 @@ def render_communities(c: dict[str, Any]) -> str:
     if c.get("renamed_labels"):
         line += (
             f"; {_plural(c['renamed_labels'], 'saved name')} dropped from "
-            ".graphify_labels.json because its community changed beyond recognition"
+            ".graphlore_labels.json because its community changed beyond recognition"
         )
     return line
 

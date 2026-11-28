@@ -507,7 +507,7 @@ class CodeIndex:
             dirnames[:] = sorted(
                 d for d in dirnames
                 if not d.startswith(".") and d not in _MENTION_SKIP_DIRS
-                and d != config.OUT_DIR_NAME
+                and d not in config.out_dir_names()
             )
             for name in sorted(filenames):
                 if os.path.splitext(name)[1].lower() not in _SEARCH_EXTS:

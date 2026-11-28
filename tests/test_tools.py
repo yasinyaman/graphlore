@@ -223,7 +223,7 @@ def test_routes_and_node_details_read_native_route_nodes(tmp_path, monkeypatch):
     assert route["http"] == {"handlers": ["read_user()"], "called_by": ["readUserById()"]}
     # without the header (a graphify graph) the source is read
     graph.pop("graph")
-    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    (tmp_path / "graphlore-out" / "graph.json").write_text(json.dumps(graph))
     server._GRAPH_CACHE.clear()
     assert json.loads(server.graphlore_routes(as_json=True))["source"] == "source"
 
@@ -404,7 +404,7 @@ def test_shared_state_makes_no_cycle_and_no_class(tmp_path, monkeypatch):
     _shared_state_project(tmp_path, monkeypatch)
     graph = json.loads(json.dumps(_SHARED_STATE_GRAPH))
     graph["links"].append({"source": "cache", "target": "get", "relation": "reads"})
-    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
+    (tmp_path / "graphlore-out" / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
     server._GRAPH_CACHE.clear()
     cycles = json.loads(server.graphlore_cycles(kind="other", as_json=True))
     assert cycles["cycles"] == [] or all("CACHE" not in str(c) for c in cycles["cycles"])
@@ -485,7 +485,7 @@ def test_node_line_helper():
 
 def test_node_details_real_graphify_schema(tmp_path, monkeypatch):
     """graphify's real output uses source_file + source_location='L295', not line."""
-    out = tmp_path / "graphify-out"
+    out = tmp_path / "graphlore-out"
     out.mkdir()
     graph = {
         "directed": True,
@@ -514,7 +514,7 @@ def test_missing_graph_errors(empty_project):
 
 def test_corrupt_graph_json_errors_gracefully(tmp_path, monkeypatch):
     # malformed graph.json must surface a parse error, not raise, across tools.
-    out = tmp_path / "graphify-out"
+    out = tmp_path / "graphlore-out"
     out.mkdir()
     (out / "graph.json").write_text("{ not valid json", encoding="utf-8")
     server._GRAPH_CACHE.clear()
@@ -666,7 +666,7 @@ def test_mcp_registry_manifest_stays_in_sync():
 
 
 def _write_graph(tmp_path, graph):
-    out = tmp_path / "graphify-out"
+    out = tmp_path / "graphlore-out"
     out.mkdir()
     (out / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
 
@@ -920,7 +920,7 @@ def _fake_native(monkeypatch, tmp_path, calls, report=None):
 
     def build(target, **kw):
         calls.append((target, kw))
-        out = target / "graphify-out"
+        out = target / "graphlore-out"
         out.mkdir(exist_ok=True)
         (out / "graph.json").write_text(json.dumps({
             "graph": {"engine": "graphlore"},
@@ -948,7 +948,7 @@ def test_build_with_the_native_engine(tmp_path, monkeypatch):
     server.graphlore_build(".", code_only=True, verbose=True)
     assert calls[-1][1]["documents"] is False
     # every build writes graph.html beside graph.json
-    assert (tmp_path / "graphify-out" / "graph.html").is_file()
+    assert (tmp_path / "graphlore-out" / "graph.html").is_file()
     assert "graph.html written" in out
 
 
@@ -1001,7 +1001,7 @@ def test_engine_build_runs_the_engine_in_a_child_process(tmp_path, monkeypatch):
     server.engine.build(tmp_path, incremental=True, timeout=5)
     assert "--incremental" in seen[-1]
     assert "--no-docs" in argv
-    assert argv[argv.index("--out") + 1] == str(tmp_path / "graphify-out" / "graph.json")
+    assert argv[argv.index("--out") + 1] == str(tmp_path / "graphlore-out" / "graph.json")
     assert "--vendor" not in argv
     monkeypatch.setenv("GRAPHLORE_VENDOR", "1")
     server.engine.build(tmp_path, timeout=5)
@@ -1076,7 +1076,7 @@ def test_no_communities_note_names_the_engine(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     out = server.graphlore_communities()
     assert "did not detect communities" in out and "cluster_only=True" in out
-    (tmp_path / "graphify-out" / "graph.json").write_text(
+    (tmp_path / "graphlore-out" / "graph.json").write_text(
         json.dumps({"nodes": [{"id": "a", "label": "a"}], "links": []}), encoding="utf-8")
     server._GRAPH_CACHE.clear()
     assert "cluster_only=True" in server.graphlore_communities()
@@ -1095,7 +1095,7 @@ def test_build_cluster_only_reclusters_a_native_graph(tmp_path, monkeypatch):
 
     monkeypatch.setattr(server.engine, "cluster", cluster)
     out = server.graphlore_build(".", cluster_only=True)
-    assert seen == [tmp_path.resolve() / "graphify-out" / "graph.json"]
+    assert seen == [tmp_path.resolve() / "graphlore-out" / "graph.json"]
     assert "communities: 4 (largest 9 nodes, modularity 0.61)" in out
     assert "3 kept their id" in out and "1 saved name dropped" in out
     monkeypatch.setattr(server.engine, "cluster", lambda graph, **kw: "ERROR: bad graph")
@@ -1885,7 +1885,7 @@ def test_structural_changes_splits_kinds(tmp_path, monkeypatch):
     (tmp_path / "d.py").unlink()  # removed
     (tmp_path / "n.py").write_text("def n():\n    return 4\n", encoding="utf-8")  # new file
     structural, removed = server._structural_changes(
-        ["s.py", "c.py", "d.py", "n.py", "graphify-out/graph.json"], "HEAD")
+        ["s.py", "c.py", "d.py", "n.py", "graphlore-out/graph.json"], "HEAD")
     assert set(structural) == {"s.py", "n.py"}  # cosmetic + out-dir dropped
     assert removed == ["d.py"]
 
@@ -2087,7 +2087,7 @@ def test_names_from_sampling_fallbacks():
 
 
 def test_set_labels_persists_and_patches_html(tmp_path, monkeypatch):
-    out = tmp_path / "graphify-out"
+    out = tmp_path / "graphlore-out"
     out.mkdir()
     (out / "graph.json").write_text(json.dumps({
         "nodes": [
@@ -2107,7 +2107,7 @@ def test_set_labels_persists_and_patches_html(tmp_path, monkeypatch):
     assert data["labeled"] == 2
     assert data["unknown_ids"] == ["99"]
     # source of truth updated
-    labels = json.loads((out / ".graphify_labels.json").read_text(encoding="utf-8"))
+    labels = json.loads((out / ".graphlore_labels.json").read_text(encoding="utf-8"))
     assert labels["0"] == "Authentication" and labels["2"] == "Tests"
     # graph.html patched in place (both per-node and the labels map)
     html = (out / "graph.html").read_text(encoding="utf-8")
@@ -2280,7 +2280,7 @@ def test_locate_hidden_links_ordered_nearest_first(tmp_path, monkeypatch):
 
 
 def test_set_labels_no_placeholders_message(tmp_path, monkeypatch):
-    out = tmp_path / "graphify-out"
+    out = tmp_path / "graphlore-out"
     out.mkdir()
     (out / "graph.json").write_text(
         json.dumps({"nodes": [{"id": "A", "label": "A", "community": 0}], "links": []}),
@@ -2353,7 +2353,7 @@ def test_freshness_fresh_state(tmp_path, monkeypatch):
     import pytest
     if _sh.which("git") is None:
         pytest.skip("git not available")
-    out = tmp_path / "graphify-out"
+    out = tmp_path / "graphlore-out"
     out.mkdir()
     (out / "graph.json").write_text('{"nodes": [], "links": []}', encoding="utf-8")
     (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
@@ -3243,14 +3243,14 @@ def test_prune_removes_only_missing_file_nodes(tmp_path, monkeypatch):
     assert dry["removable_nodes"] == 2
     assert dry["removable_edges"] == 2
     assert [f["file"] for f in dry["files"]] == ["gone.py"]
-    on_disk = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    on_disk = json.loads((tmp_path / "graphlore-out" / "graph.json").read_text())
     assert len(on_disk["nodes"]) == 4  # untouched
 
     # apply: gone.py nodes + their edges drop; live + file-less nodes remain
     server._GRAPH_CACHE.clear()
     applied = json.loads(server.graphlore_prune(dry_run=False, as_json=True))
     assert applied["removable_nodes"] == 2
-    g = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    g = json.loads((tmp_path / "graphlore-out" / "graph.json").read_text())
     assert {n["id"] for n in g["nodes"]} == {"A", "ext"}
     assert g["edges"] == []  # both edges touched a pruned node
 
@@ -4315,7 +4315,7 @@ def test_path_either_way_keeps_off_files_and_packages(tmp_path, monkeypatch):
     assert got["direction"] == "undirected" and got["via_containment"] is False
     assert [r["to"] for r in got["path"]] == ["c()", "b()"]
     # with only the file between them, the file it is, and the reply says so
-    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps({
+    (tmp_path / "graphlore-out" / "graph.json").write_text(json.dumps({
         "nodes": [{"id": "f", "label": "m.py"}, {"id": "a", "label": "a()"},
                   {"id": "b", "label": "b()"}],
         "links": [{"source": "f", "target": "a", "relation": "contains"},
@@ -4335,14 +4335,14 @@ def test_report_is_made_from_the_graph_without_graphify_s_file(tmp_path, monkeyp
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     # a native graph: graphify's GRAPH_REPORT.md beside it is from an earlier build
-    (tmp_path / "graphify-out" / "GRAPH_REPORT.md").write_text("stale graphify report")
+    (tmp_path / "graphlore-out" / "GRAPH_REPORT.md").write_text("stale graphify report")
     out = server.report()
     assert out.startswith("# Graph report") and "2 nodes, 1 edges" in out
     assert "stale" not in out and "## Surprising connections" in out
     # a graphify graph without the file: made from the graph too
     del graph["graph"]
-    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
-    (tmp_path / "graphify-out" / "GRAPH_REPORT.md").unlink()
+    (tmp_path / "graphlore-out" / "graph.json").write_text(json.dumps(graph))
+    (tmp_path / "graphlore-out" / "GRAPH_REPORT.md").unlink()
     server._GRAPH_CACHE.clear()
     assert server.report().startswith("# Graph report")
 
@@ -4617,7 +4617,7 @@ def test_impact_leaves_rationale_nodes_out(tmp_path, monkeypatch):
 def test_build_writes_graphlore_s_own_graph_html(tmp_path, monkeypatch):
     _fake_native(monkeypatch, tmp_path, [])
     out = server.graphlore_build(".")
-    page = tmp_path / "graphify-out" / "graph.html"
+    page = tmp_path / "graphlore-out" / "graph.html"
     assert "graph.html written" in out and server.viz.is_ours(page)
     page.unlink()
     # no switch leaves it out: every build writes it again, an update too
@@ -4878,7 +4878,7 @@ def test_graph_html_shows_what_graphlore_s_tools_find(tmp_path, monkeypatch):
     # by its place in graph.json, and the edges graphlore resolves for graphify
     _module_call_project(tmp_path)
     _write(tmp_path, "node_modules/lib/x.js", "module.exports = 1;\n")
-    gp = tmp_path / "graphify-out" / "graph.json"
+    gp = tmp_path / "graphlore-out" / "graph.json"
     graph = json.loads(gp.read_text(encoding="utf-8"))
     graph["nodes"].append({"id": "vend", "label": "x.js", "source_file": "node_modules/lib/x.js",
                            "source_location": "L1", "file_type": "code"})
@@ -4939,8 +4939,8 @@ def test_graph_html_carries_the_remote_of_its_repository(tmp_path, monkeypatch):
     import subprocess
 
     import pytest
-    (tmp_path / "graphify-out").mkdir()
-    gp = tmp_path / "graphify-out" / "graph.json"
+    (tmp_path / "graphlore-out").mkdir()
+    gp = tmp_path / "graphlore-out" / "graph.json"
     gp.write_text(json.dumps(_viz_graph()), encoding="utf-8")
     git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@example.com"]
     try:
@@ -4956,37 +4956,37 @@ def test_graph_html_carries_the_remote_of_its_repository(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._GRAPH_CACHE.clear()
     server._VIZ_ANALYSIS.clear()
-    server._write_viz(tmp_path / "graphify-out" / "graph.json")
-    data = _graph_html_data(tmp_path / "graphify-out" / "graph.html")
+    server._write_viz(tmp_path / "graphlore-out" / "graph.json")
+    data = _graph_html_data(tmp_path / "graphlore-out" / "graph.html")
     assert data["source"] == {"host": "github", "web": "https://github.com/o/r",
                               "commit": head, "prefix": ""}
     # no remote: no link, and the page says nothing of one
     subprocess.run([*git, "remote", "remove", "origin"], check=True)
-    server._write_viz(tmp_path / "graphify-out" / "graph.json")
-    assert "source" not in _graph_html_data(tmp_path / "graphify-out" / "graph.html")
+    server._write_viz(tmp_path / "graphlore-out" / "graph.json")
+    assert "source" not in _graph_html_data(tmp_path / "graphlore-out" / "graph.html")
 
 
 def test_graph_html_says_when_it_has_no_findings(tmp_path, monkeypatch):
     project, other = tmp_path / "proj", tmp_path / "other"
     for d in (project, other):
-        (d / "graphify-out").mkdir(parents=True)
-        (d / "graphify-out" / "graph.json").write_text(json.dumps(_viz_graph()), encoding="utf-8")
+        (d / "graphlore-out").mkdir(parents=True)
+        (d / "graphlore-out" / "graph.json").write_text(json.dumps(_viz_graph()), encoding="utf-8")
     monkeypatch.setattr(server.config, "PROJECT_DIR", project)
     server._GRAPH_CACHE.clear()
     server._VIZ_ANALYSIS.clear()
     # a graph the tools do not read (a build of another path) has none, and says so
-    note = server._write_viz(other / "graphify-out" / "graph.json")
+    note = server._write_viz(other / "graphlore-out" / "graph.json")
     assert "no findings" in note and "graphlore_project" in note
-    assert "analysis" not in _graph_html_data(other / "graphify-out" / "graph.html")
+    assert "analysis" not in _graph_html_data(other / "graphlore-out" / "graph.html")
     # whatever the graph's size, the page carries unreferenced code
-    server._write_viz(project / "graphify-out" / "graph.json")
-    a = _graph_html_data(project / "graphify-out" / "graph.html")["analysis"]
+    server._write_viz(project / "graphlore-out" / "graph.json")
+    a = _graph_html_data(project / "graphlore-out" / "graph.html")["analysis"]
     assert "rows" in a["unreferenced"] and "skipped" not in a["unreferenced"]
     # a tool that fails costs its finding, never the page
     server._VIZ_ANALYSIS.clear()
     monkeypatch.setattr(server, "graphlore_surprises", lambda **kw: 1 / 0)
-    note = server._write_viz(project / "graphify-out" / "graph.json")
-    a = _graph_html_data(project / "graphify-out" / "graph.html")["analysis"]
+    note = server._write_viz(project / "graphlore-out" / "graph.json")
+    a = _graph_html_data(project / "graphlore-out" / "graph.html")["analysis"]
     assert "surprises" not in a and "ZeroDivisionError" in a["notes"][0] and "missing" in note
     page = server.viz.TEMPLATE.read_text(encoding="utf-8")
     assert "come with the" in page and '"#f=" + encodeURIComponent' in page
@@ -5015,7 +5015,7 @@ def test_the_viewer_keeps_its_view_in_the_link_and_hands_nodes_to_the_assistant(
 
 
 def test_graph_html_follows_the_names_and_the_graph(tmp_path, monkeypatch):
-    out = tmp_path / "graphify-out"
+    out = tmp_path / "graphlore-out"
     out.mkdir()
     (out / "graph.json").write_text(json.dumps(_viz_graph()), encoding="utf-8")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
@@ -5068,7 +5068,7 @@ def test_project_reports_switches_and_refuses(tmp_path, monkeypatch):
 
     _write_graph(other, {"nodes": [{"id": "A", "label": "A"}], "links": []})
     # the output directory itself is accepted and resolved to its project
-    data = json.loads(server.graphlore_project(str(other / "graphify-out"), as_json=True))
+    data = json.loads(server.graphlore_project(str(other / "graphlore-out"), as_json=True))
     assert data["switched"] is True and data["project_dir"] == str(other)
     assert data["previous_project_dir"] == str(project) and data["nodes"] == 1
     assert server.config.PROJECT_DIR == other
@@ -5093,15 +5093,109 @@ def test_build_notes_an_unignored_output_dir(tmp_path, monkeypatch):
     _fake_native(monkeypatch, tmp_path, [])
     out = server.graphlore_build(".")
     assert "neither ignored nor tracked by git" in out and ".gitignore" in out
-    assert not (tmp_path / "graphify-out" / ".gitignore").exists()  # it only says so
+    assert not (tmp_path / "graphlore-out" / ".gitignore").exists()  # it only says so
 
-    (tmp_path / ".gitignore").write_text("graphify-out/\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("graphlore-out/\n", encoding="utf-8")
     assert "neither ignored" not in server.graphlore_build(".")
 
     (tmp_path / ".gitignore").unlink()
     git("add", "-A")  # tracked on purpose (a shared graph) is not warned about either
     assert "neither ignored" not in server.graphlore_build(".")
     assert server._out_dir_git_note(tmp_path / "nowhere") == ""
+
+
+def _legacy_graph(root):
+    """A graph built before 0.9.0: graphify-out/ with graphify's labels file."""
+    old = root / "graphify-out"
+    (old / "cache").mkdir(parents=True)
+    (old / "graph.json").write_text(json.dumps({
+        "nodes": [{"id": "old", "label": "old.py", "source_file": "old.py", "community": 0}],
+        "links": [],
+    }), encoding="utf-8")
+    (old / ".graphify_labels.json").write_text('{"0": "Legacy name"}', encoding="utf-8")
+    (old / "cache" / "graphlore-native.bin").write_bytes(b"facts")
+    return old
+
+
+def test_a_graph_under_graphify_out_is_still_read(tmp_path, monkeypatch):
+    from graphlore import hooks
+
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    old = _legacy_graph(tmp_path)
+    assert server._graph_path() == old / "graph.json"
+    assert hooks._graph_file(tmp_path) == old / "graph.json"
+    assert server._read_labels() == {"0": "Legacy name"}
+    data = json.loads(server.graphlore_overview(as_json=True))
+    assert data["nodes"] == 1
+    # both there: the new one is read
+    new = tmp_path / "graphlore-out"
+    new.mkdir()
+    (new / "graph.json").write_text(json.dumps({"nodes": [], "links": []}), encoding="utf-8")
+    assert server._graph_path() == new / "graph.json"
+    assert server.config.out_dir_names() == ("graphlore-out", "graphify-out")
+    assert server._in_out_dir("graphify-out/graph.json") and server._in_out_dir("graphlore-out")
+    assert not server._in_out_dir("graphify-outer/x.py")
+
+
+def test_set_labels_on_a_legacy_graph_writes_the_new_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    old = _legacy_graph(tmp_path)
+    out = server.graphlore_set_labels('{"0": "Renamed"}')
+    assert ".graphlore_labels.json updated" in out
+    assert json.loads((old / ".graphlore_labels.json").read_text()) == {"0": "Renamed"}
+    assert not (old / ".graphify_labels.json").exists()
+
+
+def test_a_build_moves_graphify_out_to_graphlore_out(tmp_path, monkeypatch):
+    calls = []
+    _fake_native(monkeypatch, tmp_path, calls)
+    seen = []
+    build = server.engine.build
+
+    def check(target, **kw):   # the engine finds the cache where it writes
+        seen.append((target / "graphlore-out" / "cache" / "graphlore-native.bin").read_bytes())
+        return build(target, **kw)
+
+    monkeypatch.setattr(server.engine, "build", check)
+    _legacy_graph(tmp_path)
+    out = server.graphlore_build(".", update=True)
+    assert "moved graphify-out/ to graphlore-out/" in out
+    assert seen == [b"facts"] and not (tmp_path / "graphify-out").exists()
+    new = tmp_path / "graphlore-out"
+    assert json.loads((new / ".graphlore_labels.json").read_text()) == {"0": "Legacy name"}
+    assert not (new / ".graphify_labels.json").exists()
+    assert "moved" not in server.graphlore_build(".")   # once
+
+
+def test_a_tracked_graphify_out_is_left_where_it_is(tmp_path, monkeypatch):
+    import shutil as _sh
+
+    import pytest
+    if _sh.which("git") is None:
+        pytest.skip("git not available")
+    git = _git_init(tmp_path)
+    _fake_native(monkeypatch, tmp_path, [])
+    _legacy_graph(tmp_path)
+    git("add", "-A")
+    out = server.graphlore_build(".")
+    assert "graphify-out/ is tracked by git, so it was left in place" in out
+    assert "saved community names copied" in out
+    assert (tmp_path / "graphify-out" / "graph.json").is_file()
+    new = tmp_path / "graphlore-out"
+    assert json.loads((new / ".graphlore_labels.json").read_text()) == {"0": "Legacy name"}
+    assert server._graph_path() == new / "graph.json"
+
+
+def test_an_out_dir_set_by_name_is_used_as_given(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "OUT_DIR_EXPLICIT", True)
+    old = _legacy_graph(tmp_path)
+    assert server._graph_path() == tmp_path / "graphlore-out" / "graph.json"
+    assert server.config.migrate_out_dir(tmp_path) == ""
+    assert old.is_dir() and not (tmp_path / "graphlore-out").exists()
+    monkeypatch.setattr(server.config, "OUT_DIR_NAME", "graphify-out")
+    assert server._graph_path() == old / "graph.json"
+    assert server.config.out_dir_names() == ("graphify-out",)
 
 
 # --- analysis scope: vendored / external / tests ----------------------------
@@ -6507,7 +6601,7 @@ def test_resolved_edges_leave_a_native_graph_alone(tmp_path, monkeypatch):
     # the native engine resolved these calls itself: nothing is added at read time
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     _module_call_project(tmp_path)
-    gp = tmp_path / "graphify-out" / "graph.json"
+    gp = tmp_path / "graphlore-out" / "graph.json"
     graph = json.loads(gp.read_text(encoding="utf-8"))
     graph["graph"] = {"engine": "graphlore", "schema_version": 2}
     gp.write_text(json.dumps(graph), encoding="utf-8")
@@ -7439,9 +7533,9 @@ def test_build_drift_sees_committed_uncommitted_deleted_renamed_untracked(tmp_pa
 
 def test_build_drift_unreachable_commit(tmp_path, monkeypatch):
     _git, proj = _drift_repo(tmp_path, monkeypatch)
-    g = json.loads((proj / "graphify-out/graph.json").read_text())
+    g = json.loads((proj / "graphlore-out/graph.json").read_text())
     g["built_at_commit"] = "0123456789abcdef0123456789abcdef01234567"
-    (proj / "graphify-out/graph.json").write_text(json.dumps(g))
+    (proj / "graphlore-out/graph.json").write_text(json.dumps(g))
     server._GRAPH_CACHE.clear()
     drift = server._build_drift()
     assert drift.known is False and "not in this clone" in drift.reason
@@ -9272,7 +9366,7 @@ def test_builtin_search_keeps_vectors_on_disk(tmp_path, monkeypatch):
     idx = search.index_for_project(nodes, edges)
     assert _FakeModel.calls == len(idx.chunks)
     saved = list((tmp_path / "cache").rglob("vectors-*.npz"))
-    assert len(saved) == 1 and not (tmp_path / "p" / "graphify-out" / "vectors").exists()
+    assert len(saved) == 1 and not (tmp_path / "p" / "graphlore-out" / "vectors").exists()
     search._INDEX_CACHE.clear()
     _FakeModel.calls = 0
     again = search.index_for_project(nodes, edges)
@@ -9628,8 +9722,8 @@ def test_mapping_arguments_take_a_json_string(tmp_path, monkeypatch):
 
 
 def test_set_labels_takes_its_names_as_a_json_string(tmp_path, monkeypatch):
-    (tmp_path / "graphify-out").mkdir()
-    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(_viz_graph()),
+    (tmp_path / "graphlore-out").mkdir()
+    (tmp_path / "graphlore-out" / "graph.json").write_text(json.dumps(_viz_graph()),
                                                          encoding="utf-8")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._GRAPH_CACHE.clear()
@@ -9786,8 +9880,8 @@ def test_default_replies_stay_under_what_clients_keep(tmp_path, monkeypatch):
 
     fixture = tmp_path / "polyglot"
     shutil.copytree(Path(__file__).parent / "fixtures" / "polyglot", fixture)
-    (fixture / "graphify-out").mkdir()
-    shutil.move(str(fixture / "graph.json"), fixture / "graphify-out" / "graph.json")
+    (fixture / "graphlore-out").mkdir()
+    shutil.move(str(fixture / "graph.json"), fixture / "graphlore-out" / "graph.json")
     monkeypatch.setattr(server.config, "PROJECT_DIR", fixture)
     server._GRAPH_CACHE.clear()
     graph = server._load_graph()
@@ -9833,8 +9927,8 @@ def test_agent_evaluation_runs_and_scores_with_the_fake_client(tmp_path):
     run, score = _agents_module("run"), _agents_module("score")
     repo = tmp_path / "proj"
     shutil.copytree(Path(__file__).parent / "fixtures" / "polyglot", repo)
-    (repo / "graphify-out").mkdir()
-    shutil.move(str(repo / "graph.json"), repo / "graphify-out" / "graph.json")
+    (repo / "graphlore-out").mkdir()
+    shutil.move(str(repo / "graph.json"), repo / "graphlore-out" / "graph.json")
     tasks = {
         "repos": {"proj": {"path": str(repo)}},
         "tasks": [
@@ -9873,8 +9967,8 @@ def test_agent_evaluation_baseline_has_no_graphlore_and_repeats_are_scored(tmp_p
     run, score = _agents_module("run"), _agents_module("score")
     repo = tmp_path / "proj"
     shutil.copytree(Path(__file__).parent / "fixtures" / "polyglot", repo)
-    (repo / "graphify-out").mkdir()
-    shutil.move(str(repo / "graph.json"), repo / "graphify-out" / "graph.json")
+    (repo / "graphlore-out").mkdir()
+    shutil.move(str(repo / "graph.json"), repo / "graphlore-out" / "graph.json")
     tasks = {"repos": {"proj": {"path": str(repo)}}, "tasks": [
         {"id": "a", "repo": "proj", "prompt": "Which class does HTTPTransport inherit from?",
          "expect": {"all": ["BaseTransport"]}, "tools": ["graphlore_node_details"]},
@@ -9894,8 +9988,8 @@ def test_agent_evaluation_baseline_has_no_graphlore_and_repeats_are_scored(tmp_p
     plain = next(r for r in rows if r["variant"] == "plain" and r["task"] == "a")
     assert plain["calls"] == ["graphlore_search", "graphlore_node_details"]
     # the baseline's copy has no graph to grep, and the repository keeps its own
-    assert not (tmp_path / "root" / "proj-baseline" / "graphify-out").exists()
-    assert (repo / "graphify-out" / "graph.json").is_file()
+    assert not (tmp_path / "root" / "proj-baseline" / "graphlore-out").exists()
+    assert (repo / "graphlore-out" / "graph.json").is_file()
     assert (out / "fake-plain-a-r1.log").is_file()
     table = {t["variant"]: t for t in score.score(rows, {t["id"]: t for t in tasks["tasks"]})}
     assert table["baseline"]["solved_per_repeat"] == [1, 1]
@@ -10243,7 +10337,7 @@ def _review_repo(tmp_path, monkeypatch, changes, extra_nodes=(), extra_edges=(),
     for rel, text in _REVIEW_BASE.items():
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text(text, encoding="utf-8")
-    (tmp_path / ".gitignore").write_text("graphify-out/\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("graphlore-out/\n", encoding="utf-8")
     git("init", "-q")
     git("config", "user.email", "t@example.com")
     git("config", "user.name", "Test")
@@ -10303,7 +10397,7 @@ def test_review_maps_changed_lines_to_definitions_and_what_depends_on_them(tmp_p
         "pkg/util.py": "def tidy(x):\n    # a comment only\n    return x\n",
     }, built="HEAD")
     # the head graph's lines: the edit moved helper to 4 and compute to 8
-    graph = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    graph = json.loads((tmp_path / "graphlore-out" / "graph.json").read_text())
     for n in graph["nodes"]:
         if n["id"] == "helper":
             n["source_location"] = "L4"
@@ -10319,7 +10413,7 @@ def test_review_maps_changed_lines_to_definitions_and_what_depends_on_them(tmp_p
     graph["links"] += [
         {"source": "core", "target": "limit", "relation": "contains"},
         {"source": "doc", "target": "helper", "relation": "documents"}]
-    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    (tmp_path / "graphlore-out" / "graph.json").write_text(json.dumps(graph))
     server._GRAPH_CACHE.clear()
 
     r = change_review.analyze("HEAD~1", "HEAD", build=False)
@@ -10363,10 +10457,10 @@ def test_review_gates_an_introduced_import_cycle_and_an_untested_definition(tmp_
         extra_edges=[{"source": "core", "target": "api", "relation": "imports_from",
                       "source_file": "pkg/core.py", "source_location": "L1"},
                      {"source": "api", "target": "orphan", "relation": "contains"}])
-    graph = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    graph = json.loads((tmp_path / "graphlore-out" / "graph.json").read_text())
     for n in graph["nodes"]:
         n["source_location"] = {"helper": "L4", "compute": "L8"}.get(n["id"], n["source_location"])
-    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    (tmp_path / "graphlore-out" / "graph.json").write_text(json.dumps(graph))
     (tmp_path / ".graphlore-layers.json").write_text(json.dumps(
         {"pkg/core.py": [], "pkg/api.py": ["pkg/core.py"]}))
     server._GRAPH_CACHE.clear()
@@ -10454,7 +10548,7 @@ def _hook_project(tmp_path, monkeypatch, nodes=None):
         {"id": "c", "label": "compute()", "source_file": "a.py", "source_location": "L1"},
         {"id": "x", "label": "requests", "type": "external"},
     ]
-    out = proj / "graphify-out"
+    out = proj / "graphlore-out"
     out.mkdir()
     (out / "graph.json").write_text(json.dumps(
         {"built_at_commit": git("rev-parse", "HEAD"), "nodes": nodes, "links": []}))
@@ -10601,9 +10695,9 @@ def test_review_names_the_definitions_a_change_removes(tmp_path, monkeypatch):
 
     git("rm", "-q", "pkg/util.py")
     git("commit", "-qm", "drop util")
-    graph = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    graph = json.loads((tmp_path / "graphlore-out" / "graph.json").read_text())
     graph["built_at_commit"] = git("rev-parse", "HEAD")
-    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    (tmp_path / "graphlore-out" / "graph.json").write_text(json.dumps(graph))
     server._GRAPH_CACHE.clear()
 
     r = change_review.analyze("HEAD~2", "HEAD", build=False)

@@ -11,7 +11,7 @@ use crate::BuildOptions;
 
 /// Build a graph. Returns the report as a JSON string.
 #[pyfunction]
-#[pyo3(signature = (root, out=None, commit=None, documents=true, out_dir_name="graphify-out",
+#[pyo3(signature = (root, out=None, commit=None, documents=true, out_dir_name="graphlore-out",
                     max_file_bytes=crate::DEFAULT_MAX_FILE_BYTES, parse_timeout_ms=10_000,
                     threads=None, incremental=false, unresolved=None, read_vendor=false))]
 #[allow(clippy::too_many_arguments)]

@@ -498,7 +498,7 @@ def _count_mentions(
         dirnames[:] = [
             d for d in dirnames
             if not d.startswith(".") and d not in _MENTION_SKIP_DIRS
-            and d != config.OUT_DIR_NAME
+            and d not in config.out_dir_names()
         ]
         for name in filenames:
             full = os.path.join(dirpath, name)

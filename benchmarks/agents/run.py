@@ -262,13 +262,14 @@ def baseline_copy(root: Path, name: str, repo: Path) -> Path:
     path = root / f"{name}-baseline"
     if not path.is_dir():
         shutil.copytree(repo, path, symlinks=True,
-                        ignore=shutil.ignore_patterns("graphify-out"))
-    shutil.rmtree(path / "graphify-out", ignore_errors=True)
+                        ignore=shutil.ignore_patterns("graphlore-out", "graphify-out"))
+    for out in ("graphlore-out", "graphify-out"):
+        shutil.rmtree(path / out, ignore_errors=True)
     return path
 
 
 def build(repo: Path) -> None:
-    if (repo / "graphify-out" / "graph.json").is_file():
+    if any((repo / out / "graph.json").is_file() for out in ("graphlore-out", "graphify-out")):
         return
     env = {**os.environ, "GRAPHLORE_PROJECT_DIR": str(repo)}
     code = "from graphlore import server; print(server.graphlore_build('.'))"

@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--out", help="graph.json to write (default: ROOT/OUT_DIR_NAME/graph.json)")
     b.add_argument("--commit", help="value for built_at_commit")
     b.add_argument("--no-docs", action="store_true", help="skip Markdown / RST headings")
-    b.add_argument("--out-dir-name", default="graphify-out")
+    b.add_argument("--out-dir-name", default="graphlore-out")
     b.add_argument("--max-file-bytes", type=int, default=2 * 1024 * 1024)
     b.add_argument("--threads", type=int)
     b.add_argument("--incremental", action="store_true",

@@ -444,7 +444,7 @@ def index_files(project: Path | None = None) -> list[Path]:
     if raw.lower() in ("off", "0", "false", "no", "none", ""):
         return []
     if raw.lower() == "auto":
-        cands = [root / DEFAULT_NAME, root / config.OUT_DIR_NAME / DEFAULT_NAME]
+        cands = [root / DEFAULT_NAME, *(root / n / DEFAULT_NAME for n in config.out_dir_names())]
     else:
         cands = [root / p.strip() for p in raw.split(",") if p.strip()]
     out: list[Path] = []

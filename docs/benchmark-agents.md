@@ -20,7 +20,7 @@ Back to the [README](../README.md) · [Clients](clients.md) · [Benchmark](bench
   headless mode (`claude -p`, `codex exec --json`, `gemini -p`, `kimi -p`,
   `agent -p`), in three variants:
   - `baseline`: no graphlore, in a copy of the repository without
-    `graphify-out/` (an agent must not find `graph.json` to grep either):
+    `graphlore-out/` or `graphify-out/` (an agent must not find `graph.json` to grep either):
     what the agent does with its own tools;
   - `plain`: graphlore set up the way `graphlore setup <client>` writes it;
   - `agents-md`: also the usage guide `graphlore agents-md` writes into the

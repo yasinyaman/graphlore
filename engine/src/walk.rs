@@ -159,7 +159,9 @@ fn tracked_but_ignored(
         let parts: Vec<&str> = rel.split('/').collect();
         let dirs = &parts[..parts.len() - 1];
         if parts.iter().any(|p| p.starts_with('.'))
-            || dirs.iter().any(|d| *d == out_dir || SKIP_DIRS.contains(d))
+            || dirs
+                .iter()
+                .any(|d| *d == out_dir || *d == crate::LEGACY_OUT_DIR_NAME || SKIP_DIRS.contains(d))
         {
             continue;
         }
@@ -227,7 +229,12 @@ pub fn workspace_repos(root: &Path, out_dir: &str) -> Vec<String> {
         return Vec::new();
     }
     let mut found = Vec::new();
-    let skip = |name: &str| name.starts_with('.') || name == out_dir || SKIP_DIRS.contains(&name);
+    let skip = |name: &str| {
+        name.starts_with('.')
+            || name == out_dir
+            || name == crate::LEGACY_OUT_DIR_NAME
+            || SKIP_DIRS.contains(&name)
+    };
     let Ok(level1) = std::fs::read_dir(root) else { return found };
     let mut dirs: Vec<(String, PathBuf)> = level1
         .flatten()
@@ -340,7 +347,10 @@ pub fn discover(
                 return true;
             }
             if e.file_type().is_some_and(|t| t.is_dir()) {
-                if name == out_dir || SKIP_DIRS.contains(&name.as_ref()) {
+                if name == out_dir
+                    || name == crate::LEGACY_OUT_DIR_NAME
+                    || SKIP_DIRS.contains(&name.as_ref())
+                {
                     return false;
                 }
                 // a virtualenv, whatever it is called

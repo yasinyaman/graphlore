@@ -693,4 +693,4 @@ None of these saves anything. For names a reader would choose, the assistant
 in the loop reads `graphlore_communities` and pushes names back via
 **`graphlore_set_labels({"0": "Authentication", ...})`** — no key, no
 sampling, works in any client. The names persist to
-`.graphify_labels.json` and go into `graph.html`.
+`.graphlore_labels.json` and go into `graph.html`.

@@ -602,7 +602,7 @@ nodes to another community: 71 in all on the 45 (three seeded edits each),
 192 before, when 13 of those updates ended in a cycle or at the limit. The previous ids are
 kept by overlap, and a saved name stays while its community's members are the
 same or a strict majority of both its old and new members; others are dropped
-from `.graphify_labels.json`, and the build says how many.
+from `.graphlore_labels.json` (graphify's `.graphify_labels.json` is read when it is the only one), and the build says how many.
 
 On the 31 audit repositories, against graphify's communities on its own graphs
 (`benchmarks/compare_engines.py REPO --communities`, averages per repository):
@@ -2641,14 +2641,15 @@ roadmap below, release B).
      installed, graphify otherwise. `graphlore_add`, `mode="deep"` and
      `no_viz` say they are going, and graphlore writes its own `graph.html`.
      Each engine release is published by pushing its `engine-vX.Y.Z` tag.
-   - **B (done in 0.9.0, but for the output directory):** graphify goes:
-     `_run_cli`, the `graphify` extra, `graphlore_add`, `mode`, `no_viz` and
-     `GRAPHLORE_BIN`; `graphlore-engine` is a dependency of graphlore. Left:
-     builds write `graphlore-out/` and `.graphlore_labels.json`, and a
-     `graphify-out/` graph is still read.
+   - **B (done in 0.9.0):** graphify goes: `_run_cli`, the `graphify`
+     extra, `graphlore_add`, `mode`, `no_viz` and `GRAPHLORE_BIN`;
+     `graphlore-engine` is a dependency of graphlore. Builds write
+     `graphlore-out/` and `.graphlore_labels.json`; a `graphify-out/` graph
+     is still read, and the first build moves the folder to `graphlore-out/`
+     (cache, communities and names kept; left in place when git tracks it).
    - **C:** what reads graphify's graphs goes: `resolve.py`'s added edges,
      `ImportChecker`'s rejection of name-resolved imports, the
-     `graphify-out/` and `GRAPHIFY_*` fallbacks.
+     `graphify-out/`, `.graphify_labels.json` and `GRAPHIFY_*` fallbacks.
 
    graphify stays a tool of the benchmarks only (`compare_engines.py`,
    `verify_graphify.py`, `polyglot.py --engine graphify`), never a dependency.

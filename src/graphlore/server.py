@@ -427,7 +427,7 @@ def _instructions(active: set[str] | frozenset[str] | None = None) -> str:
     if under_out:
         named = ["graphlore_prune(dry_run=False)" if t == "graphlore_prune" else t
                  for t in under_out]
-        writers.append(", ".join(named) + " write under graphify-out/")
+        writers.append(", ".join(named) + " write under graphlore-out/")
     if _has(active, "graphlore_project"):
         writers.append("graphlore_project switches the active project")
     lines.append(
@@ -916,11 +916,10 @@ def _drift_at(built_at: str, repo: str = "") -> _Drift:
         )
         return _Drift(False, lead + reason, built_at, frozenset())
     untracked = _git(["ls-files", "--others", "--exclude-standard", "-z"], cwd) or ""
-    out_dir = config.OUT_DIR_NAME.rstrip("/") + "/"
     pre = f"{repo}/" if repo else ""
     changed = frozenset(
         pre + p for p in (*diff.split("\0"), *untracked.split("\0"))
-        if p and not (pre + p).startswith(out_dir)
+        if p and not _in_out_dir(pre + p)
     )
     return _Drift(True, "", built_at, changed)
 
@@ -1404,9 +1403,16 @@ def _client_supports_sampling(ctx: Context) -> bool:
         return False
 
 
+def _in_out_dir(path: str) -> bool:
+    """A project-relative path inside the graph's output directory, under its
+    name or the legacy ``graphify-out/``."""
+    return any(path == n or path.startswith(n + "/") for n in config.out_dir_names())
+
+
 def _read_labels(out_dir: Path | None = None) -> dict[str, str]:
-    """graphify-out/.graphify_labels.json — community id -> name."""
-    lp = (out_dir or _out_dir()) / ".graphify_labels.json"
+    """graphlore-out/.graphlore_labels.json (or graphify's .graphify_labels.json)
+    — community id -> name."""
+    lp = config.labels_path(out_dir or _out_dir())
     if not lp.exists():
         return {}
     try:
@@ -1743,7 +1749,7 @@ _EMPTY_NOTE = (
 
 
 def _out_dir_git_note(project: Path | None = None) -> str:
-    """Warn when graphify-out/ sits in a git work tree neither ignored nor tracked.
+    """Warn when graphlore-out/ sits in a git work tree neither ignored nor tracked.
 
     The build writes its output into the repository it reads, and a `git add -A`
     would then commit tens of megabytes of it. Whether the graph is ignored or
@@ -1790,7 +1796,7 @@ def _out_dir_git_note(project: Path | None = None) -> str:
 def graphlore_project(path: str = "", as_json: bool = False) -> str:
     """Show which project this server reads, or switch it to another directory.
 
-    Every tool works on ONE project, the directory holding graphify-out/graph.json;
+    Every tool works on ONE project, the directory holding graphlore-out/graph.json;
     it starts as GRAPHLORE_PROJECT_DIR. Pass ``path`` to point the server at
     another repository (for example one just built with graphlore_build) until the
     next switch or a restart; no file is changed. The reply also names the server
@@ -1816,7 +1822,7 @@ def graphlore_project(path: str = "", as_json: bool = False) -> str:
             )
         p = Path(path.strip()).expanduser()
         target = (p if p.is_absolute() else config.PROJECT_DIR / p).resolve()
-        if target.name == config.OUT_DIR_NAME and (target / "graph.json").exists():
+        if target.name in config.out_dir_names() and (target / "graph.json").exists():
             target = target.parent  # handed the output directory: use its project
         if not target.is_dir():
             return _err(f"ERROR: '{path}' is not a directory ({target}).", as_json)
@@ -1899,7 +1905,7 @@ def graphlore_build(
     code_only: bool = False,
     verbose: bool = False,
 ) -> str:
-    """Build or update the knowledge graph of a folder (writes graphify-out/).
+    """Build or update the knowledge graph of a folder (writes graphlore-out/).
 
     The graph is written INSIDE the folder read: building another folder than the
     active project leaves it where this server does not look, and the reply names
@@ -2200,6 +2206,7 @@ def _build_native(
     target = _build_target(path)
     if not target.is_dir():
         return _err(f"ERROR: not a directory: {target}", False)
+    moved = config.migrate_out_dir(target)
     report = engine.build(
         target, documents=not code_only, commit=_git(["rev-parse", "HEAD"], target),
         timeout=CLI_TIMEOUT, incremental=update,
@@ -2209,6 +2216,8 @@ def _build_native(
         return _err(report, False)
     text = engine.render_report(report, verbose, update=update)
     notes = _build_notes(path)
+    if moved:
+        notes.insert(0, moved)
     written = target / config.OUT_DIR_NAME / "graph.json"
     if viz_page and written.is_file():
         notes.append(_write_viz(written))
@@ -2225,7 +2234,8 @@ def _cluster_native(path: str, *, note: str, viz_page: bool = True) -> str:
     """graphlore_build(cluster_only=True): the engine detects the communities of
     the graph on disk again."""
     target = _build_target(path)
-    gp = target / config.OUT_DIR_NAME / "graph.json"
+    moved = config.migrate_out_dir(target)
+    gp = config.out_dir(target) / "graph.json"
     if not gp.is_file():
         return _err(f"ERROR: no graph to cluster at {gp}; run graphlore_build() first.", False)
     report = engine.cluster(gp, timeout=CLI_TIMEOUT)
@@ -2233,6 +2243,8 @@ def _cluster_native(path: str, *, note: str, viz_page: bool = True) -> str:
     if isinstance(report, str):
         return _err(report, False)
     text = "native engine: " + engine.render_communities(report)
+    if moved:
+        text += "\n\n" + moved
     if viz_page:
         text += "\n\n" + _write_viz(gp)
     if note:
@@ -3280,7 +3292,7 @@ def graphlore_communities(limit: int = 30, members: int = 15, as_json: bool = Fa
 
     A community carries a ``name`` when it has one: set with
     graphlore_set_labels / graphlore_label_communities
-    (``graphify-out/.graphify_labels.json``), else the one the build wrote on the
+    (``graphlore-out/.graphlore_labels.json``), else the one the build wrote on the
     nodes. Use for: the parts the code splits into and what each holds. Not for:
     one symbol's neighbourhood (use graphlore_subgraph).
 
@@ -3691,7 +3703,7 @@ def graphlore_set_labels(
 
     The calling assistant is already an LLM in the loop: it names the communities
     itself (e.g. from graphlore_communities members) and pushes them here. Names are
-    written to graphify-out/.graphify_labels.json and, when regenerate=True, baked
+    written to graphlore-out/.graphlore_labels.json and, when regenerate=True, baked
     into the existing graph.html so the visualization shows them.
 
     Args:
@@ -3723,9 +3735,10 @@ def graphlore_set_labels(
     # 1) update the label store (source of truth)
     labels = _read_labels() or {cid: f"Community {cid}" for cid in valid_ids}
     labels.update(applied)
-    (_out_dir() / ".graphify_labels.json").write_text(
+    (_out_dir() / config.LABELS_FILE).write_text(
         json.dumps(labels, ensure_ascii=False), encoding="utf-8"
     )
+    (_out_dir() / config.LEGACY_LABELS_FILE).unlink(missing_ok=True)
 
     # 2) graph.html: graphlore's own is written again; graphify's is patched in
     # place (quoted-exact: '"Community 1"' != '"Community 10"')
@@ -3762,7 +3775,7 @@ def graphlore_set_labels(
         "graph_html_patched": patched,
         "names": applied,
     }
-    lines = [f"Set {len(applied)} community name(s); .graphify_labels.json updated."]
+    lines = [f"Set {len(applied)} community name(s); .graphlore_labels.json updated."]
     if regenerate:
         lines.append(viz_note)
     if unknown:
@@ -5902,7 +5915,7 @@ def _repo_freshness(
     (paths led by ``lead``, a workspace repository's ``svc-a/``), whether the graph
     is behind its HEAD, and the action that follows. A string when git failed."""
     # Modified AND untracked files — `git diff --name-only HEAD` misses new files.
-    # Skip graphify's own output dir so an un-gitignored graphify-out/ doesn't
+    # Skip the graph's own output dir so an un-gitignored graphlore-out/ doesn't
     # mark the graph perpetually stale.
     # `-z`: NUL-separated with paths printed verbatim. Default porcelain C-quotes
     # paths containing spaces or non-ASCII bytes (e.g. `"my file.py"`), which would
@@ -5948,7 +5961,7 @@ def _repo_freshness(
         if path is None:
             continue  # changed outside PROJECT_DIR
         old = _reanchor(raw_old)
-        if path == config.OUT_DIR_NAME or path.startswith(config.OUT_DIR_NAME + "/"):
+        if _in_out_dir(path):
             continue
         changed_files.append(path)
         if ("D" in code or "R" in code) and old is not None:
@@ -6245,7 +6258,6 @@ def _diff_records(
     if raw is None:
         return f"ERROR: could not diff {ref_a}..{ref_b}."
 
-    out_prefix = config.OUT_DIR_NAME + "/"
     fields = iter(raw.split("\0"))
     # records ordered structural-first so a budget trim drops cosmetic noise last
     structural: list[dict[str, Any]] = []
@@ -6260,7 +6272,7 @@ def _diff_records(
         else:
             old = new = next(fields, "")
         path = new or old
-        if path == config.OUT_DIR_NAME or path.startswith(out_prefix):
+        if _in_out_dir(path):
             continue
         shown, shown_old = lead + new, lead + old
         if code == "A":
@@ -7670,7 +7682,7 @@ def _route_candidate_files(graph_files: set[str]) -> set[str]:
     limitation — this must not grow into a filesystem scanner.
     """
     skip = {".git", "node_modules", ".venv", "venv", "dist", "build", "target",
-            "__pycache__", config.OUT_DIR_NAME}
+            "__pycache__", *config.out_dir_names()}
     found: set[str] = set()
     root = config.PROJECT_DIR
     try:
@@ -8226,7 +8238,6 @@ def _structural_changes(paths: list[str], ref: str) -> tuple[list[str], list[str
     """
     structural: list[str] = []
     removed: list[str] = []
-    out_prefix = config.OUT_DIR_NAME + "/"
     g = _load_graph()
     graph_files = (
         {_norm_relpath(_node_file(n)) for n in _nodes_edges(g)[0] if _node_file(n)}
@@ -8237,7 +8248,7 @@ def _structural_changes(paths: list[str], ref: str) -> tuple[list[str], list[str
              if _git(["rev-parse", "HEAD"]) is None else [])
     for p in paths:
         rel = _norm_relpath(p)
-        if not rel or rel == config.OUT_DIR_NAME or rel.startswith(out_prefix):
+        if not rel or _in_out_dir(rel):
             continue
         if any(part in _WATCH_SKIP_PARTS for part in rel.split("/")):
             continue

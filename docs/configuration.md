@@ -241,7 +241,7 @@ pip install dist-engine/*.whl
 
 `graphlore_build`'s `update` parses only the files that
 changed since the last native build (a facts cache in
-`graphify-out/cache/graphlore-native.bin`) and resolves again only the files
+`graphlore-out/cache/graphlore-native.bin`) and resolves again only the files
 whose resolution read something that changed (`graphlore-resolved.bin` beside
 it); the graph is the one a full build writes, and the nodes of deleted files
 go, `cluster_only` detects the communities of the graph
@@ -257,7 +257,7 @@ has the results on 31 repositories and the roadmap.
 |---|---|---|
 | `GRAPHLORE_PROJECT_DIR` | `.` | Project root to extract the graph from |
 | `GRAPHLORE_PROJECT_FROM_CLIENT` | off | `1`: the project is not the working directory but the client's: its first workspace root (MCP `roots/list`, asked on the first tool call), else the directory `graphlore_project` is given; until then every other tool answers `code: project_unknown`. Ignored when `GRAPHLORE_PROJECT_DIR` is set. The [plugin](#plugins-for-other-clients) of a client that starts the server in the plugin's own directory sets it |
-| `GRAPHLORE_OUT_DIR` | `graphify-out` | Output folder name |
+| `GRAPHLORE_OUT_DIR` | `graphlore-out` | Output folder name. Unset, a graph in the `graphify-out/` of graphlore before 0.9.0 is read while `graphlore-out/` holds none, and the first build moves the folder there (the cache, the communities and their names come along; a folder git tracks is left in place, its saved names copied) |
 | `GRAPHLORE_ENGINE` | `auto` | What `graphlore_build` extracts with: `auto` and `native` both mean graphlore's native engine (the `graphlore-engine` package; an error when it is not installed). `graphify` was removed in 0.9.0 and is an error that says so, as is another value. See [The native engine](#the-native-engine) |
 | `GRAPHLORE_TIMEOUT` | `600` | Native build timeout (seconds) |
 | `GRAPHLORE_VENDOR` | unset | `1` also reads a Go module's `vendor/` directory (one with `vendor/modules.txt` beside a `go.mod`), which a build leaves out: copies of other projects' code, often more than the project's own. The build reply names the directories left out and how many source files they hold; without them, imports of vendored packages are external modules |
@@ -287,6 +287,7 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_STRUCTURED` | `1` | `0` → plain-text tool results, without `structuredContent` / `isError` |
 
 > Every variable is also honored under its legacy `GRAPHIFY_*` spelling (the
-> pre-rename names); when both are set, `GRAPHLORE_*` wins. `graphify-out/` and
-> `.graphify_labels.json`, named after the Graphify CLI that built the graph
-> before 0.9.0, keep their names regardless.
+> pre-rename names); when both are set, `GRAPHLORE_*` wins. The output folder and the saved community
+> names were `graphify-out/` and `.graphify_labels.json` before 0.9.0: both
+> are still read (see `GRAPHLORE_OUT_DIR`), and what is written has the new
+> names, `graphlore-out/` and `.graphlore_labels.json`.

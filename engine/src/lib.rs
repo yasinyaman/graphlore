@@ -81,7 +81,7 @@ impl BuildOptions {
             out: None,
             commit: None,
             documents: true,
-            out_dir_name: "graphify-out".into(),
+            out_dir_name: OUT_DIR_NAME.into(),
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
             parse_timeout: Some(DEFAULT_PARSE_TIMEOUT),
             threads: None,
@@ -543,7 +543,7 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
     });
     lap("previous", &mut phases);
     let labels_path = opts.out.as_deref().and_then(|o| o.parent()).map(|d| d.join(LABELS_FILE));
-    let saved = labels_path.as_deref().and_then(read_labels);
+    let saved = labels_path.as_deref().and_then(read_saved_labels);
     let communities = community::detect(
         &mut assembled.nodes,
         &links,
@@ -668,8 +668,15 @@ fn memory_mb() -> Option<[u64; 2]> {
     Some([field("VmRSS:")?, field("VmHWM:")?])
 }
 
-/// Where graphlore and graphify keep the names given to communities.
-pub const LABELS_FILE: &str = ".graphify_labels.json";
+/// The output directory a build writes into by default, beside the sources.
+pub const OUT_DIR_NAME: &str = "graphlore-out";
+/// The output directory graphify and graphlore before 0.9.0 wrote: still left
+/// out of the walk, and graphlore moves it to [`OUT_DIR_NAME`] before a build.
+pub const LEGACY_OUT_DIR_NAME: &str = "graphify-out";
+/// Where graphlore keeps the names given to communities.
+pub const LABELS_FILE: &str = ".graphlore_labels.json";
+/// The name graphify gave that file, read when the new one is not there.
+pub const LEGACY_LABELS_FILE: &str = ".graphify_labels.json";
 
 fn read_json(path: &std::path::Path) -> Option<Value> {
     let text = std::fs::read(path).ok()?;
@@ -685,6 +692,15 @@ fn read_labels(path: &std::path::Path) -> Option<std::collections::BTreeMap<Stri
             .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
             .collect(),
     )
+}
+
+/// The saved names at `path` (a [`LABELS_FILE`]), else in the
+/// [`LEGACY_LABELS_FILE`] beside it.
+fn read_saved_labels(path: &std::path::Path) -> Option<std::collections::BTreeMap<String, String>> {
+    if path.exists() {
+        return read_labels(path);
+    }
+    read_labels(&path.with_file_name(LEGACY_LABELS_FILE))
 }
 
 fn write_labels(
@@ -705,7 +721,7 @@ pub fn cluster(path: &std::path::Path) -> Result<community::CommunityReport, Str
     let mut graph = read_json(path).ok_or_else(|| format!("cannot read {}", path.display()))?;
     let prev = community::Previous::from_graph(&graph);
     let labels_path = path.parent().map(|d| d.join(LABELS_FILE));
-    let saved = labels_path.as_deref().and_then(read_labels);
+    let saved = labels_path.as_deref().and_then(read_saved_labels);
     let obj = graph.as_object_mut().ok_or("graph.json is not an object")?;
     let links = obj.get("links").or_else(|| obj.get("edges")).cloned().unwrap_or(json!([]));
     let links = links.as_array().map(Vec::as_slice).unwrap_or_default();

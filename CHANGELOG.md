@@ -7,6 +7,21 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`graphlore-out/`: the output directory under graphlore's own name**
+  (release B's last step, `docs/native-engine.md`). Builds write
+  `graphlore-out/graph.json` and `.graphlore_labels.json`. A graph in the
+  `graphify-out/` of graphify or graphlore before 0.9.0 is still read while
+  `graphlore-out/` holds none. The first build moves that folder to
+  `graphlore-out/` before it runs, so the facts cache, the communities and
+  their saved names carry over, and the build says so. A `graphify-out/` that
+  git tracks is left in place: its saved names are copied and the build starts
+  afresh. Both names are left out of every walk (the engine's too), and
+  `.graphify_labels.json` is read when it is the only file of names
+  (`graphlore_set_labels` writes the new one and removes it).
+  `GRAPHLORE_OUT_DIR` is used as given, with no fallback and no move. A
+  `.gitignore` line for `graphify-out/` now wants `graphlore-out/`; the
+  build's note on an unignored output folder says so. Needs graphlore-engine
+  0.5.80, which reads both names of the labels file.
 - **JS / TS and Ruby names read as their languages scope them** (three
   conformance cases, found by scip-typescript on zod and got and by
   scip-ruby on faraday). A declaration of a JS / TS module (a file that

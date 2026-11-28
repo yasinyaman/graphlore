@@ -6,7 +6,7 @@ def build(
     out: str | None = None,
     commit: str | None = None,
     documents: bool = True,
-    out_dir_name: str = "graphify-out",
+    out_dir_name: str = "graphlore-out",
     max_file_bytes: int = ...,
     parse_timeout_ms: int = 10000,
     threads: int | None = None,

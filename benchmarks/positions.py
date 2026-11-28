@@ -378,7 +378,7 @@ def main() -> int:
             lang = EXT_LANG.get(path.suffix)
             parts = path.relative_to(repo).parts
             if (lang in wanted and lang in pack and path.is_file()
-                    and not any(p.startswith(".") or p in ("node_modules", "vendor", "graphify-out",
+                    and not any(p.startswith(".") or p in ("node_modules", "vendor", "graphify-out", "graphlore-out",
                                                            "graphlore-native", "target", "build", "docs",
                                                            "docsets", "website", "third_party", "dist")
                                 for p in parts)

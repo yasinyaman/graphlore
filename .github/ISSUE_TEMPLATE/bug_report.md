@@ -24,4 +24,4 @@ What you expected instead.
 - MCP client (Claude Code / Claude Desktop / other):
 
 **graph.json shape (if relevant)**
-A small snippet of your `graphify-out/graph.json` (redact as needed).
+A small snippet of your `graphlore-out/graph.json` (or `graphify-out/graph.json`) (redact as needed).

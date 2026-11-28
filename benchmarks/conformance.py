@@ -5337,7 +5337,7 @@ SCIP_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
 SCIP_TSCONFIG = """{
   "compilerOptions": {"allowJs": true, "checkJs": false, "noEmit": true, "strict": true,
                       "target": "es2022", "module": "nodenext", "moduleResolution": "nodenext"},
-  "include": ["**/*"], "exclude": ["graphify-out"]
+  "include": ["**/*"], "exclude": ["graphlore-out"]
 }
 """
 
@@ -5384,9 +5384,9 @@ def _scip_index(lang: str, root: Path) -> str | None:
         if not tool or not Path(plugin).is_file():
             return "scip-java (on PATH) and SEMANTICDB_JAVAC (the semanticdb-javac jar) are needed"
         sources = [str(p) for p in root.rglob("*.java")]
-        out = root / "graphify-out" / "semanticdb"
+        out = root / "graphlore-out" / "semanticdb"
         out.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["javac", "-cp", plugin, "-d", str(root / "graphify-out" / "classes"),
+        subprocess.run(["javac", "-cp", plugin, "-d", str(root / "graphlore-out" / "classes"),
                         f"-Xplugin:semanticdb -sourceroot:{root} -targetroot:{out}", *sources],
                        cwd=root, capture_output=True, text=True, timeout=600)
         argv = [tool, "index-semanticdb", "--output", "index.scip", str(out)]
@@ -5578,7 +5578,7 @@ def _run_scip(cases: list[dict[str, Any]], jobs: int) -> dict[str, dict[str, Any
     def index(c: dict[str, Any]) -> tuple[str, dict[str, Any] | str]:
         tmp = tempfile.mkdtemp(prefix="conformance-")
         root = Path(tmp) / "project"
-        graph = _prepare(c, root, root / "graphify-out" / "graph.json")
+        graph = _prepare(c, root, root / "graphlore-out" / "graph.json")
         if not isinstance(graph, str):
             why = _scip_index(c["lang"], root)
             if why:

@@ -22,7 +22,7 @@
       "environmentVariables": [
         {
           "name": "GRAPHLORE_PROJECT_DIR",
-          "description": "Absolute path of the project to explore. The server reads graphify-out/graph.json inside it.",
+          "description": "Absolute path of the project to explore. The server reads graphlore-out/graph.json inside it.",
           "format": "filepath",
           "isRequired": true
         },

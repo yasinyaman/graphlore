@@ -86,7 +86,7 @@ def _git(project: Path, *args: str) -> str | None:
 
 
 def _graph_file(project: Path) -> Path:
-    return project / config.OUT_DIR_NAME / "graph.json"
+    return config.out_dir(project) / "graph.json"
 
 
 def _cache_file(project: Path, kind: str) -> Path | None:

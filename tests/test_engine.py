@@ -31,14 +31,14 @@ def native(tmp_path, monkeypatch):
 
 
 def _graph(root):
-    return json.loads((root / "graphify-out" / "graph.json").read_text(encoding="utf-8"))
+    return json.loads((root / "graphlore-out" / "graph.json").read_text(encoding="utf-8"))
 
 
 def test_native_build_is_read_by_the_tools(native):
     out = server.graphlore_build(".")
     assert out.startswith("native engine "), out
     assert "graph.json ready" in out
-    page = native / "graphify-out" / "graph.html"     # graphlore's own view of it
+    page = native / "graphlore-out" / "graph.html"     # graphlore's own view of it
     assert "graph.html written" in out and server.viz.is_ours(page)
     graph = _graph(native)
     assert graph["graph"]["engine"] == "graphlore"
@@ -363,7 +363,7 @@ def test_native_communities_are_read_kept_and_reclustered(native):
     assert out.startswith("native engine: communities: "), out
     assert "graph.html written" in out
     assert {n["id"]: n["community"] for n in _graph(native)["nodes"]} == first
-    labels = json.loads((native / "graphify-out" / ".graphify_labels.json").read_text())
+    labels = json.loads((native / "graphlore-out" / ".graphlore_labels.json").read_text())
     assert labels[str(top)] == "The core"
     skeleton = json.loads(server.graphlore_skeleton(community=str(top), as_json=True))
     assert skeleton["sections"]
@@ -382,7 +382,7 @@ def test_derived_community_names_are_the_engine_s(native):
 
 
 def test_native_update_parses_only_what_changed(py_project):
-    cache = py_project / "graphify-out" / "cache" / "graphlore-native.bin"
+    cache = py_project / "graphlore-out" / "cache" / "graphlore-native.bin"
     assert cache.is_file()
     before = _graph(py_project)
     out = server.graphlore_build(".", update=True)
@@ -590,7 +590,7 @@ def test_review_builds_the_graph_at_the_head_commit(tmp_path, monkeypatch):
         "def helper(x):\n    return x + 1\n\n\ndef compute(x):\n    return helper(x) * 2\n")
     (tmp_path / "pkg" / "api.py").write_text(
         "from pkg.core import compute\n\n\ndef handle(x):\n    return compute(x)\n")
-    (tmp_path / ".gitignore").write_text("graphify-out/\n")
+    (tmp_path / ".gitignore").write_text("graphlore-out/\n")
     git("init", "-q")
     git("config", "user.email", "t@example.com")
     git("config", "user.name", "Test")

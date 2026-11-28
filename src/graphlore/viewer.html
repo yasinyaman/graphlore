@@ -148,7 +148,7 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4p
       <div>
         <h1>Open a graph</h1>
         <p><span class="drop-hint">Drop a <code>graph.json</code> here, or choose one </span>
-          (graphlore's or graphify's; with its <code>.graphify_labels.json</code> too, for the
+          (graphlore's or graphify's; with its <code>.graphlore_labels.json</code> (or <code>.graphify_labels.json</code>) too, for the
           community names):</p>
         <p><button id="welcome-open">Choose a file…</button></p>
         <p class="muted">The file is read by this page, in your browser. Nothing is uploaded:
@@ -1600,7 +1600,7 @@ function load(data, title, fresh) {
 }
 
 // Files are read here, in the browser: nothing is sent anywhere. A graph.json,
-// and optionally the .graphify_labels.json beside it, at once.
+// and optionally the .graphlore_labels.json (or .graphify_labels.json) beside it, at once.
 async function openFiles(files) {
   const status = document.getElementById("load-status");
   const list = [...files];
